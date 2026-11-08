@@ -234,3 +234,142 @@ The in-game **Privacy** page (Basecamp footer → Privacy) lists what's stored o
 - [ ] Merge to `main` so GitHub Actions publishes the game.
 
 Never needed, and never to be put in the game or this repo: the secret / `service_role` key.
+
+---
+
+# Deploying Edge Functions without a terminal
+
+The workflow `.github/workflows/deploy-functions.yml` deploys all three functions (`submit-run`, `delete-account`, `chat`) from GitHub. One-time setup:
+
+1. In Supabase: click your avatar (top right) → **Account preferences** → **Access Tokens** → **Generate new token**. Name it `GitHub deploy` and copy it. This is a personal access token, not the service_role key.
+2. On GitHub: the CranSki repository → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**. Set the name to `SUPABASE_ACCESS_TOKEN`, paste the token as the value, and save.
+3. Make sure the latest code is merged into `main`.
+4. **Actions** tab → **Deploy Supabase functions** → **Run workflow** → **Run workflow**. A green tick means all three are deployed. Check under **Edge Functions** in Supabase.
+
+After that it runs by itself whenever function code changes on `main`. Wherever this guide says `npx supabase functions deploy …`, you can run this workflow instead.
+
+# Phase 4: multiplayer
+
+## 6. Live rooms (Phase 4, step 1)
+
+Live rooms use **Supabase Realtime**:
+
+- **Broadcast** carries positions and tricks.
+- **Presence** tracks who's in each room.
+
+Both run on private channels that only signed-in riders with a gamertag can join. Nothing sent over them is stored.
+
+1. **SQL Editor** → **New query** → paste all of `supabase/setup.sql` → **Run**. It's safe to run again; it adds the new policies on `realtime.messages`. If you prefer separate files, run `supabase/migrations/20261109120000_live_rooms.sql`.
+2. **Realtime** → **Settings**: turn **off** "Allow public access", then save. Every CranSki channel is private, and this stops anyone from opening public channels on your project.
+
+### Realtime usage and your plan
+
+Each rider sends up to 12 position updates a second while riding. Busy rooms send fewer each, so a whole room stays under `REALTIME_BUDGET` in `src/online/config.js` (60 a second). Supabase's Free plan allows about 100 Realtime messages a second for the whole project; Pro allows 500.
+
+Supabase **bills** every message each rider receives. One update seen by 9 other riders counts as 10 messages. A busy room uses millions of messages an hour. To keep an eye on it:
+
+- **Project Settings** → **Usage** → **Realtime messages** shows your use against your plan's monthly allowance.
+- If you upgrade, you can raise `REALTIME_BUDGET` (for example to 400 on Pro) for smoother riders in big rooms.
+
+### Test it
+
+1. Two devices (or two browsers), each signed in with a different account.
+2. On both: Basecamp → **Live rooms** → **RIDE** → the same park.
+3. Each should see the other rider with their gamertag above them, and a blue dot on the minimap. Hold **Tab** for the roster, or use **Pause** → **Riders in this room** on a tablet.
+
+No second account? Add `?localnet` to the game's address (for example `http://localhost:5173/?localnet`) and open it in two tabs side by side. The tabs link to each other directly without a server, so you can try rooms alone.
+
+## 7. Idle rules (Phase 4, step 2)
+
+Nothing to set up. In a live room, being paused for 1 minute, having no input for 2 minutes, or leaving a replay untouched for 10 minutes shows a 10-second countdown, then sends the rider back to Basecamp. Solo is never timed out.
+
+## 8. Chat and safety (Phase 4, step 3)
+
+Chat never goes straight from one rider to another. Every message goes through the `chat` Edge Function, which:
+
+1. Removes links and contact details (emails, phone numbers, social handles), and masks crude words.
+2. Drops any message with a hate word, so it reaches nobody. This includes disguised spellings: spaced out, l33t, look-alike letters, stretched.
+3. Adds strikes for filtered messages. 3 strikes within 15 minutes mutes that rider's chat for 15 minutes.
+4. Signs the message and broadcasts it to the room. It's never stored.
+
+Riders can only listen on chat channels, so nobody can skip the filter. A report sends the reporter's last 10 minutes of that room's chat. The function keeps only messages carrying its own signature, so a report can't contain made-up lines, and saves them in the `reports` table.
+
+### Set it up
+
+1. **SQL Editor**: paste and run `supabase/setup.sql` again. It adds the chat tables, functions and channel policies (or run `supabase/migrations/20261109120100_chat_safety.sql`).
+2. Deploy the function:
+
+   ```bash
+   npx supabase functions deploy chat --no-verify-jwt
+   ```
+
+3. Optional: under **Edge Functions** → **Secrets**, add `CHAT_SIGNING_SECRET` with a long random value. Without it, the function derives a signing key from the project's secret key, which also works.
+
+### Reviewing reports
+
+Open **Table Editor** → `reports`. Each row has who reported whom, the reason, an optional note, and `messages`, the room's chat for the 10 minutes before the report. Set `status` to `actioned` or `dismissed` once you've looked at it. Delete rows you no longer need.
+
+To mute someone by hand, run this in the SQL Editor, changing the email address:
+
+```sql
+insert into private.chat_state (user_id, muted_until)
+select id, now() + interval '1 day' from auth.users where email = 'someone@example.com'
+on conflict (user_id) do update set muted_until = excluded.muted_until;
+```
+
+### Test it
+
+1. Two riders in the same live room.
+2. Press **T** to type, **Enter** to send, or pick a quick phrase.
+3. Try `that was sh1t`: it should arrive masked.
+4. Try a link: it should arrive as "[link removed]".
+5. Hold **Tab** → **Mute** or **Report** on the other rider.
+6. **Settings** → **Chat** switches between full chat, quick phrases only, and off.
+
+## 9. Friendly 1v1 duels (Phase 4, step 4)
+
+1. **SQL Editor**: run `supabase/setup.sql` again, or `supabase/migrations/20261109120200_duels.sql` on its own. It lets riders with a gamertag use private `duel:<id>` channels.
+2. Nothing to deploy. A duel's two riders talk to each other over Realtime, and each re-rides the other's runs from their recorded inputs to check the score.
+
+### Test it
+
+1. Two riders in a live room on APEX, BIG AIR, FOREST LINE, ASPEN PIPE or BELLEVUE.
+2. Press **V** near the other rider, or hold **Tab** and press **1V1**. They get a card: **Y** accepts, **N** declines.
+3. 3-2-1 → the challenger rides while the other watches → then they swap, 2 runs each. Best run wins.
+4. At the end: **Rematch**, **Change map**, **Highlight reel** (both best runs side by side) or **Leave duel**.
+5. During your run, pausing or standing still uses up a 30-second allowance for the whole duel. When it runs out, the run ends.
+6. If the other rider drops out, you see **NOT RESPONDING** with their remaining pause time. If your own connection drops, you see **RECONNECTING**.
+
+## 10. Parties (Phase 4, step 5)
+
+1. **SQL Editor**: run `supabase/setup.sql` again, or `supabase/migrations/20261109120300_parties.sql`. It adds `parties`, `party_members`, `party_invites` and `party_bans`, the functions that manage them, and the policies for party channels.
+2. Redeploy the chat function. It now also checks party membership for party chat:
+
+   ```bash
+   npx supabase functions deploy chat --no-verify-jwt
+   ```
+
+How parties work:
+
+- **Friends** → **Start a party** → **Invite** friends (accepted friends only). Up to 4 riders, and a rider is in one party at a time.
+- Invited riders see the invite in **Friends** (and a toast) → **Join**.
+- The leader (👑) picks the park and can tick **Private room**. **GO** takes the leader there. Everyone else gets a **GO / STAY** prompt, and GO puts them in the same room.
+- Party chat works anywhere, including Basecamp. In a public room, the chat bar has a **Room / Party** switch.
+- The leader can **Remove** someone, who then can't rejoin that party for 10 minutes. If the leader leaves, the longest-standing member takes over. A party with nobody left is deleted.
+- Only a party's members can join its channels and its private room.
+
+### Test it
+
+1. Two accounts that are friends.
+2. A: **Friends** → **Start a party** → **Invite** B.
+3. B: **Friends** → **Join**.
+4. A: pick a park, tick **Private room**, then **GO**.
+5. B: **GO** → you're both in the private room.
+6. Press **T** to chat with the party.
+
+## Quick checklist for Phase 4
+
+- [ ] Run `supabase/setup.sql` in the SQL Editor. It includes everything; it's safe to run again.
+- [ ] **Realtime** → **Settings** → turn off "Allow public access".
+- [ ] `npx supabase functions deploy chat --no-verify-jwt`
+- [ ] Merge to `main` so GitHub Actions publishes the game.

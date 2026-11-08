@@ -15,6 +15,7 @@
       <!-- In-run HUD -->
       <div id="hud" class="hidden">
         <canvas id="minimap" width="240" height="96" aria-label="Park map"></canvas>
+        <div id="roombadge" class="hidden"></div>
         <div id="speedbox">
           <div id="speed"><span id="speed-num">0</span><small>km/h</small></div>
           <div id="runscore">SCORE <b id="score-num">0</b></div>
@@ -93,8 +94,8 @@
         </div>
         <div class="modes">
           <button class="mode on" data-mode="solo">Solo <span class="picked">PICKED</span></button>
-          <button class="mode" data-mode="multi" disabled title="Needs online play (later)">Multiplayer <small>later</small></button>
-          <div class="party muted">Parties, duels and ranked arrive with online play.</div>
+          <button class="mode" data-mode="multi" title="Live rooms: ride with up to 30 riders">Live rooms <span class="picked">PICKED</span></button>
+          <div class="party muted" id="mode-note">Ride alone, race your ghost, never timed out.</div>
         </div>
         <button id="ride" class="btn primary ride-big">RIDE <kbd>Enter</kbd></button>
         <nav class="footlinks">
@@ -136,12 +137,62 @@
           <button class="btn" data-act="reset">Reset position</button>
           <button class="btn" data-act="restart">Restart run</button>
           <button class="btn" data-act="map">Change park</button>
+          <button class="btn hidden" data-act="roster" id="pause-roster">Riders in this room</button>
           <button class="btn" data-act="settings">Settings</button>
           <button class="btn" data-act="help">How to play</button>
           <button class="btn" data-act="basecamp">Back to Basecamp</button>
           <div class="pause-music"><span>♪ <b id="pm-name"></b></span><button class="btn sm" data-act="mplay" id="pm-play">Pause</button><button class="btn sm" data-act="mskip">Skip</button></div>
           <div id="pause-help" class="hidden"></div>
           <p class="muted">Esc steps back.</p>
+        </div>
+      </section>
+
+      <!-- Chat (live rooms and parties): latest lines top left, chat bar -->
+      <div id="chatlog" class="hidden" aria-live="polite"></div>
+      <button id="chat-btn" class="pill hidden" title="Chat (T)">Chat <kbd>T</kbd></button>
+      <div id="chatbar" class="hidden" tabindex="-1">
+        <div class="chat-row"><button class="btn sm hidden" id="chat-target" title="Who you're talking to">Room</button><input id="chat-input" type="text" placeholder="Say something nice" autocomplete="off" spellcheck="true" aria-label="Chat message" /><button class="btn sm" id="chat-close">Close</button></div>
+        <div id="chat-phrases"></div>
+        <div id="chat-hint" class="muted small"></div>
+      </div>
+
+      <!-- Duels: score strip, big cards (challenge, 3-2-1, connection), results, highlight reel -->
+      <div id="duelhud" class="hidden"><span id="dh-title"></span><span id="dh-score"></span></div>
+      <div id="duelcard" class="hidden"><div id="dc-big"></div><div id="dc-small"></div><div id="dc-buttons"></div></div>
+      <section id="duelover" class="overlay hidden">
+        <div class="panel">
+          <h2 id="do-title">DUEL</h2>
+          <table class="breakdown" id="do-table"></table>
+          <p class="acct-msg" id="do-msg"></p>
+          <div id="do-parks" class="seg hidden"></div>
+          <div class="buttons">
+            <button class="btn primary" data-dact="rematch">Rematch</button>
+            <button class="btn" data-dact="map">Change map</button>
+            <button class="btn" data-dact="reel">Highlight reel</button>
+            <button class="btn" data-dact="leave">Leave duel</button>
+          </div>
+        </div>
+      </section>
+      <div id="reel" class="hidden">
+        <div class="rl-side rl-left"><b id="rl-l-name"></b><span id="rl-l-trick"></span></div>
+        <div class="rl-side rl-right"><b id="rl-r-name"></b><span id="rl-r-trick"></span></div>
+        <div class="rl-divider"></div>
+        <button class="btn" id="rl-skip">Skip <kbd>Esc</kbd></button>
+      </div>
+
+      <!-- Idle in a live room: countdown back to Basecamp -->
+      <div id="idlecard" class="hidden" role="alert">
+        <div class="idle-title">STILL THERE?</div>
+        <div id="idle-why" class="muted"></div>
+        <div class="idle-count">Back to Basecamp in <b id="idle-count">10</b></div>
+        <button class="btn primary" id="idle-stay">I'm here</button>
+      </div>
+
+      <!-- Live room roster (hold Tab, or Riders in the pause menu) -->
+      <section id="roster" class="hidden" aria-label="Riders in this room">
+        <div class="panel">
+          <div class="modal-head"><h2 id="roster-title">RIDERS</h2><span class="muted" id="roster-hint">Hold Tab</span></div>
+          <table class="rlist" id="roster-list"></table>
         </div>
       </section>
 
@@ -208,7 +259,7 @@
         <div class="panel wide">
           <div class="modal-head"><h2>SETTINGS</h2><button class="btn" id="settings-close">Close <kbd>Esc</kbd></button></div>
           <nav class="stabs">
-            <button data-stab="controls">Controls</button><button data-stab="graphics">Graphics</button><button data-stab="camera">Camera</button><button data-stab="sound">Sound</button><button data-stab="stats">Stats</button>
+            <button data-stab="controls">Controls</button><button data-stab="graphics">Graphics</button><button data-stab="camera">Camera</button><button data-stab="sound">Sound</button><button data-stab="stats">Stats</button><button data-stab="chat">Chat</button>
           </nav>
           <div id="settings-body"></div>
         </div>

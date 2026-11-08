@@ -4,7 +4,7 @@ A free 3D freeski game that runs in the browser from GitHub Pages. Drop into a t
 
 > CranSki is an independent fan-made game inspired by Cork7. It is not affiliated with, endorsed by, or connected to Cork7 or its developers. Not affiliated with SSX, EA, X Games or Red Bull.
 
-This is **Phase 3 (online basics)** from [DESIGN.md](DESIGN.md). The game is still static files on GitHub Pages and solo play needs no account. Signing in is optional: an email sign-in link (no passwords) unlocks cloud saves, friends and server-checked leaderboards, backed by [Supabase](https://supabase.com).
+This is **Phase 4 (multiplayer)** from [DESIGN.md](DESIGN.md), on top of Phase 3's accounts and leaderboards. The game is still static files on GitHub Pages and solo play needs no account. Signing in is optional: an email sign-in link (no passwords) unlocks cloud saves, friends and server-checked leaderboards, backed by [Supabase](https://supabase.com).
 
 ## What's in it
 
@@ -25,7 +25,17 @@ This is **Phase 3 (online basics)** from [DESIGN.md](DESIGN.md). The game is sti
 - **Leaderboards** for every park except SHIRAKUMO. A finished run is sent as its recorded inputs. The `submit-run` Edge Function re-rides them through the same deterministic simulation and saves only the score it calculates itself. If the result doesn't match, the run is rejected.
 - **Privacy page**: what's stored and where, and account deletion.
 
-Setting up the Supabase side (SQL, sign-in settings, deploying the Edge Functions) is a few clicks and three commands: see **[SUPABASE_SETUP.md](SUPABASE_SETUP.md)**.
+### Multiplayer (Phase 4, needs a gamertag)
+
+- **Live rooms** on Supabase Realtime: up to 30 riders per park in numbered rooms, with smoothed movement, full or cheap rider models by distance, a Tab roster and minimap dots.
+- **Idle rules** for rooms (solo never times out).
+- **Chat** filtered by the `chat` Edge Function before anyone sees it, with mutes, strikes, reports and a quick-phrases-only setting. Chat is never stored.
+- **Friendly 1v1 duels** with alternate drops, live spectating, re-checked scores and a side-by-side highlight reel.
+- **Parties** of up to 4 with GO / STAY, private rooms and party chat.
+
+Try rooms without a server by opening the game with `?localnet` in two tabs.
+
+Setting up the Supabase side (SQL, sign-in settings, Realtime, deploying the Edge Functions) is a few clicks and a few commands: see **[SUPABASE_SETUP.md](SUPABASE_SETUP.md)**.
 
 ## Play
 
@@ -60,7 +70,7 @@ npm test
 npm run build
 ```
 
-`npm run build` writes static files to `dist/`. `npm run build:sim` bundles the simulation for the leaderboard Edge Function (`supabase/functions/submit-run/sim.js`); `npm test` fails if that bundle is out of date. The workflow in `.github/workflows/deploy.yml` tests, builds and publishes `dist/` to GitHub Pages on every push to `main` (repository **Settings → Pages → Source: GitHub Actions**).
+`npm run build` writes static files to `dist/`. `npm run build:functions` bundles the simulation for the leaderboard Edge Function (`supabase/functions/submit-run/sim.js`) and copies the chat filter into the chat function; `npm run build:sql` joins the migrations into `supabase/setup.sql`. `npm test` fails if any of those copies are out of date. The workflow in `.github/workflows/deploy.yml` tests, builds and publishes `dist/` to GitHub Pages on every push to `main` (repository **Settings → Pages → Source: GitHub Actions**).
 
 ## Project layout
 

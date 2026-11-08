@@ -2101,3 +2101,336 @@ body.touching #footer .credits {
   width: 34%;
   color: var(--muted);
 }
+
+/* ---------------------------------------------------------------- live rooms (Phase 4) */
+.mode:not(.on) .picked {
+  display: none;
+}
+
+#roombadge {
+  position: absolute;
+  left: 16px;
+  bottom: 142px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(9, 22, 44, 0.6);
+  border: 1px solid var(--panel-line);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+}
+
+#roster {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 6;
+  pointer-events: none;
+}
+
+#roster .panel {
+  width: min(560px, calc(100% - 32px));
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
+#roster-list td {
+  vertical-align: middle;
+}
+
+#roster-list tr.me td {
+  background: rgba(30, 123, 255, 0.25);
+}
+
+.rstatus {
+  font-size: 12px;
+}
+
+body.touching #roombadge {
+  bottom: auto;
+  top: 64px;
+}
+
+#idlecard {
+  position: absolute;
+  left: 50%;
+  top: 38%;
+  transform: translate(-50%, -50%);
+  z-index: 12;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  text-align: center;
+  padding: 18px 26px;
+  background: var(--panel);
+  border: 2px solid var(--orange);
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+}
+
+#idlecard.hidden {
+  display: none;
+}
+
+.idle-title {
+  font-family: var(--brush);
+  font-size: 30px;
+  font-style: italic;
+}
+
+.idle-count b {
+  font-size: 22px;
+  color: var(--orange);
+}
+
+/* ---------------------------------------------------------------- chat */
+#chatlog {
+  position: absolute;
+  left: 16px;
+  top: 76px;
+  width: min(400px, calc(100% - 140px));
+  display: grid;
+  gap: 3px;
+  pointer-events: none;
+  z-index: 3;
+  font-size: 14px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+
+#chatlog .cl {
+  padding: 3px 9px;
+  border-radius: 8px;
+  background: rgba(9, 22, 44, 0.5);
+  overflow-wrap: anywhere;
+  transition: opacity 3s;
+}
+
+#chatlog .cl b {
+  color: #9fd0ff;
+}
+
+#chatlog .cl.mine b {
+  color: #ffc49e;
+}
+
+#chatlog .cl.sys {
+  color: #ffd9a8;
+}
+
+#chatlog .cl.fading {
+  opacity: 0;
+}
+
+#chat-btn {
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  z-index: 3;
+}
+
+#chatbar {
+  position: absolute;
+  left: 50%;
+  bottom: 150px;
+  transform: translateX(-50%);
+  width: min(620px, calc(100% - 32px));
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  z-index: 8;
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
+  border-radius: 14px;
+  outline: none;
+}
+
+#chatbar.hidden {
+  display: none;
+}
+
+.chat-row {
+  display: flex;
+  gap: 8px;
+}
+
+#chat-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 16px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  outline: none;
+  color: var(--ink);
+}
+
+#chat-input:focus {
+  border-color: var(--blue);
+}
+
+#chat-phrases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ---------------------------------------------------------------- duels */
+#duelhud {
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 6px 16px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 2px solid var(--orange);
+  font-weight: 800;
+  font-size: 14px;
+  z-index: 4;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+#duelhud.hidden,
+#duelcard.hidden,
+#reel.hidden {
+  display: none;
+}
+
+#dh-score b {
+  color: var(--orange);
+}
+
+#duelcard {
+  position: absolute;
+  left: 50%;
+  top: 34%;
+  transform: translate(-50%, -50%);
+  z-index: 9;
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  text-align: center;
+  min-width: 240px;
+  padding: 16px 24px;
+  border-radius: 16px;
+  background: var(--panel);
+  border: 2px solid var(--panel-line);
+  pointer-events: auto;
+}
+
+#duelcard.count {
+  background: transparent;
+  border: none;
+  pointer-events: none;
+}
+
+#dc-big {
+  font-family: var(--brush);
+  font-style: italic;
+  font-size: 34px;
+  letter-spacing: 0.02em;
+}
+
+#duelcard.count #dc-big {
+  font-size: 120px;
+  text-shadow: 0 6px 30px rgba(0, 0, 0, 0.45);
+}
+
+#dc-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+#reel {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+}
+
+.rl-side {
+  position: absolute;
+  top: 16px;
+  display: grid;
+  gap: 4px;
+  font-weight: 800;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+}
+
+.rl-side b {
+  font-family: var(--brush);
+  font-style: italic;
+  font-size: 28px;
+}
+
+.rl-left {
+  left: 20px;
+}
+
+.rl-right {
+  left: calc(50% + 20px);
+}
+
+.rl-divider {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  transform: translateX(-50%);
+  background: var(--orange);
+}
+
+#rl-skip {
+  position: absolute;
+  right: 16px;
+  bottom: 52px;
+  pointer-events: auto;
+}
+
+.party-ctl {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0;
+}
+
+.party-ctl select {
+  font: inherit;
+  padding: 5px 8px;
+  border-radius: 8px;
+}
+
+#chatlog .ptag {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--orange);
+  color: #fff;
+}
+
+/* Chat in Basecamp (party chat): clear of the top bar and side cards. */
+#basecamp:not(.hidden) ~ #chat-btn {
+  top: auto;
+  bottom: 130px;
+  right: 16px;
+}
+
+#basecamp:not(.hidden) ~ #chatlog {
+  top: auto;
+  bottom: 170px;
+  left: 50%;
+  transform: translateX(-50%);
+}

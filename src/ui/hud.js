@@ -117,11 +117,23 @@ export class Hud {
     this.mapBg = c;
   }
 
-  drawMinimap(rider) {
+  // others: [{ s, y }] riders in the same live room, drawn as small dots.
+  drawMinimap(rider, others = []) {
     const c = this.el.minimap;
     const g = c.getContext('2d');
     g.clearRect(0, 0, c.width, c.height);
     g.drawImage(this.mapBg, 0, 0);
+    g.fillStyle = '#1e7bff';
+    g.strokeStyle = '#fff';
+    g.lineWidth = 1.5;
+    for (const o of others) {
+      const ox = 6 + o.s * this.map.sx;
+      const oy = 8 + (this.map.top - o.y) * this.map.sy;
+      g.beginPath();
+      g.arc(ox, oy - 3, 3.5, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+    }
     const s = -rider.pos.z;
     const x = 6 + s * this.map.sx;
     const y = 8 + (this.map.top - rider.pos.y) * this.map.sy;
@@ -177,7 +189,7 @@ export class Hud {
       this.hintTimer -= dt;
       if (this.hintTimer <= 0) this.el.hint.classList.remove('show');
     }
-    this.drawMinimap(r);
+    this.drawMinimap(r, this.others || []);
   }
 
   setRestart(frac) {

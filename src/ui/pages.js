@@ -9,6 +9,16 @@ export const DISCLAIMER =
 
 export const UPDATES = [
   {
+    title: 'Phase 4 · Multiplayer',
+    items: [
+      'Live rooms: pick Live rooms in Basecamp and ride with up to 30 riders per park in numbered rooms. Hold Tab for the roster; other riders show on the minimap.',
+      'Idle rules for rooms: paused for 1 minute, no input for 2 minutes, or a replay left for 10 minutes sends you back to Basecamp after a countdown. Solo is never timed out.',
+      'Chat with safety built in: every message is filtered before anyone sees it, hate words never get through, repeat offenders are muted, and you can mute or report anyone. Full chat, quick phrases only, or off.',
+      'Friendly 1v1 duels on APEX, BIG AIR, FOREST LINE, ASPEN PIPE and BELLEVUE: press V or 1V1, alternate drops while the other watches, 2 runs each, then a side-by-side highlight reel.',
+      'Parties of up to 4: invite friends, the leader picks the park (or a private room) and everyone gets a GO / STAY prompt. Party chat included.',
+    ],
+  },
+  {
     title: 'Phase 3 · Online basics',
     items: [
       'Sign in with an email link (no passwords) and pick a gamertag. Solo play still needs no account.',
@@ -76,6 +86,12 @@ export const PAGES = {
           <tr><td>Your best server-checked score on each park, with its best trick and date</td><td>Everyone</td></tr>
           <tr><td>The recorded inputs behind each leaderboard run: which buttons were held at each moment, nothing else</td><td>Nobody through the game; kept so runs can be re-checked</td></tr>
           <tr><td>When you last submitted runs, to stop spam</td><td>Nobody; deleted after a day</td></tr>
+          <tr><td>Live rooms: your position, pose, tricks and Locker look while you ride, sent to the riders in your room</td><td>Riders in your room, live. Never stored.</td></tr>
+          <tr><td>Chat messages</td><td>Your room or party, live. Never stored: every message is filtered and passed straight on.</td></tr>
+          <tr><td>Chat strikes and mutes (how many times your messages broke the chat rules, and until when you're muted), but not the messages</td><td>Nobody; strikes reset after 15 minutes</td></tr>
+          <tr><td>Reports you make or that are made about you, with the last 10 minutes of that room's chat</td><td>Moderators only, until reviewed</td></tr>
+          <tr><td>Your party: who's in it, who leads it, its park and private-room switch, invites you've sent or received, and 10-minute removals</td><td>The party's members (and riders you invite see the leader's gamertag)</td></tr>
+          <tr><td>Duels: whose turn it is and each finished run's inputs and score, sent to your opponent</td><td>Your opponent, live. Never stored.</td></tr>
         </tbody>
       </table>
       <p>There are no ads, no analytics and no tracking cookies. Nothing is sold or shared, and CranSki never asks for payment details or passwords.</p>

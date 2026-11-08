@@ -20,6 +20,7 @@ export const DEFAULTS = {
   },
   sound: { music: 60, effects: 80 },
   stats: 'off', // off | basic | detailed
+  chat: 'full', // full | quick (quick phrases only) | off
   keys: DEFAULT_KEYS,
   pad: DEFAULT_PAD,
   touch: null, // touch layout (step 6)

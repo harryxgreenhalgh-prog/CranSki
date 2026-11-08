@@ -15,7 +15,7 @@ import { ParkMap } from './ui/map.js';
 import { PAGES, pageHtml } from './ui/pages.js';
 import { parkMeta } from './parks/index.js';
 import { profile, load } from './store.js';
-import { settings, saveSettings, looksLowEnd } from './settings.js';
+import { settings, saveSettings, looksLowEnd, onSettings } from './settings.js';
 import { SettingsUI, StatsOverlay } from './ui/settings.js';
 import { TouchControls, TouchEditor, isTouchDevice } from './ui/touch.js';
 import { Recorder, SIM_VERSION } from './replay/record.js';
@@ -37,6 +37,20 @@ import { friends, onFriends, setLocation } from './online/friends.js';
 import { mountFriends } from './ui/friendsUI.js';
 import { canPost, submitRun } from './online/leaderboard.js';
 import { mountBoard } from './ui/boardUI.js';
+import { LiveRoom } from './online/rooms.js';
+import { LOCAL } from './online/net.js';
+import { REALTIME_BUDGET } from './online/config.js';
+import { RemoteRiders } from './render/remoteRiders.js';
+import { Roster } from './ui/roster.js';
+import { IdleWatch } from './ui/idle.js';
+import { ChatChannel, mutedRiders, setMuted, REPORT_REASONS } from './online/chat.js';
+import { ChatUI } from './ui/chatUI.js';
+import { party } from './online/party.js';
+import { DuelSession, DUEL_PARKS, CHALLENGE_TIMEOUT, validPose } from './online/duel.js';
+import { Snapshots } from './online/rooms.js';
+import { Reel } from './render/reel.js';
+import { packRuns } from './replay/record.js';
+import { frameRider, STRIDE } from './render/pose.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -209,6 +223,7 @@ function boot() {
     onPage: (p) => openPage(p),
     onAccount: () => openAccount(),
     onFriends: () => openFriends(),
+    onMode: (m) => setPlayMode(m),
     onGear: () => openSettings(),
     onMusic: () => {
       $('musicpop').classList.toggle('hidden');
@@ -235,6 +250,10 @@ function boot() {
     $('liftbar').classList.add('hidden');
     $('ghosttag').classList.add('hidden');
     if (loaded) loaded.hud.show(false);
+    if (duel) leaveDuel();
+    if (live) live.leaveRoom();
+    remotes.clear();
+    roster.hide();
     placeModel(basecampScene.scene);
     model.root.position.set(0, COM_HEIGHT, 0);
     model.root.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI - 0.35);
@@ -317,9 +336,10 @@ function boot() {
   // Friends (Phase 3 step 3).
   function openFriends() {
     openModal('Friends', '<div class="acct friends" id="friends-panel"></div>');
-    mountFriends($('friends-panel'), { onAccount: () => openAccount() });
+    mountFriends($('friends-panel'), { onAccount: () => openAccount(), onPartyGo: () => partyGo() });
   }
   onFriends(() => basecamp.refreshFriends(friends));
+  basecamp.partyInvites = () => party.invites.length;
   // Tell friends where you are: Basecamp, a lift, a run or a replay.
   function reportLocation() {
     const park = loaded ? loaded.id : parkId;
@@ -327,7 +347,804 @@ function boot() {
     else if (state === 'riding' || state === 'paused' || state === 'finish' || state === 'results') setLocation('riding', park);
     else if (state === 'replay') setLocation('replay', park);
     else if (state !== 'loading' && state !== 'boot') setLocation('basecamp');
+    const where = { lift: 'lift', riding: 'riding', paused: 'paused', finish: 'results', results: 'results', replay: 'replay', duel: 'duel', duelover: 'duel', reel: 'duel' }[state] || 'basecamp';
+    if (state !== 'loading' && state !== 'boot') party.setWhere(where, where === 'basecamp' ? null : park);
   }
+
+  // ------------------------------------------------------------ live rooms (Phase 4)
+  let playMode = 'solo'; // solo | live
+  let live = null; // LiveRoom while in live mode
+  const remotes = new RemoteRiders();
+  const roster = new Roster({ onAction: (act, uid) => onRosterAction(act, uid) });
+  const rosterActions = {}; // filled in by chat (mute/report) and duels (1V1)
+  function onRosterAction(act, uid) {
+    rosterActions[act]?.(uid);
+    roster.render();
+  }
+  // Who you are online. With ?localnet (testing in several tabs) a made-up rider.
+  function identity() {
+    if (account.ready) return { uid: account.user.id, tag: account.gamertag };
+    if (LOCAL) {
+      let id = sessionStorage.getItem('cranski.localid');
+      if (!id) sessionStorage.setItem('cranski.localid', (id = 'local-' + Math.random().toString(36).slice(2, 8)));
+      return { uid: id, tag: `${profile.name} ${id.slice(6, 9).toUpperCase()}` };
+    }
+    return null;
+  }
+  const MODE_NOTE = {
+    solo: 'Ride alone, race your ghost, never timed out.',
+    live: 'Ride with up to 30 riders. Hold Tab for the roster.',
+  };
+  async function setPlayMode(m) {
+    if (m === playMode) return;
+    if (m === 'live') {
+      const me = identity();
+      if (!me) {
+        openAccount();
+        toast(account.signedIn ? 'Pick a gamertag to ride in live rooms.' : 'Sign in to ride in live rooms.');
+        return;
+      }
+      playMode = 'live';
+      basecamp.setMode('live', MODE_NOTE.live);
+      const lk = look();
+      live = new LiveRoom({
+        me: { ...me, look: lk, board: lk.ride === 'board' },
+        budget: REALTIME_BUDGET,
+        onChange: () => onRoomChange(),
+        onTrick: (r) => remotes.showTrick(r),
+        onEvent: (e, m2) => roomEvents[e]?.(m2),
+      });
+      live.openLobby().catch((err) => {
+        console.warn(err);
+        toast("Couldn't reach the live rooms. Back to solo.");
+        setPlayMode('solo');
+      });
+    } else {
+      playMode = 'solo';
+      basecamp.setMode('solo', MODE_NOTE.solo);
+      const l = live;
+      live = null;
+      remotes.clear();
+      roster.hide();
+      updateRoomBadge();
+      if (l) await l.close();
+    }
+  }
+  const roomEvents = {}; // room broadcast events by name, for later features
+
+  // Chat (Phase 4 step 3): filtered and signed by the chat Edge Function.
+  const chatUI = new ChatUI({
+    onSend: (t) => chatFor(chatUI.target)?.send(t),
+    onPhrase: (i) => chatFor(chatUI.target)?.sendPhrase(i),
+  });
+  let chat = null; // room chat
+  let partyChat = null;
+  const chatFor = (target) => (target === 'party' ? partyChat : chat) || chat || partyChat;
+  function chatTopicFor() {
+    if (!live || !live.room) return null;
+    return live.privateKey ? null : `chat:${live.park}:${live.number}`;
+  }
+  // Room chat while in a public room; party chat while in a party.
+  // One sync at a time, so overlapping calls never open a channel twice.
+  let chatSync = Promise.resolve();
+  function syncChat() {
+    chatSync = chatSync.then(syncChatNow, syncChatNow);
+    return chatSync;
+  }
+  async function syncChatNow() {
+    const me = identity();
+    const roomTopic = chatTopicFor();
+    const partyTopic = party.info && account.ready ? `pchat:${party.info.id}` : null;
+    if (me && LOCAL) sessionStorage.setItem('cranski.localme', JSON.stringify(me));
+    const want = async (cur, topic, from) => {
+      if (!topic || !me) {
+        if (cur) await cur.detach();
+        return null;
+      }
+      const c = cur || new ChatChannel({ me, onMessage: (m) => chatUI.message(m, m.u === me.uid, from), onSystem: (t) => chatUI.system(t) });
+      if (c.topic !== topic) {
+        try {
+          await c.attach(topic);
+        } catch (e) {
+          console.warn('chat', e);
+          chatUI.system("Chat isn't available right now.");
+        }
+      }
+      return c;
+    };
+    chat = await want(chat, roomTopic, 'room');
+    partyChat = await want(partyChat, partyTopic, 'party');
+    const targets = [chat && 'room', partyChat && 'party'].filter(Boolean);
+    chatUI.setTargets(targets);
+    if (!targets.length) chatUI.clear();
+    chatUI.setEnabled(targets.length > 0);
+  }
+  onSettings(() => chatUI.setEnabled(!!(chat?.topic || partyChat?.topic)));
+  // T opens chat (Enter too while riding).
+  window.addEventListener('keydown', (e) => {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || chatUI.isOpen || !chatUI.enabled) return;
+    if (!['riding', 'lift', 'results', 'finish', 'basecamp', 'duel', 'duelover'].includes(state) || !$('modal').classList.contains('hidden')) return;
+    if (e.code === 'KeyT' || (e.code === 'Enter' && state === 'riding')) {
+      e.preventDefault();
+      chatUI.open();
+    }
+  });
+  // Mute and report from the roster.
+  roster.actions.push((r) => {
+    const muted = mutedRiders().has(r.uid);
+    return `<button class="btn sm" data-ract="${muted ? 'unmute' : 'mute'}" data-uid="${r.uid}">${muted ? 'Unmute' : 'Mute'}</button> <button class="btn sm" data-ract="report" data-uid="${r.uid}">Report</button>`;
+  });
+  rosterActions.mute = (uid) => setMuted(uid, true);
+  rosterActions.unmute = (uid) => setMuted(uid, false);
+  rosterActions.report = (uid) => openReport(uid);
+  function openReport(uid) {
+    const r = live?.remotes.get(uid);
+    const tag = r ? r.tag : 'this rider';
+    roster.hide();
+    openModal(
+      'Report a rider',
+      `<p>Report <b>${esc(tag)}</b>. Your report includes the last 10 minutes of this room's chat, checked by the server, so a moderator can see what happened. It's kept until a moderator has reviewed it.</p>
+      <form id="report-form" class="report-form">
+        ${REPORT_REASONS.map(([id, label], i) => `<label class="choice"><input type="radio" name="reason" value="${id}" ${i === 0 ? 'checked' : ''}/><b>${label}</b></label>`).join('')}
+        <textarea name="note" maxlength="300" rows="2" placeholder="Anything else? (optional)"></textarea>
+        <p class="acct-row"><button class="btn primary" type="submit">Send report</button><label class="fcheck"><input type="checkbox" name="mute" checked /> Also mute them</label></p>
+        <p class="acct-msg" id="report-msg"></p>
+      </form>`
+    );
+    const form = $('report-form');
+    form.note.addEventListener('keydown', (e) => e.stopPropagation());
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = form.querySelector('button[type=submit]');
+      btn.disabled = true;
+      if (form.mute.checked) setMuted(uid, true);
+      const res = chat ? await chat.report(uid, form.reason.value, form.note.value) : { error: 'not_in_room' };
+      $('report-msg').className = `acct-msg ${res?.ok ? 'good' : 'bad'}`;
+      $('report-msg').textContent = res?.ok ? 'Thanks. Your report was sent to the moderators.' : res?.error === 'slow_down' ? "You've sent a lot of reports. Try again later." : "Couldn't send the report. Try again later.";
+      if (!res?.ok) btn.disabled = false;
+    });
+  }
+
+  // ------------------------------------------------------------ duels (Phase 4 step 4)
+  let duel = null; // DuelSession
+  let duelRun = false; // riding one of my duel runs
+  let duelOpp = null; // { model, snaps, score, camPos }
+  let countdown = null; // { until, mine }
+  let pendingChallenge = null; // challenge I sent
+  let incoming = null; // challenge I received
+  let reel = null;
+  let verifyMod = null;
+  let oppGone = false;
+  const duelFrameBuf = new Float32Array(STRIDE);
+  const duelView = {};
+  const cards = {}; // kind -> { big, small, buttons, count }
+  const CARD_ORDER = ['conn', 'opp', 'challenge', 'partygo', 'leave', 'still', 'count'];
+  function setCard(kind, card) {
+    if (card) cards[kind] = card;
+    else delete cards[kind];
+    const top = CARD_ORDER.find((k) => cards[k]);
+    const el = $('duelcard');
+    if (!top) {
+      el.classList.add('hidden');
+      el.dataset.kind = '';
+      return;
+    }
+    const c = cards[top];
+    el.classList.toggle('count', top === 'count');
+    el.classList.remove('hidden');
+    $('dc-big').textContent = c.big || '';
+    $('dc-small').textContent = c.small || '';
+    if (el.dataset.kind !== top || c.rebuild) {
+      el.dataset.kind = top;
+      c.rebuild = false;
+      $('dc-buttons').innerHTML = (c.buttons || []).map((b, i) => `<button class="btn ${i === 0 ? 'primary' : ''}" data-dc="${i}">${b.label}</button>`).join('');
+      $('dc-buttons').querySelectorAll('[data-dc]').forEach((b) => b.addEventListener('click', () => c.buttons[Number(b.dataset.dc)].fn()));
+    }
+  }
+  const PARK_NAME = (id) => parkMeta(id).name;
+  const duelParkOk = (id) => DUEL_PARKS.includes(id);
+
+  // Challenge someone in your room (V, or 1V1 in the roster).
+  function challenge(uid) {
+    if (!live || !live.room || duel) return;
+    if (!duelParkOk(live.park)) {
+      toast('Duels are on APEX, BIG AIR, FOREST LINE, ASPEN PIPE and BELLEVUE.');
+      return;
+    }
+    const r = live.remotes.get(uid);
+    if (!r) return;
+    pendingChallenge = { id: crypto.randomUUID(), to: uid, tag: r.tag, until: performance.now() + CHALLENGE_TIMEOUT * 1000 };
+    live.sendEvent('challenge', { to: uid, id: pendingChallenge.id, park: live.park, tag: live.me.tag });
+    toast(`Challenge sent to ${r.tag}…`, 4000);
+  }
+  roomEvents.challenge = (m) => {
+    const me = identity();
+    if (!me || m.to !== me.uid || duel || incoming || m.park !== live?.park) return;
+    incoming = { from: m.u, tag: String(m.tag || 'A rider').slice(0, 18), id: m.id, park: m.park, until: performance.now() + CHALLENGE_TIMEOUT * 1000 };
+    setCard('challenge', {
+      big: `${incoming.tag} challenges you`,
+      small: `Friendly 1v1 on ${PARK_NAME(m.park)}: 2 runs each, best run wins.`,
+      buttons: [
+        { label: 'Accept <kbd>Y</kbd>', fn: () => answerChallenge(true) },
+        { label: 'No thanks <kbd>N</kbd>', fn: () => answerChallenge(false) },
+      ],
+      rebuild: true,
+    });
+  };
+  function answerChallenge(yes) {
+    const c = incoming;
+    incoming = null;
+    setCard('challenge', null);
+    if (!c || !live) return;
+    live.sendEvent(yes ? 'accept' : 'decline', { to: c.from, id: c.id });
+    if (yes) startDuel({ id: c.id, opp: { uid: c.from, tag: c.tag }, host: false, park: c.park });
+  }
+  roomEvents.accept = (m) => {
+    const me = identity();
+    if (!me || m.to !== me.uid || !pendingChallenge || pendingChallenge.id !== m.id || duel) return;
+    const p = pendingChallenge;
+    pendingChallenge = null;
+    startDuel({ id: p.id, opp: { uid: p.to, tag: p.tag }, host: true, park: live.park });
+  };
+  roomEvents.decline = (m) => {
+    const me = identity();
+    if (!me || m.to !== me.uid || !pendingChallenge || pendingChallenge.id !== m.id) return;
+    toast(`${pendingChallenge.tag} said no thanks.`, 4000);
+    pendingChallenge = null;
+  };
+  window.addEventListener('keydown', (e) => {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    if (incoming && (e.code === 'KeyY' || e.code === 'KeyN')) {
+      e.preventDefault();
+      answerChallenge(e.code === 'KeyY');
+      return;
+    }
+    // V: challenge the nearest rider (or pick from the roster).
+    if (e.code === 'KeyV' && live && live.room && !duel && ['riding', 'lift', 'results', 'finish'].includes(state)) {
+      e.preventDefault();
+      if (!duelParkOk(live.park)) {
+        toast('Duels are on APEX, BIG AIR, FOREST LINE, ASPEN PIPE and BELLEVUE.');
+        return;
+      }
+      let best = null;
+      for (const [uid, en] of remotes.entries) if (en.group.visible && en.dist < 60 && (!best || en.dist < best.d)) best = { uid, d: en.dist };
+      if (best) challenge(best.uid);
+      else roster.show(live, true);
+    }
+  });
+  roster.actions.push((r, room) => (duelParkOk(room.park) && !duel ? `<button class="btn sm primary" data-ract="duel" data-uid="${r.uid}">1V1</button>` : ''));
+  rosterActions.duel = (uid) => {
+    roster.hide();
+    challenge(uid);
+  };
+
+  // Re-ride the opponent's inputs ourselves to get their score.
+  function verifyRecord(rec) {
+    if (!verifyMod || !rec) return null;
+    const r = verifyMod.rerun({ park: rec.park, version: rec.version, steps: rec.steps, inputs: rec.inputs, marks: rec.marks || [], grabSlots: rec.grabSlots, board: !!rec.board, claimed: { total: -1 } });
+    return r.results ? r.results.total : 0;
+  }
+
+  async function startDuel({ id, opp, host, park }) {
+    const me = identity();
+    if (!me || duel) return;
+    try {
+      if (!verifyMod) verifyMod = await import('./sim/verify.js');
+      const lk = live?.remotes.get(opp.uid)?.look;
+      duel = new DuelSession({
+        id,
+        me,
+        opp,
+        host,
+        park,
+        verify: verifyRecord,
+        hooks: {
+          onTurn: (uid, run) => duelTurn(uid, run),
+          onCountdown: (uid) => {
+            countdown = { until: performance.now() + 3600, mine: uid === me.uid };
+            if (uid !== me.uid && duelOpp) duelOpp.snaps = new Snapshots();
+          },
+          onOppPose: (m) => {
+            if (!duelOpp || !validPose(m)) return;
+            duelOpp.snaps.push(m.t, m.f, performance.now());
+            duelOpp.score = Number(m.sc) || 0;
+          },
+          onOppDone: (total, run) => toast(`${opp.tag}: run ${Math.floor(run / 2) + 1} scored ${fmt(total)}`, 4000),
+          onOver: (res) => duelOver(res),
+          onRestart: (p) => duelRestart(p),
+          onOppLeft: () => duelOppLeft(),
+          onOppPresence: (here) => {
+            oppGone = !here;
+            if (here) setCard('opp', null);
+          },
+          onConnection: (ok) => setCard('conn', ok ? null : { big: 'RECONNECTING…', small: 'Lost the connection to the duel. Trying again.' }),
+          onProposal: (p) => duelProposal(p),
+        },
+      });
+      await duel.connect();
+      const model = new RiderModel({ ...DEFAULT_LOOK, ...(lk || {}) });
+      if (ASSETS.ready) {
+        model.upgrade(ASSETS.parts);
+        model.applyLook({ ...DEFAULT_LOOK, ...(lk || {}) });
+      }
+      model.root.visible = false;
+      duelOpp = { model, snaps: new Snapshots(), score: 0, camPos: null, prev: new THREE.Vector3() };
+      toast(`Duel with ${opp.tag} on ${PARK_NAME(park)}!`, 4000);
+      enterDuelLobby();
+    } catch (e) {
+      console.warn(e);
+      toast("Couldn't start the duel.");
+      duel = null;
+    }
+  }
+
+  function enterDuelLobby() {
+    const L = loaded;
+    if (!L || !duel) return;
+    blurMenus();
+    endLift();
+    showOverlay(null);
+    $('duelover').classList.add('hidden');
+    $('finishcard').classList.add('hidden');
+    $('liftbar').classList.add('hidden');
+    L.run.reset();
+    L.hud.show(false);
+    duelRun = false;
+    countdown = null;
+    state = 'duel';
+    if (duelOpp && duelOpp.model.root.parent !== L.world.scene) L.world.scene.add(duelOpp.model.root);
+    updateDuelHud();
+    duel.ready();
+  }
+
+  function duelTurn(uid, run) {
+    const L = loaded;
+    if (!L) return;
+    state = 'duel';
+    L.run.reset();
+    L.hud.show(false);
+    updateDuelHud();
+    if (uid === duel.me.uid) setTimeout(() => duel && duel.turn === uid && duel.run === run && duel.go(), 1500);
+  }
+
+  function beginDuelRun() {
+    startRun();
+    duelRun = true;
+    duel.startRun();
+    updateDuelHud();
+  }
+
+  function endDuelRun(reason) {
+    const L = loaded;
+    if (!duel || !duelRun) return;
+    duelRun = false;
+    const res = L.run.results();
+    const data = recorder.data();
+    const record = { version: SIM_VERSION, park: L.id, steps: data.steps, inputs: packRuns(data.runs), marks: data.marks, grabSlots: L.run.rider.grabSlots.slice(), board: L.run.rider.board };
+    setCard('still', null);
+    if (state === 'paused') showOverlay(null);
+    state = 'duel';
+    L.hud.show(false);
+    const n = Math.floor(duel.run / 2) + 1;
+    toast(`Your run ${n}: ${fmt(res.total)}${reason === 'cap' ? ' (out of pause time)' : ''}`, 4000);
+    duel.finishRun(res.total, record);
+  }
+
+  // During my duel run: stream my pose; pausing or standing still uses up the 30 s.
+  function duelTick(L, dt) {
+    if (!duel || !duelRun) return;
+    const r = L.run.rider;
+    duel.pose(r, L.run.score.total);
+    let why = null;
+    if (state === 'paused') why = 'PAUSED';
+    else if (state === 'riding' && r.mode === 'ground' && r.speed < 0.6 && L.run.time > 2.5) why = 'STANDING STILL';
+    if (why) {
+      const left = duel.addPause(dt);
+      setCard('still', { big: why, small: `${Math.ceil(left)} s of pause time left in this duel` });
+      if (left <= 0) endDuelRun('cap');
+    } else if (cards.still) setCard('still', null);
+  }
+
+  function updateDuelHud() {
+    const el = $('duelhud');
+    if (!duel) {
+      el.classList.add('hidden');
+      return;
+    }
+    el.classList.remove('hidden');
+    const total = duel.order.length;
+    const runTxt = duel.over ? 'FINAL' : `RUN ${duel.run + 1}/${total}`;
+    $('dh-title').textContent = `DUEL · ${PARK_NAME(duel.park)} · ${runTxt}`;
+    const best = (u) => Math.max(0, ...(duel.scores[u] || []));
+    $('dh-score').innerHTML = `${esc(duel.me.tag)} <b>${fmt(best(duel.me.uid))}</b> · ${esc(duel.opp.tag)} <b>${fmt(best(duel.opp.uid))}</b>`;
+  }
+
+  function duelOver(res) {
+    setCard('still', null);
+    countdown = null;
+    setCard('count', null);
+    state = 'duelover';
+    updateDuelHud();
+    const me = duel.me;
+    const opp = duel.opp;
+    $('do-title').textContent = res.winner === null ? 'DRAW' : res.winner === me.uid ? 'YOU WIN!' : `${opp.tag.toUpperCase()} WINS`;
+    const row = (u, tag) => `<tr><td><b>${esc(tag)}</b></td>${[0, 1].map((i) => `<td>${duel.scores[u][i] !== undefined ? fmt(duel.scores[u][i]) : '—'}</td>`).join('')}<td><b>${fmt(res.best[u])}</b></td></tr>`;
+    $('do-table').innerHTML = `<tr><td></td><td class="muted">Run 1</td><td class="muted">Run 2</td><td class="muted">Best</td></tr>${row(me.uid, me.tag)}${row(opp.uid, opp.tag)}`;
+    $('do-msg').textContent = '';
+    $('do-msg').className = 'acct-msg';
+    $('do-parks').classList.add('hidden');
+    $('duelover').classList.remove('hidden');
+    $('duelover').querySelector('[data-dact=rematch]').disabled = false;
+    $('duelover').querySelector('[data-dact=map]').disabled = false;
+  }
+
+  function duelProposal(park) {
+    if (!duel || state !== 'duelover') return;
+    const mine = duel.again[duel.me.uid];
+    if (mine === park) return; // about to restart
+    const what = park === duel.park ? `${duel.opp.tag} wants a rematch on ${PARK_NAME(park)}.` : `${duel.opp.tag} wants to change map to ${PARK_NAME(park)}.`;
+    $('do-msg').innerHTML = `${esc(what)} <button class="btn sm primary" id="do-accept">Accept</button>`;
+    $('do-accept').addEventListener('click', () => duel.proposeAgain(park));
+  }
+
+  async function duelRestart(park) {
+    $('duelover').classList.add('hidden');
+    const L = loaded;
+    if (!L || L.id !== park) {
+      state = 'loading';
+      parkId = park;
+      profile.park = park;
+      try {
+        await loadPark(park, (p, t) => loadingScreen.set(p, t));
+      } catch (e) {
+        console.warn(e);
+        toast("Couldn't load the duel park.");
+        leaveDuel();
+        toBasecamp();
+        return;
+      }
+      if (live) await live.join(park).catch(() => {});
+    }
+    enterDuelLobby();
+  }
+
+  function duelOppLeft() {
+    if (!duel) return;
+    toast(`${duel.opp.tag} left the duel.`, 5000);
+    if (!duel.over) {
+      while (!duel.over) {
+        if (duel.turn === duel.opp.uid) duel.forfeitTurn();
+        else {
+          duel.scores[duel.me.uid].push(0);
+          duel.run++;
+        }
+      }
+      duelOver(duel.result());
+    }
+    // Leaving forfeits: whoever stayed wins.
+    $('do-title').textContent = 'YOU WIN!';
+    $('do-msg').textContent = `${duel.opp.tag} left the duel, so you win by forfeit.`;
+    $('duelover').querySelector('[data-dact=rematch]').disabled = true;
+    $('duelover').querySelector('[data-dact=map]').disabled = true;
+    setCard('opp', null);
+  }
+
+  // The other rider has dropped out: their pause time runs down.
+  function watchOpponent(dt) {
+    if (!duel || !oppGone || duel.over) {
+      if (cards.opp && (!oppGone || !duel)) setCard('opp', null);
+      return;
+    }
+    duel.pauseUsed[duel.opp.uid] += dt;
+    const left = duel.pauseLeft(duel.opp.uid);
+    setCard('opp', { big: 'NOT RESPONDING', small: `${duel.opp.tag} has dropped out · ${Math.ceil(left)} s of their pause time left` });
+    if (left <= 0) {
+      if (duel.turn === duel.opp.uid) duel.forfeitTurn();
+      if (state === 'duel' || state === 'duelover') updateDuelHud();
+    }
+  }
+
+  async function leaveDuel() {
+    const d = duel;
+    if (!d) return;
+    duel = null;
+    duelRun = false;
+    countdown = null;
+    incoming = null;
+    for (const k of Object.keys(cards)) setCard(k, null);
+    $('duelover').classList.add('hidden');
+    $('duelhud').classList.add('hidden');
+    if (reel) {
+      reel.dispose();
+      reel = null;
+    }
+    if (duelOpp) {
+      duelOpp.model.root.parent?.remove(duelOpp.model.root);
+      duelOpp = null;
+    }
+    await d.leave();
+  }
+
+  $('duelover').addEventListener('click', (e) => {
+    const act = e.target.closest('[data-dact]')?.dataset.dact;
+    if (!act || !duel) return;
+    if (act === 'rematch') {
+      duel.proposeAgain(duel.park);
+      $('do-msg').textContent = `Waiting for ${duel.opp.tag} to accept…`;
+    } else if (act === 'map') {
+      const el = $('do-parks');
+      el.innerHTML = DUEL_PARKS.filter((id) => id !== duel.park).map((id) => `<button data-dpark="${id}">${PARK_NAME(id)}</button>`).join('');
+      el.classList.remove('hidden');
+      el.querySelectorAll('[data-dpark]').forEach((b) =>
+        b.addEventListener('click', () => {
+          duel.proposeAgain(b.dataset.dpark);
+          el.classList.add('hidden');
+          $('do-msg').textContent = `Asked ${duel.opp.tag} to ride ${PARK_NAME(b.dataset.dpark)}…`;
+        })
+      );
+    } else if (act === 'reel') startReel();
+    else if (act === 'leave') {
+      leaveDuel();
+      startLift();
+    }
+  });
+
+  // Side-by-side highlight reel of both riders' best runs.
+  function startReel() {
+    const L = loaded;
+    if (!duel || !L) return;
+    const bestRec = (u) => {
+      const sc = duel.scores[u];
+      let i = sc.indexOf(Math.max(...sc));
+      if (!duel.records[u][i]) i = duel.records[u].findIndex(Boolean);
+      return i >= 0 ? duel.records[u][i] : null;
+    };
+    const mine = bestRec(duel.me.uid);
+    const theirs = bestRec(duel.opp.uid);
+    if (!mine && !theirs) {
+      toast('No runs to show.');
+      return;
+    }
+    $('duelover').classList.add('hidden');
+    $('duelhud').classList.add('hidden');
+    model.root.visible = false;
+    if (duelOpp) duelOpp.model.root.visible = false;
+    try {
+      reel = new Reel({
+        renderer,
+        world: L.world,
+        terrain: L.terrain,
+        sides: [
+          { record: mine, look: look(), tag: duel.me.tag },
+          { record: theirs, look: live?.remotes.get(duel.opp.uid)?.look, tag: duel.opp.tag },
+        ],
+      });
+      state = 'reel';
+    } catch (e) {
+      console.warn(e);
+      toast("Couldn't play the highlight reel.");
+      $('duelover').classList.remove('hidden');
+    }
+  }
+  function endReel() {
+    if (reel) reel.dispose();
+    reel = null;
+    if (duel) {
+      state = 'duelover';
+      updateDuelHud();
+      $('duelover').classList.remove('hidden');
+    }
+  }
+  $('rl-skip').addEventListener('click', () => endReel());
+
+  // Draw the duel screens: waiting at the gate, spectating, results, reel.
+  const spectateLook = new THREE.Vector3();
+  function duelFrame(L, dt) {
+    placeModel(L.world.scene);
+    const now = performance.now();
+    if (state === 'reel' && reel) {
+      if (!reel.frame(dt, L.time)) endReel();
+      liveFrame(L, dt);
+      return;
+    }
+    if (countdown) {
+      const left = (countdown.until - now) / 1000;
+      if (left > 0.6) setCard('count', { big: String(Math.ceil(left - 0.6)), small: countdown.mine ? 'Your run' : `${duel?.opp.tag}'s run` });
+      else if (left > 0) setCard('count', { big: 'GO!', small: '' });
+      else {
+        const mine = countdown.mine;
+        countdown = null;
+        setCard('count', null);
+        if (mine && duel) {
+          beginDuelRun();
+          return;
+        }
+      }
+    }
+    watchOpponent(dt);
+    const r = L.run.rider;
+    const spectating = duel && !duel.myTurn && !duel.over && state === 'duel';
+    let focus = null;
+    if (spectating && duelOpp) {
+      model.root.visible = false;
+      const delay = 140;
+      if (duelOpp.snaps.sample(now, delay, duelFrameBuf)) {
+        const v = frameRider(duelFrameBuf, 0, duelView);
+        const m = duelOpp.model;
+        m.root.visible = true;
+        placeRider(v, L.terrain, v.pos, v.q, m.root.position, m.root.quaternion);
+        m.update(poseFor(v), dt);
+        focus = m.root.position;
+        // Follow the rider from behind their direction of travel.
+        const dir = tmp.subVectors(focus, duelOpp.prev);
+        duelOpp.prev.copy(focus);
+        dir.y = 0;
+        if (dir.lengthSq() > 1e-5) duelOpp.dir = (duelOpp.dir || new THREE.Vector3()).copy(dir).normalize();
+        const d = duelOpp.dir || tmp2.set(0, 0, -1);
+        const want = tmp2.copy(focus).addScaledVector(d, -6.5);
+        want.y = Math.max(focus.y + 2.3, L.terrain.height(want.x, want.z) + 1.2);
+        if (!duelOpp.camPos) duelOpp.camPos = want.clone();
+        duelOpp.camPos.lerp(want, 1 - Math.exp(-dt * 4));
+        camera.position.copy(duelOpp.camPos);
+        spectateLook.copy(focus);
+        spectateLook.y += 0.4;
+        camera.lookAt(spectateLook);
+        $('dh-score').innerHTML = `Watching ${esc(duel.opp.tag)} · <b>${fmt(duelOpp.score)}</b>`;
+      } else {
+        // Not started yet: look at the start gate.
+        if (duelOpp.model) duelOpp.model.root.visible = false;
+        placeRider(r, L.terrain, r.pos, r.q, pivot, model.root.quaternion);
+        focus = pivot;
+        L.chase.update(r, pivot, dt);
+      }
+    } else {
+      if (duelOpp) duelOpp.model.root.visible = false;
+      model.root.visible = true;
+      placeRider(r, L.terrain, r.pos, r.q, model.root.position, model.root.quaternion);
+      model.update({ ...IDLE, crouch: 0.05 + 0.04 * Math.sin(L.time * 1.6) }, dt);
+      pivot.copy(model.root.position);
+      focus = pivot;
+      L.chase.update(r, pivot, dt);
+    }
+    L.world.update(L.time, focus, camera);
+    liveFrame(L, dt);
+    renderer.render(L.world.scene, camera);
+  }
+
+  // ------------------------------------------------------------ parties (Phase 4 step 5)
+  // Leader: head to the party's park (in its private room if switched on),
+  // then tell everyone, who get a GO / STAY prompt.
+  async function partyGo() {
+    if (!party.info || !party.isLeader) return;
+    if (playMode !== 'live') await setPlayMode('live');
+    if (!live) return;
+    const park = party.info.park || parkId;
+    if (!party.info.park) await party.set(park, null).catch(() => {});
+    closeModal();
+    if (duel) leaveDuel();
+    parkId = park;
+    profile.park = park;
+    goRide({ privateKey: party.info.private_room ? party.info.id : null, announce: true, force: true });
+  }
+  party.h.onGo = (m) => {
+    if (!m || !m.park) return;
+    const priv = m.priv ? ' (private room)' : '';
+    setCard('partygo', {
+      big: `${String(m.tag || 'Your leader').slice(0, 18)} is heading to ${PARK_NAME(m.park)}${priv}`,
+      small: duel ? 'Going leaves your duel.' : 'Ride with your party?',
+      buttons: [
+        {
+          label: 'GO',
+          fn: async () => {
+            setCard('partygo', null);
+            if (playMode !== 'live') await setPlayMode('live');
+            if (!live) return;
+            if (duel) leaveDuel();
+            closeModal();
+            parkId = m.park;
+            profile.park = m.park;
+            goRide({ room: m.priv ? null : m.room, privateKey: m.priv ? m.party : null, force: true });
+          },
+        },
+        { label: 'STAY', fn: () => setCard('partygo', null) },
+      ],
+      rebuild: true,
+    });
+  };
+  const leftParty = (id, removed) => {
+    if (removed) toast('The leader removed you from the party. You can rejoin in 10 minutes.', 8000);
+    if (live && live.privateKey && live.privateKey === id) {
+      toast('You left the party, so you left its private room.', 6000);
+      toBasecamp();
+    }
+    syncChat();
+  };
+  party.h.onRemoved = (id) => leftParty(id, true);
+  party.h.onLeft = (id) => leftParty(id, false);
+  const seenInvites = new Set();
+  party.onChange(() => {
+    for (const i of party.invites)
+      if (!seenInvites.has(i.party)) {
+        seenInvites.add(i.party);
+        toast(`${i.inviter} invited you to ${i.leader}'s party. Open Friends to join.`, 7000);
+      }
+    basecamp.refreshFriends(friends);
+    syncChat();
+  });
+
+  function onRoomChange() {
+    syncChat();
+    updateRoomBadge();
+    roster.render();
+    if (parkMap.isOpen) parkMap.select(parkMap.sel);
+  }
+  function updateRoomBadge() {
+    const el = $('roombadge');
+    if (!live || !live.room) {
+      el.classList.add('hidden');
+      return;
+    }
+    const where = live.privateKey ? 'PRIVATE ROOM' : `ROOM ${live.number}`;
+    el.textContent = `${where} · ${live.riders} rider${live.riders === 1 ? '' : 's'} · Tab`;
+    el.classList.remove('hidden');
+  }
+  parkMap.riderCount = (id) => (live && live.lobby ? live.parkCount(id) : null);
+  // Leaving to Basecamp, or signing out, takes you out of the room.
+  account.onChange(() => {
+    if (playMode === 'live' && !identity()) setPlayMode('solo');
+  });
+  async function joinRoomFor(id, opts = {}) {
+    if (!live) return;
+    try {
+      const n = await live.join(id, { room: opts.room || null, privateKey: opts.privateKey || null });
+      toast(opts.privateKey ? `${parkMeta(id).name} · Private party room` : `${parkMeta(id).name} · Room ${n}`, 3000);
+      if (opts.announce) party.go({ park: id, room: n, priv: !!opts.privateKey });
+    } catch (e) {
+      console.warn(e);
+      toast(e.message && /full/i.test(e.message) ? e.message : "Couldn't join a live room. Riding solo for now.");
+    }
+  }
+  const STATUS_OF = { lift: 'lift', riding: 'riding', paused: 'paused', finish: 'results', results: 'results', replay: 'replay', duel: 'duel', duelover: 'duel', reel: 'duel' };
+  // Send your state and place everyone else, every frame you're in a park.
+  function liveFrame(L, dt) {
+    if (!live || !live.room || live.park !== L.id) {
+      if (remotes.entries.size) remotes.clear();
+      L.hud.others = null;
+      duelTick(L, dt);
+      return;
+    }
+    duelTick(L, dt);
+    live.tick(L.run.rider, STATUS_OF[state] || 'lift');
+    remotes.attach(L.world.scene);
+    remotes.update(live, dt, camera, L.terrain);
+    if (duel) remotes.hideUid(duel.opp.uid);
+    L.hud.others = remotes.dots();
+    if (roster.isOpen) {
+      rosterTimer -= dt;
+      if (rosterTimer <= 0) {
+        roster.render();
+        rosterTimer = 1;
+      }
+    }
+  }
+  let rosterTimer = 0;
+  // Idle in a live room: countdown, then back to Basecamp (solo never times out).
+  const idle = new IdleWatch({
+    onTimeout: () => {
+      if (state === 'replay' && replayView.isOpen) replayView.close();
+      toBasecamp();
+      toast('Back in Basecamp: you were idle in a live room.', 8000);
+    },
+  });
+  // Hold Tab for the roster.
+  window.addEventListener('keydown', (e) => {
+    if (e.code !== 'Tab' || !live || !live.room || e.target instanceof HTMLInputElement) return;
+    e.preventDefault();
+    if (!e.repeat && !roster.pinned) roster.show(live);
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.code === 'Tab' && !roster.pinned) roster.hide();
+  });
 
   // Leaderboards (Phase 3 step 4).
   function openBoard() {
@@ -581,7 +1398,8 @@ function boot() {
   }
   $('modal-close').addEventListener('click', closeModal);
 
-  async function goRide() {
+  // opts: { room, privateKey, announce, force } for parties.
+  async function goRide(opts = {}) {
     blurMenus();
     $('musicpop').classList.add('hidden');
     $('music-btn').classList.remove('on');
@@ -602,6 +1420,7 @@ function boot() {
       return;
     }
     loadingScreen.hide();
+    if (live && (opts.force || live.park !== parkId || !live.room)) joinRoomFor(parkId, opts);
     startLift();
   }
 
@@ -657,7 +1476,7 @@ function boot() {
     if (ghostModel.root.parent !== L.world.scene) L.world.scene.add(ghostModel.root);
     ghostModel.root.visible = false;
     const runId = L.run;
-    replayDB.ghost(L.id).then((g) => {
+    if (playMode !== 'live') replayDB.ghost(L.id).then((g) => {
       if (!g || g.version !== SIM_VERSION || loaded !== L || L.run !== runId || state !== 'riding') return;
       // Catch the ghost up to where you are now, so it starts with you.
       ghost = new Ghost(L.terrain, g);
@@ -670,6 +1489,7 @@ function boot() {
   function pause(on) {
     if (on && state === 'riding') {
       state = 'paused';
+      $('pause-roster').classList.toggle('hidden', !(live && live.room));
       showOverlay('pause');
     } else if (!on && state === 'paused') {
       state = 'riding';
@@ -680,6 +1500,10 @@ function boot() {
   }
 
   function startFinish() {
+    if (duel && duelRun) {
+      endDuelRun('finish');
+      return;
+    }
     const L = loaded;
     const res = L.run.results();
     finish = { t: 0, res, face: 0, dir: null };
@@ -737,8 +1561,13 @@ function boot() {
       loaded.chase.snap();
       pause(false);
     }
+    if ((act === 'restart' || act === 'map') && duel) {
+      toast("Not during a duel. Use Back to Basecamp to leave it.");
+      return;
+    }
     if (act === 'restart') startRun();
     if (act === 'map') openMap('paused');
+    if (act === 'roster' && live && live.room) roster.show(live, true);
     if (act === 'settings') openSettings();
     if (act === 'help') $('pause-help').classList.toggle('hidden');
     if (act === 'basecamp') toBasecamp();
@@ -762,6 +1591,31 @@ function boot() {
 
   // Esc steps back one menu level.
   function back() {
+    if (state === 'reel') {
+      endReel();
+      return;
+    }
+    if (state === 'duel' && duel) {
+      if (cards.leave) setCard('leave', null);
+      else
+        setCard('leave', {
+          big: 'Leave the duel?',
+          small: `${duel.opp.tag} will win the runs you don't ride.`,
+          buttons: [
+            { label: 'Stay', fn: () => setCard('leave', null) },
+            {
+              label: 'Leave',
+              fn: () => {
+                setCard('leave', null);
+                leaveDuel();
+                startLift();
+              },
+            },
+          ],
+          rebuild: true,
+        });
+      return;
+    }
     if (state === 'locker') {
       locker.close(false);
       return;
@@ -820,6 +1674,7 @@ function boot() {
     time += dt;
     input.pollFrame();
     stats.update(dt);
+    idle.update(dt, { active: !!(live && live.room) && !duel, state });
     if (state !== reportedState) {
       reportedState = state;
       reportLocation();
@@ -902,9 +1757,17 @@ function boot() {
     const run = L.run;
     const r = run.rider;
 
+    // -------------------------------------------- duel screens
+    if (state === 'duel' || state === 'duelover' || state === 'reel') {
+      duelFrame(L, dt);
+      input.endFrame();
+      return;
+    }
+
     // -------------------------------------------- replay viewer
     if (state === 'replay') {
       placeModel(L.world.scene);
+      if (live && live.room) live.tick(L.run.rider, 'replay');
       replayView.frame(dt, L.time);
       input.endFrame();
       return;
@@ -926,6 +1789,7 @@ function boot() {
         input.endFrame();
         return;
       }
+      liveFrame(L, dt);
       const feet = ride.place(lift.d, L.time, liftPos, liftDir);
       const left = (ride.length - lift.d) / ride.speed;
       $('lift-time').textContent = `${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')} to the top`;
@@ -970,7 +1834,7 @@ function boot() {
     // -------------------------------------------- simulation
     if (state === 'riding' || state === 'finish') {
       if (state === 'riding') {
-        if (input.restartHeld()) {
+        if (input.restartHeld() && !duelRun) {
           restartHold += dt;
           if (restartHold >= 2) {
             restartHold = 0;
@@ -1020,6 +1884,7 @@ function boot() {
         else {
           if (m.type === 'railTrick') sfx.tick();
           L.hud.message(m);
+          if (live && m.type === 'trick' && m.name) live.sendTrick(m.name, m.points);
         }
       }
       run.messages.length = 0;
@@ -1107,6 +1972,7 @@ function boot() {
       L.chase.update(r, pivot, dt);
     }
     L.world.update(L.time, pivot, camera, state === 'riding' ? r : null);
+    liveFrame(L, dt);
     renderer.render(L.world.scene, camera);
     input.endFrame();
   }
@@ -1161,6 +2027,18 @@ function boot() {
     },
     get lastReplay() {
       return lastReplay;
+    },
+    get live() {
+      return live;
+    },
+    remotes,
+    idle,
+    get duel() {
+      return duel;
+    },
+    party,
+    get chat() {
+      return { enabled: chatUI.enabled, open: chatUI.isOpen, topic: chat?.topic || null };
     },
     get lift() {
       return lift;
