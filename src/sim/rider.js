@@ -4,6 +4,7 @@
 import { Vector3, Quaternion, Matrix4 } from 'three';
 import { DT, PHYS, AIR, LAND, CRASH, RAIL, BUTTER, POWDER, PIPE } from './constants.js';
 import { OFF_AXIS } from './tricks.js';
+import * as dm from './dmath.js';
 
 const DEG = Math.PI / 180;
 const DEFAULT_GRABS = ['mute', 'tail', 'japan'];
@@ -272,7 +273,7 @@ export class Rider {
     if (B) {
       B.time += DT;
       // A/D turns the press (up to a half turn); a butter landing carries its spin.
-      B.carry *= Math.exp(-2.2 * DT);
+      B.carry *= dm.exp(-2.2 * DT);
       let rate = -input.steer * BUTTER.turnRate + B.carry;
       const limit = B.fromLanding ? 400 : BUTTER.maxTurn;
       if (Math.abs(B.turned + rate * DT) > limit) rate = 0;
@@ -282,14 +283,14 @@ export class Rider {
     if (!projectOnPlane(this.skiDir, n, _f)) projectOnPlane(this.vel, n, _f);
     this.skiDir.copy(_f);
     if (dYaw !== 0 || butterYaw !== 0) {
-      _q.setFromAxisAngle(n, dYaw + butterYaw * DEG);
+      dm.quatAxisAngle(_q, n, dYaw + butterYaw * DEG);
       this.skiDir.applyQuaternion(_q);
     }
     this.lean += (input.steer * (0.3 + 0.7 * speedT) - this.lean) * Math.min(1, DT * 8);
 
     // Carve: rotate velocity about the normal by the same yaw change.
     if (dYaw !== 0 && !this.braking) {
-      _q.setFromAxisAngle(n, dYaw * PHYS.carveEfficiency);
+      dm.quatAxisAngle(_q, n, dYaw * PHYS.carveEfficiency);
       this.vel.applyQuaternion(_q);
     }
 
@@ -309,7 +310,7 @@ export class Rider {
     // Grip: scrub sideways slip. Powerslides slip more (and that slip is lost speed).
     const lat = this.vel.dot(_r);
     const grip = this.braking || B ? PHYS.gripSlide : PHYS.gripCarve;
-    this.vel.addScaledVector(_r, -lat * (1 - Math.exp(-grip * DT)));
+    this.vel.addScaledVector(_r, -lat * (1 - dm.exp(-grip * DT)));
 
     // Snap the skis toward the travel line after a sideways landing.
     if (this.straighten > 0 && speed > 2) {
@@ -371,7 +372,7 @@ export class Rider {
     }
     if (!input.pop && !released) {
       this.load = Math.max(0, this.load - DT * 4);
-      if (this.pendingPopTimer <= 0) this.windup *= Math.exp(-DT * 2);
+      if (this.pendingPopTimer <= 0) this.windup *= dm.exp(-DT * 2);
     }
     if (this.pendingPopTimer > 0) {
       this.pendingPopTimer -= DT;
@@ -430,7 +431,7 @@ export class Rider {
     const sp = hv.length();
     if (sp < 2) return;
     hv.multiplyScalar(1 / sp);
-    const ang = Math.acos(clamp(hv.dot(_d), -1, 1)) / DEG;
+    const ang = dm.acos(clamp(hv.dot(_d), -1, 1)) / DEG;
     if (ang > RAIL.lipAssistAngle) return; // aim away and you pass by
     // Sideways offset from the rail line, removed smoothly.
     const ox = this.pos.x - _p.x;
@@ -489,7 +490,7 @@ export class Rider {
       fb.normalize();
       _d.normalize();
       const cross = _d.z * fb.x - _d.x * fb.z; // + when the body is turned left of travel
-      stance = Math.round((Math.atan2(cross, _d.dot(fb)) / DEG) / 90) * 90;
+      stance = Math.round((dm.atan2(cross, _d.dot(fb)) / DEG) / 90) * 90;
     }
     if (stance <= -180) stance += 360;
     if (stance > 180) stance -= 360;
@@ -512,7 +513,7 @@ export class Rider {
     _d.y = 0;
     if (_d.lengthSq() < 1e-6) _d.set(0, 0, -1);
     _d.normalize();
-    _q.setFromAxisAngle(UPV, R.stanceVis * DEG);
+    dm.quatAxisAngle(_q, UPV, R.stanceVis * DEG);
     _d.applyQuaternion(_q);
     basisQuat(_d, UPV, this.q);
     this.skiDir.copy(_d);
@@ -624,7 +625,7 @@ export class Rider {
         const out = Math.sign(u);
         const vOut = this.vel.x * out;
         if (vOut > -0.6) {
-          this.vel.y = Math.hypot(Math.max(0, this.vel.y), Math.max(0, vOut) * 0.95);
+          this.vel.y = dm.hypot(Math.max(0, this.vel.y), Math.max(0, vOut) * 0.95);
           this.vel.x = -out * 0.6;
         }
         uphill = false;
@@ -758,8 +759,8 @@ export class Rider {
       }
       if (spinIn) {
         const rate = AIR.offAxisRate * boost;
-        const s = Math.sin(air.tilt * DEG) * rate;
-        const c = Math.cos(air.tilt * DEG) * rate;
+        const s = dm.sin(air.tilt * DEG) * rate;
+        const c = dm.cos(air.tilt * DEG) * rate;
         if (fam === 'flat') target.set(0, spinIn * c, air.rollSign * s);
         else target.set(air.flipSign * s, spinIn * c, 0);
       }
@@ -772,10 +773,10 @@ export class Rider {
     }
 
     if (opening) target.multiplyScalar(AIR.openTargetScale);
-    const kUp = 1 - Math.exp(-AIR.spinUpRate * (grabbing ? AIR.grabSpinUp : 1) * DT);
-    let kDown = 1 - Math.exp(-AIR.spinDownRate * DT);
-    if (grabbing) kDown = 1 - Math.exp(-AIR.grabHoldDecay * DT); // tucked tight: keep turning
-    else if (opening || !anyRot) kDown = 1 - Math.exp(-AIR.openDamp * DT); // opened up: slow right down
+    const kUp = 1 - dm.exp(-AIR.spinUpRate * (grabbing ? AIR.grabSpinUp : 1) * DT);
+    let kDown = 1 - dm.exp(-AIR.spinDownRate * DT);
+    if (grabbing) kDown = 1 - dm.exp(-AIR.grabHoldDecay * DT); // tucked tight: keep turning
+    else if (opening || !anyRot) kDown = 1 - dm.exp(-AIR.openDamp * DT); // opened up: slow right down
     // While opening up, every axis slows (even with a key still held).
     const kx = target.x !== 0 && !opening ? kUp : kDown;
     const ky = target.y !== 0 && !opening ? kUp : kDown;
@@ -816,10 +817,10 @@ export class Rider {
 
   // Rotate the body about its own axes (degrees) and add to the trick record.
   _rotateBody(dx, dy, dz) {
-    const ang = Math.hypot(dx, dy, dz);
+    const ang = dm.hypot(dx, dy, dz);
     if (ang < 1e-9) return;
     _b.set(dx / ang, dy / ang, dz / ang);
-    _q.setFromAxisAngle(_b, ang * DEG);
+    dm.quatAxisAngle(_q, _b, ang * DEG);
     this.q.multiply(_q).normalize();
     this.air.spin += dy;
     this.air.flip += dx;
@@ -838,14 +839,14 @@ export class Rider {
     } else {
       const d = _r.dot(_g);
       const sign = d >= 0 ? 1 : -1;
-      const folded = Math.acos(clamp(Math.abs(d), 0, 1)) / DEG;
+      const folded = dm.acos(clamp(Math.abs(d), 0, 1)) / DEG;
       // More help lining up on a pipe wall, where the travel line bends a lot in the air.
       const help = this.terrain.cross.type === 'pipe' && n.y < PIPE.wallSlope ? 65 : 40;
       if (folded < help) target = _g.multiplyScalar(sign);
       else target = _r; // too far round: just level out, keep the yaw
     }
     basisQuat(target.clone(), n, _q2);
-    if (pitch) _q2.multiply(_q.setFromAxisAngle(_a.set(1, 0, 0), pitch * DEG));
+    if (pitch) _q2.multiply(dm.quatAxisAngle(_q, _a.set(1, 0, 0), pitch * DEG));
     // Body-frame delta from current to target, limited by the align rate.
     const maxStep = AIR.alignRate * DEG * DT;
     _q.copy(this.q).invert().multiply(_q2); // delta in body frame
@@ -855,7 +856,7 @@ export class Rider {
       _q.z = -_q.z;
       _q.w = -_q.w;
     }
-    const angle = 2 * Math.acos(clamp(_q.w, -1, 1));
+    const angle = 2 * dm.acos(clamp(_q.w, -1, 1));
     if (angle < 1e-5) return;
     const sinH = Math.sqrt(Math.max(1e-12, 1 - _q.w * _q.w));
     const step = Math.min(angle, maxStep);
@@ -869,14 +870,14 @@ export class Rider {
     const n = t.normal(this.pos.x, this.pos.z, _n);
 
     const bodyUp = _a.set(0, 1, 0).applyQuaternion(this.q);
-    const tiltErr = Math.acos(clamp(bodyUp.dot(n), -1, 1)) / DEG;
+    const tiltErr = dm.acos(clamp(bodyUp.dot(n), -1, 1)) / DEG;
 
     const fbRaw = _f.set(0, 0, -1).applyQuaternion(this.q);
-    const pitchErr = Math.asin(clamp(Math.abs(fbRaw.dot(n)), 0, 1)) / DEG;
+    const pitchErr = dm.asin(clamp(Math.abs(fbRaw.dot(n)), 0, 1)) / DEG;
     const hasFb = projectOnPlane(fbRaw, n, _r);
     const hasTravel = projectOnPlane(this.vel, n, _g);
     let yawErr = 0;
-    if (hasFb && hasTravel) yawErr = Math.acos(clamp(_r.dot(_g), -1, 1)) / DEG;
+    if (hasFb && hasTravel) yawErr = dm.acos(clamp(_r.dot(_g), -1, 1)) / DEG;
     const switchLand = yawErr > 90;
     const folded = Math.min(yawErr, 180 - yawErr);
 

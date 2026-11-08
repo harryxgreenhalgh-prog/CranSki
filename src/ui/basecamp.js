@@ -1,6 +1,7 @@
 // Basecamp lobby: tabs, cards, lift pass, mode picker and footer links.
 import { parkMeta } from '../parks/index.js';
 import { profile } from '../store.js';
+import { account } from '../online/account.js';
 import { UPDATES } from './pages.js';
 
 const $ = (id) => document.getElementById(id);
@@ -17,7 +18,7 @@ const CHALLENGES = [
 ];
 
 export class Basecamp {
-  constructor({ onRide, onTab, onPage, onGear, onMusic }) {
+  constructor({ onRide, onTab, onPage, onGear, onMusic, onAccount, onFriends }) {
     $('ride').addEventListener('click', onRide);
     document.querySelectorAll('#basecamp .tabs button').forEach((b) =>
       b.addEventListener('click', () => {
@@ -28,9 +29,15 @@ export class Basecamp {
     document.querySelectorAll('#basecamp .footlinks button').forEach((b) => b.addEventListener('click', () => onPage(b.dataset.page)));
     $('gear-btn').addEventListener('click', onGear);
     $('music-btn').addEventListener('click', onMusic);
-    $('friends-btn').addEventListener('click', () => onPage('online'));
+    $('friends-btn').addEventListener('click', () => (onFriends ? onFriends() : onPage('online')));
+    $('account-btn').addEventListener('click', onAccount);
     const name = $('rider-name');
+    // Signed in, the lift pass shows your gamertag; change it from Account.
+    name.addEventListener('click', () => {
+      if (account.ready) onAccount();
+    });
     name.addEventListener('change', () => {
+      if (account.ready) return;
       profile.name = name.value;
       name.value = profile.name;
     });
@@ -58,9 +65,28 @@ export class Basecamp {
     return !$('basecamp').classList.contains('hidden');
   }
 
+  refreshAccount() {
+    const btn = $('account-btn');
+    const s = account.status;
+    btn.textContent = s === 'starting' ? '…' : account.ready ? account.gamertag : account.signedIn ? 'Pick a gamertag' : 'Sign in';
+    btn.classList.toggle('on', account.signedIn);
+    const name = $('rider-name');
+    name.readOnly = account.ready;
+    name.title = account.ready ? 'Your gamertag (change it in Account)' : 'Rider name';
+    if (document.activeElement !== name) name.value = account.ready ? account.gamertag : profile.name;
+    $('pc-mode').textContent = account.ready ? 'ONLINE' : 'SOLO';
+  }
+
+  refreshFriends(f) {
+    const btn = $('friends-btn');
+    const online = f.online.length;
+    const asks = f.incoming.length;
+    btn.innerHTML = `Friends${online ? ` <span class="fcount" title="Friends online">${online}</span>` : ''}${asks ? ` <span class="fbadge" title="Friend requests">${asks}</span>` : ''}`;
+  }
+
   refresh() {
     $('frost').textContent = fmt(profile.frost);
-    $('rider-name').value = profile.name;
+    this.refreshAccount();
     const runs = profile.runs;
     $('pc-runs').textContent = `${runs.length} run${runs.length === 1 ? '' : 's'}`;
     const u = UPDATES[0];

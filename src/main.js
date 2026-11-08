@@ -30,6 +30,13 @@ import { Music } from './audio/music.js';
 import { LoadingScreen } from './ui/loading.js';
 import { loadAssets, ASSETS, preloadScenes, sceneCopy, modelBounds } from './render/assets.js';
 import { placeRider, poseFor } from './render/pose.js';
+import { account, resumeAccount, displayName, signOut } from './online/account.js';
+import { mountAccount, addAccountSection, esc } from './ui/accountUI.js';
+import { cloud, cloudStatusText } from './online/cloud.js';
+import { friends, onFriends, setLocation } from './online/friends.js';
+import { mountFriends } from './ui/friendsUI.js';
+import { canPost, submitRun } from './online/leaderboard.js';
+import { mountBoard } from './ui/boardUI.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -196,9 +203,12 @@ function boot() {
       else if (tab === 'updates') openPage('updates');
       else if (tab === 'replays') openReplays();
       else if (tab === 'locker') openLocker();
+      else if (tab === 'leaderboard') openBoard();
       else openPage('online');
     },
     onPage: (p) => openPage(p),
+    onAccount: () => openAccount(),
+    onFriends: () => openFriends(),
     onGear: () => openSettings(),
     onMusic: () => {
       $('musicpop').classList.toggle('hidden');
@@ -229,6 +239,7 @@ function boot() {
     model.root.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI - 0.35);
     model.root.visible = true;
     basecamp.show();
+    maybeWelcome();
   }
 
   function openMap(from) {
@@ -262,10 +273,109 @@ function boot() {
           /* nothing stored */
         }
         $('wipe-data').textContent = 'Deleted';
+        // The sign-in session lived in that storage too: sign out properly.
+        if (account.signedIn) signOut().catch(() => {});
         basecamp.refresh();
       });
+      $('privacy-account')?.addEventListener('click', () => openAccount());
     }
   }
+
+  // ------------------------------------------------------------ account (Phase 3)
+  function openAccount() {
+    openModal('Account', '<div class="acct" id="acct"></div>');
+    mountAccount($('acct'), { onPrivacy: () => openPage('privacy') });
+  }
+  function toast(text, ms = 6000) {
+    $('toast-text').textContent = text;
+    $('toast-btn').classList.add('hidden');
+    $('toast').classList.remove('hidden');
+    clearTimeout(toast.t);
+    toast.t = setTimeout(() => {
+      $('toast').classList.add('hidden');
+      $('toast-btn').classList.remove('hidden');
+    }, ms);
+  }
+  // Back from a sign-in link: welcome, or ask for a gamertag first.
+  function maybeWelcome() {
+    if (state !== 'basecamp' || !$('modal').classList.contains('hidden')) return;
+    if (account.notice) openAccount();
+    else if (account.justSignedIn) {
+      account.justSignedIn = false;
+      if (account.ready) toast(`Signed in as ${account.gamertag}`);
+      else openAccount();
+    } else if (account.signedIn && !account.profile && !maybeWelcome.asked) {
+      maybeWelcome.asked = true;
+      openAccount();
+    }
+  }
+  account.onChange(() => {
+    basecamp.refreshAccount();
+    maybeWelcome();
+  });
+  // Friends (Phase 3 step 3).
+  function openFriends() {
+    openModal('Friends', '<div class="acct friends" id="friends-panel"></div>');
+    mountFriends($('friends-panel'), { onAccount: () => openAccount() });
+  }
+  onFriends(() => basecamp.refreshFriends(friends));
+  // Tell friends where you are: Basecamp, a lift, a run or a replay.
+  function reportLocation() {
+    const park = loaded ? loaded.id : parkId;
+    if (state === 'lift') setLocation('lift', parkId);
+    else if (state === 'riding' || state === 'paused' || state === 'finish' || state === 'results') setLocation('riding', park);
+    else if (state === 'replay') setLocation('replay', park);
+    else if (state !== 'loading' && state !== 'boot') setLocation('basecamp');
+  }
+
+  // Leaderboards (Phase 3 step 4).
+  function openBoard() {
+    openModal('Leaderboard', '<div class="boardwrap" id="board-panel"></div>');
+    mountBoard($('board-panel'), { park: loaded ? loaded.id : parkId, onAccount: () => openAccount() });
+  }
+  const fmtN = (n) => Math.round(n).toLocaleString('en-US');
+  // Every finished run on a leaderboard park is posted while signed in; the
+  // server re-rides it and only counts it if the score comes out the same.
+  async function postRun(rec) {
+    const el = $('res-board');
+    const name = parkMeta(rec.park).name;
+    if (!canPost(rec)) {
+      el.textContent = '';
+      return;
+    }
+    if (!account.ready) {
+      el.innerHTML = `<button class="btn sm" data-post="signin">${account.signedIn ? 'Pick a gamertag' : 'Sign in'}</button> to post this run to the ${name} leaderboard`;
+      el.querySelector('[data-post]').addEventListener('click', () => openAccount());
+      return;
+    }
+    if (rec.posting || rec.posted) return;
+    rec.posting = true;
+    el.textContent = 'Checking your run on the server…';
+    const r = await submitRun(rec);
+    rec.posting = false;
+    if (lastReplay !== rec) return;
+    if (r.ok) {
+      rec.posted = true;
+      el.innerHTML = `✓ Checked by the server · <b>#${r.rank}</b> on ${name}${r.improved ? ' · new leaderboard best' : ` · your board best is ${fmtN(r.best)}`}`;
+    } else {
+      el.textContent = r.message + (r.error === 'mismatch' && r.serverTotal != null ? ` (Server got ${fmtN(r.serverTotal)}.)` : '');
+      if (r.error === 'network' || r.error === 'server_error') {
+        el.insertAdjacentHTML('beforeend', ' <button class="btn sm" data-post="retry">Try again</button>');
+        el.querySelector('[data-post]').addEventListener('click', () => postRun(rec));
+      }
+    }
+  }
+  account.onChange(() => {
+    if (state === 'results' && lastReplay && account.ready && !lastReplay.posted && !lastReplay.posting) postRun(lastReplay);
+  });
+
+  // Cloud saves (Phase 3 step 2): show the status, and apply what arrives.
+  addAccountSection(() => `<h3>CLOUD SAVE</h3><p class="muted">${esc(cloudStatusText())}</p>`);
+  cloud.onApplied = (changed) => {
+    if (changed.look && state !== 'locker') model.applyLook(look());
+    if (basecamp.visible) basecamp.refresh();
+  };
+  resumeAccount();
 
   let settingsReturn = null;
   const settingsUI = new SettingsUI({
@@ -418,14 +528,24 @@ function boot() {
     const rows = list.length
       ? list
           .map(
-            (r) => `<tr><td><b>${parkMeta(r.park).name}</b><br><span class="muted">${new Date(r.date).toLocaleString()}</span></td><td>${r.total.toLocaleString('en-US')}<br><span class="muted">${r.bestTrick || '—'}</span></td><td>${r.version === SIM_VERSION ? `<button class="btn sm" data-watch="${r.id}">Watch</button> <button class="btn sm" data-clip="${r.id}">Clip</button>` : '<span class="muted">older version</span>'} <button class="btn sm" data-keep="${r.id}">${r.saved ? 'Kept ★' : 'Keep'}</button> <button class="btn sm" data-del="${r.id}">Delete</button></td></tr>`
+            (r) => `<tr><td><b>${parkMeta(r.park).name}</b><br><span class="muted">${new Date(r.date).toLocaleString()}</span></td><td>${r.total.toLocaleString('en-US')}<br><span class="muted">${r.bestTrick || '—'}</span></td><td>${r.version === SIM_VERSION ? `<button class="btn sm" data-watch="${r.id}">Watch</button> <button class="btn sm" data-clip="${r.id}">Clip</button>` : '<span class="muted">older version</span>'} ${account.ready && canPost(r) ? `<button class="btn sm" data-post="${r.id}">Post</button>` : ''} <button class="btn sm" data-keep="${r.id}">${r.saved ? 'Kept ★' : 'Keep'}</button> <button class="btn sm" data-del="${r.id}">Delete</button></td></tr>`
           )
           .join('')
       : '<tr><td class="muted">No replays yet. Your last 5 runs are saved here automatically.</td></tr>';
-    openModal('Replays', `<p class="muted">Your last 5 runs are kept automatically; Keep a replay to hold on to it. Your best run on each park is saved as a ghost you race next time. Everything stays in this browser.</p><table class="rlist">${rows}</table>`);
+    openModal('Replays', `<p class="muted">Your last 5 runs are kept automatically; Keep a replay to hold on to it. Your best run on each park is saved as a ghost you race next time. Replays stay in this browser; Post sends a run's inputs to the leaderboard server to be checked.</p><table class="rlist">${rows}</table>`);
     const body = $('modal-body');
     body.querySelectorAll('[data-watch]').forEach((b) => b.addEventListener('click', async () => watchReplay(await replayDB.get(Number(b.dataset.watch)), 'basecamp')));
     body.querySelectorAll('[data-clip]').forEach((b) => b.addEventListener('click', async () => watchReplay(await replayDB.get(Number(b.dataset.clip)), 'basecamp', true)));
+    body.querySelectorAll('[data-post]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        b.disabled = true;
+        b.textContent = 'Checking…';
+        const r = await submitRun(await replayDB.get(Number(b.dataset.post)));
+        b.textContent = r.ok ? `#${r.rank} ✓` : 'Not posted';
+        b.title = r.ok ? 'Checked by the server and posted' : r.message;
+        if (!r.ok) b.insertAdjacentHTML('afterend', `<br><span class="muted small">${esc(r.message)}</span>`);
+      })
+    );
     body.querySelectorAll('[data-keep]').forEach((b) =>
       b.addEventListener('click', async () => {
         const r = await replayDB.get(Number(b.dataset.keep));
@@ -572,7 +692,7 @@ function boot() {
       version: SIM_VERSION,
       total: res.total,
       bestTrick: res.bestTrick?.name || null,
-      name: profile.name,
+      name: displayName(profile.name),
       inputs: recorder.data(),
       grabSlots: L.run.rider.grabSlots.slice(),
       board: L.run.rider.board,
@@ -598,6 +718,8 @@ function boot() {
     profile.addRun({ park: L.id, total: res.total, date: Date.now(), best: res.bestTrick?.name || null });
     showResults(res, Math.max(best, res.total), isNew);
     $('res-frost').textContent = frost > 0 ? `+${frost} FROST earned` : 'Daily FROST cap reached (100 a day)';
+    if (lastReplay) postRun(lastReplay);
+    else $('res-board').textContent = '';
     $('finishcard').classList.add('hidden');
     state = 'results';
     showOverlay('results');
@@ -683,6 +805,7 @@ function boot() {
   const IDLE = { crouch: 0.05, tuck: 0, legsUp: 0, lean: 0, look: 0, armsOut: 0, grab: null, grabSide: 1 };
 
   let lastDraw = 0;
+  let reportedState = null;
   let lastVy = 0;
   let slowFrames = 0;
   let fastFrames = 0;
@@ -696,6 +819,10 @@ function boot() {
     time += dt;
     input.pollFrame();
     stats.update(dt);
+    if (state !== reportedState) {
+      reportedState = state;
+      reportLocation();
+    }
     {
       const R = loaded?.run?.rider;
       const live = (state === 'riding' || state === 'finish') && R;
@@ -1030,6 +1157,9 @@ function boot() {
     pivot,
     get state() {
       return state;
+    },
+    get lastReplay() {
+      return lastReplay;
     },
     get lift() {
       return lift;

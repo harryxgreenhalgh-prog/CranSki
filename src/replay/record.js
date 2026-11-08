@@ -3,7 +3,7 @@
 
 // Bump this whenever the simulation changes in a way that alters runs:
 // replays and ghosts from an older version can't be re-ridden.
-export const SIM_VERSION = 8;
+export const SIM_VERSION = 9;
 
 export function encodeInput(i) {
   let v = 0;
@@ -97,4 +97,25 @@ export class InputStream {
   marksAt(step) {
     return this.marks.filter((m) => m.step === step);
   }
+}
+
+// Recorded inputs as text (base64 of little-endian 16-bit values), for sending
+// a run to the leaderboard server.
+export function packRuns(runs) {
+  const bytes = new Uint8Array(runs.length * 2);
+  for (let i = 0; i < runs.length; i++) {
+    bytes[2 * i] = runs[i] & 255;
+    bytes[2 * i + 1] = runs[i] >>> 8;
+  }
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+export function unpackRuns(text) {
+  const bin = atob(text);
+  if (bin.length % 2) throw new Error('Bad input data');
+  const out = new Uint16Array(bin.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8);
+  return out;
 }

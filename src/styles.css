@@ -1840,3 +1840,264 @@ body.touching #footer .credits {
 .pause-music span {
   flex: 1;
 }
+
+/* ---------------------------------------------------------------- account (Phase 3) */
+.pill.on {
+  background: var(--blue);
+  border-color: transparent;
+}
+
+.acct {
+  max-width: 560px;
+}
+
+.acct-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.acct-form input,
+.acct input[type='search'] {
+  flex: 1 1 220px;
+  min-width: 0;
+  font: inherit;
+  font-size: 16px; /* no zoom-on-focus on phones */
+  padding: 9px 12px;
+  color: var(--ink);
+  background: #fff;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  outline: none;
+}
+
+.acct-form input:focus,
+.acct input[type='search']:focus {
+  border-color: var(--blue);
+}
+
+.acct-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.acct-msg {
+  min-height: 1.4em;
+  margin: 4px 0;
+  font-weight: 700;
+}
+
+.acct-msg.good {
+  color: var(--green);
+}
+
+.acct-msg.bad {
+  color: #ff8a8a;
+}
+
+.acct-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin: 6px 0 12px;
+}
+
+.acct-tag {
+  font-family: var(--brush);
+  font-size: 28px;
+  letter-spacing: 0.02em;
+}
+
+.small {
+  font-size: 12px;
+}
+
+#rider-name[readonly] {
+  cursor: pointer;
+}
+
+#account-btn {
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1400px) {
+  .topright .brand {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------- friends */
+.flist {
+  list-style: none;
+  margin: 6px 0 10px;
+  padding: 0;
+}
+
+.flist li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--panel-line);
+}
+
+.fname {
+  font-weight: 800;
+  font-size: 15px;
+}
+
+.fwhere {
+  flex: 1;
+  min-width: 120px;
+}
+
+.fdot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+  flex: none;
+}
+
+.fdot.on {
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+}
+
+.fcheck {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn.ghost {
+  background: transparent;
+}
+
+.fcount,
+.fbadge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 2px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--ink);
+  background: var(--green);
+}
+
+.fbadge {
+  color: #fff;
+  background: var(--orange);
+}
+
+/* ---------------------------------------------------------------- leaderboards */
+.seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 10px;
+}
+
+.seg button {
+  font: inherit;
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--paper);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--panel-line);
+  border-radius: 999px;
+  padding: 5px 11px;
+  cursor: pointer;
+}
+
+.seg button.on {
+  background: var(--blue);
+  border-color: transparent;
+}
+
+.board {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.board th {
+  text-align: left;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  padding: 4px 6px;
+}
+
+.board td {
+  padding: 7px 6px;
+  border-top: 1px solid var(--panel-line);
+}
+
+.board tr.me td {
+  background: rgba(30, 123, 255, 0.28);
+}
+
+.board-me {
+  margin: 8px 0;
+}
+
+.boardline {
+  min-height: 1.4em;
+  margin: 6px 0 2px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+@media (max-width: 560px) {
+  .hide-narrow {
+    display: none;
+  }
+}
+
+.btn.danger {
+  background: var(--red);
+  border-color: transparent;
+  color: #fff;
+}
+
+.ptable {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 6px 0 10px;
+  font-size: 13px;
+}
+
+.ptable th {
+  text-align: left;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  padding: 4px 8px 4px 0;
+}
+
+.ptable td {
+  vertical-align: top;
+  padding: 7px 8px 7px 0;
+  border-top: 1px solid var(--panel-line);
+}
+
+.ptable td:last-child {
+  width: 34%;
+  color: var(--muted);
+}

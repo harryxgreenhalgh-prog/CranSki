@@ -2,6 +2,7 @@
 //
 //   base  = 1500 x turns^2
 //   trick = base x grab x flip x switch x repeat + airtime
+import * as dm from './dmath.js';
 
 export const SCORE = {
   basePerTurn2: 1500,
@@ -74,7 +75,7 @@ export function scoreTrick(trick, air, history = []) {
   if (trick.turns > 0) {
     base = SCORE.basePerTurn2 * trick.turns * trick.turns;
     grab = grabMultiplier(trick.grabs.length, trick.longestGrab);
-    flip = Math.pow(trick.invertBonus ?? SCORE.invertBonus, trick.inversions);
+    flip = dm.pow(trick.invertBonus ?? SCORE.invertBonus, trick.inversions);
     sw = trick.switchStance ? SCORE.switchBonus : 1;
   } else {
     base = SCORE.grabOnly; // a grab with no spin or flip

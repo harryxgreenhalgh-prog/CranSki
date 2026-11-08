@@ -2,6 +2,7 @@
 // finish) to the top station (above the start gate), towers along it, and a
 // sagging cable between tower tops. Pure data, shared by the simulation (to clear
 // trees out of the lift line) and the renderer.
+import * as dm from './dmath.js';
 
 // Real-world speeds: a gondola runs at about 6 m/s, an aerial ropeway about
 // 10 m/s, and a T-bar drag lift about 3 m/s.
@@ -40,7 +41,7 @@ export function liftLayout(terrain) {
     for (let i = 0; i < towers.length - 1; i++) {
       const a = towers[i];
       const b = towers[i + 1];
-      const span = Math.hypot(b.s - a.s, b.g - a.g);
+      const span = dm.hypot(b.s - a.s, b.g - a.g);
       const sag = spec.type === 'tbar' ? span * 0.01 : span * 0.025;
       const steps = Math.max(2, Math.ceil(span / 2));
       for (let j = 0; j < steps; j++) {
