@@ -148,6 +148,17 @@ export class RiderModel {
     };
   }
 
+  // Ghost: see-through and pale blue.
+  makeGhost() {
+    const mat = new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.35, depthWrite: false });
+    this.root.traverse((o) => {
+      if (o.isMesh) {
+        o.material = mat;
+        o.castShadow = false;
+      }
+    });
+  }
+
   // target: { crouch, tuck, legsUp, lean, look, armsOut, grab(name|null), grabSide }
   update(target, dt) {
     const p = this.pose;

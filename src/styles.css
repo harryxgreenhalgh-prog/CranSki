@@ -1470,3 +1470,115 @@ body.touching #footer {
 body.touching #footer .credits {
   display: none;
 }
+
+/* ---------------------------------------------------------------- replays */
+#replaybar {
+  position: absolute;
+  left: 50%;
+  bottom: 40px;
+  transform: translateX(-50%);
+  width: min(760px, 96vw);
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
+  border-radius: 14px;
+  padding: 8px 12px;
+  display: grid;
+  gap: 6px;
+  z-index: 3;
+}
+
+#rp-title {
+  font-family: var(--brush);
+  font-style: italic;
+  font-size: 16px;
+}
+
+.rp-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+#rp-time {
+  flex: 1;
+}
+
+#rp-clock {
+  font: 12px ui-monospace, Menlo, monospace;
+}
+
+.rp-help {
+  font-size: 11px;
+}
+
+.cliprow {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 10px 0;
+  font-size: 13px;
+}
+
+.cliprow select {
+  font: inherit;
+  margin-left: 6px;
+}
+
+#clip {
+  z-index: 4;
+}
+
+#clip-segs {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+#clip-result {
+  margin-top: 10px;
+}
+
+#exporting {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  background: rgba(9, 22, 44, 0.85);
+}
+
+#exporting progress {
+  width: min(420px, 80vw);
+}
+
+#ghosttag {
+  position: absolute;
+  left: 16px;
+  top: 14px;
+  font-size: 12px;
+  font-weight: 800;
+  background: rgba(159, 216, 255, 0.25);
+  border: 1px solid rgba(159, 216, 255, 0.6);
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+
+.rlist {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.rlist td {
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--panel-line);
+}
+
+.rlist td:last-child {
+  text-align: right;
+  white-space: nowrap;
+}

@@ -151,9 +151,9 @@
             <div><span>Best trick</span><b id="res-trick">—</b></div>
           </div>
           <div class="buttons">
-            <button class="btn" data-act="replay" disabled title="Replays arrive in a later step">Watch replay</button>
-            <button class="btn" data-act="save" disabled title="Replays arrive in a later step">Save replay</button>
-            <button class="btn" data-act="clip" disabled title="Clips arrive in a later step">Clip</button>
+            <button class="btn" data-act="replay">Watch replay</button>
+            <button class="btn" data-act="save">Save replay</button>
+            <button class="btn" data-act="clip">Clip</button>
             <button class="btn primary" data-act="again">Ride again <kbd>Enter</kbd></button>
             <button class="btn" data-act="map">Map</button>
           </div>
@@ -180,6 +180,46 @@
       </div>
       <div id="touch-editor" class="hidden"></div>
       <div id="toast" class="hidden"><span id="toast-text"></span><button class="btn sm" id="toast-btn">Undo</button></div>
+
+      <!-- Replay viewer -->
+      <div id="replaybar" class="hidden">
+        <div id="rp-title"></div>
+        <div class="rp-row">
+          <button class="btn sm" id="rp-play" aria-label="Play or pause">❚❚</button>
+          <input id="rp-time" type="range" min="0" max="1000" value="0" aria-label="Seek" />
+          <span id="rp-clock">0:00 / 0:00</span>
+        </div>
+        <div class="rp-row">
+          <button class="btn sm" id="rp-cam">Broadcast <kbd>C</kbd></button>
+          <button class="btn sm" id="rp-freeze">Freeze <kbd>F</kbd></button>
+          <button class="btn sm" id="rp-save">Save replay</button>
+          <button class="btn sm" id="rp-clip">Clip</button>
+          <button class="btn sm" id="rp-exit">Exit <kbd>Esc</kbd></button>
+        </div>
+        <div class="muted rp-help">Space play/pause · ←/→ seek · C camera · Free cam: W A S D, Q/E, drag to look, T to track</div>
+      </div>
+      <section id="clip" class="overlay hidden">
+        <div class="panel">
+          <div class="modal-head"><h2>CLIP</h2><button class="btn" id="clip-close">Close</button></div>
+          <p class="muted">Auto edit: cuts in before every jump and rail. Untick sections to trim, or keep the whole run.</p>
+          <label class="check"><input type="checkbox" id="clip-whole" /> Whole run</label>
+          <div id="clip-segs"></div>
+          <div class="cliprow">
+            <label>Format <select id="clip-format"><option value="wide">Wide 16:9</option><option value="vertical">Vertical 9:16</option></select></label>
+            <label>Camera <select id="clip-cam"><option>Broadcast</option><option selected>Cinematic</option><option>Follow</option><option>Action cam</option><option>Drone</option></select></label>
+            <label class="check"><input type="checkbox" id="clip-text" checked /> Trick text</label>
+          </div>
+          <p class="muted" id="clip-mime"></p>
+          <div class="buttons"><button class="btn primary" id="clip-export">Export clip</button></div>
+          <div id="clip-result"></div>
+        </div>
+      </section>
+      <div id="exporting" class="hidden">
+        <b>Rendering clip on this device…</b>
+        <progress id="clip-progress" max="1" value="0"></progress>
+        <button class="btn sm" id="clip-cancel">Cancel</button>
+      </div>
+      <div id="ghosttag" class="hidden"></div>
 
       <!-- Pages and panels (About, How to play, Credits, coming-later tabs...) -->
       <section id="modal" class="overlay hidden">

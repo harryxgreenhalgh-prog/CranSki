@@ -18,6 +18,11 @@ import { profile, load } from './store.js';
 import { settings, saveSettings, looksLowEnd } from './settings.js';
 import { SettingsUI, StatsOverlay } from './ui/settings.js';
 import { TouchControls, TouchEditor, isTouchDevice } from './ui/touch.js';
+import { Recorder, SIM_VERSION } from './replay/record.js';
+import { replayDB } from './replay/db.js';
+import { Ghost } from './replay/player.js';
+import { ReplayView } from './ui/replayUI.js';
+import { placeRider, poseFor } from './render/pose.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -71,6 +76,11 @@ function boot() {
 
   const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 6000);
   const model = new RiderModel();
+  const ghostModel = new RiderModel();
+  ghostModel.makeGhost();
+  const recorder = new Recorder();
+  let ghost = null;
+  let lastReplay = null;
   const input = new Input(window);
   const basecampScene = buildBasecamp();
 
@@ -159,7 +169,8 @@ function boot() {
     onTab: (tab) => {
       if (tab === 'ride') openMap('basecamp');
       else if (tab === 'updates') openPage('updates');
-      else if (tab === 'locker' || tab === 'replays') openSoon(tab === 'locker' ? 'Locker' : 'Replays');
+      else if (tab === 'replays') openReplays();
+      else if (tab === 'locker') openSoon('Locker');
       else openPage('online');
     },
     onPage: (p) => openPage(p),
@@ -264,6 +275,75 @@ function boot() {
   }
   const stats = new StatsOverlay(renderer);
 
+  // ------------------------------------------------------------ replays
+  let replayReturn = 'basecamp';
+  const replayView = new ReplayView({
+    renderer,
+    camera,
+    model,
+    onExit: () => {
+      ghostModel.root.visible = false;
+      if (replayReturn === 'results') {
+        state = 'results';
+        showOverlay('results');
+        loaded.hud.show(false);
+      } else toBasecamp();
+    },
+  });
+
+  async function watchReplay(record, from, thenClip = false) {
+    replayReturn = from;
+    if (!loaded || loaded.id !== record.park) {
+      basecamp.hide();
+      showOverlay(null);
+      state = 'loading';
+      $('liftbar').classList.remove('hidden');
+      $('lift-name').textContent = 'LOADING';
+      await loadPark(record.park);
+      $('liftbar').classList.add('hidden');
+    }
+    basecamp.hide();
+    showOverlay(null);
+    $('finishcard').classList.add('hidden');
+    placeModel(loaded.world.scene);
+    ghostModel.root.visible = false;
+    const err = replayView.open(record, loaded);
+    if (err) {
+      openModal('Replay', `<p>${err}</p>`);
+      return;
+    }
+    state = 'replay';
+    if (thenClip) replayView.openClip();
+  }
+
+  async function openReplays() {
+    const list = await replayDB.all();
+    const rows = list.length
+      ? list
+          .map(
+            (r) => `<tr><td><b>${parkMeta(r.park).name}</b><br><span class="muted">${new Date(r.date).toLocaleString()}</span></td><td>${r.total.toLocaleString('en-US')}<br><span class="muted">${r.bestTrick || '—'}</span></td><td>${r.version === SIM_VERSION ? `<button class="btn sm" data-watch="${r.id}">Watch</button> <button class="btn sm" data-clip="${r.id}">Clip</button>` : '<span class="muted">older version</span>'} <button class="btn sm" data-keep="${r.id}">${r.saved ? 'Kept ★' : 'Keep'}</button> <button class="btn sm" data-del="${r.id}">Delete</button></td></tr>`
+          )
+          .join('')
+      : '<tr><td class="muted">No replays yet. Your last 5 runs are saved here automatically.</td></tr>';
+    openModal('Replays', `<p class="muted">Your last 5 runs are kept automatically; Keep a replay to hold on to it. Your best run on each park is saved as a ghost you race next time. Everything stays in this browser.</p><table class="rlist">${rows}</table>`);
+    const body = $('modal-body');
+    body.querySelectorAll('[data-watch]').forEach((b) => b.addEventListener('click', async () => watchReplay(await replayDB.get(Number(b.dataset.watch)), 'basecamp')));
+    body.querySelectorAll('[data-clip]').forEach((b) => b.addEventListener('click', async () => watchReplay(await replayDB.get(Number(b.dataset.clip)), 'basecamp', true)));
+    body.querySelectorAll('[data-keep]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        const r = await replayDB.get(Number(b.dataset.keep));
+        await replayDB.setSaved(r.id, !r.saved);
+        openReplays();
+      })
+    );
+    body.querySelectorAll('[data-del]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        await replayDB.remove(Number(b.dataset.del));
+        openReplays();
+      })
+    );
+  }
+
   function openSoon(what) {
     openModal(what, `<p>${what} arrives in a later Phase 2 step.</p>`);
   }
@@ -335,6 +415,21 @@ function boot() {
     restartHold = 0;
     finish = null;
     L.hud.hint(`${L.meta.name} · W tuck · Space pop`, 3);
+    recorder.reset();
+    ghost = null;
+    $('ghosttag').classList.add('hidden');
+    placeModel(L.world.scene);
+    if (ghostModel.root.parent !== L.world.scene) L.world.scene.add(ghostModel.root);
+    ghostModel.root.visible = false;
+    const runId = L.run;
+    replayDB.ghost(L.id).then((g) => {
+      if (!g || g.version !== SIM_VERSION || loaded !== L || L.run !== runId || state !== 'riding') return;
+      // Catch the ghost up to where you are now, so it starts with you.
+      ghost = new Ghost(L.terrain, g);
+      for (let i = 0; i < recorder.steps; i++) ghost.advance();
+      $('ghosttag').textContent = `GHOST · best ${g.total.toLocaleString('en-US')}`;
+      $('ghosttag').classList.remove('hidden');
+    });
   }
 
   function pause(on) {
@@ -354,6 +449,21 @@ function boot() {
     const res = L.run.results();
     finish = { t: 0, res, face: 0, dir: null };
     state = 'finish';
+    $('ghosttag').classList.add('hidden');
+    ghostModel.root.visible = false;
+    lastReplay = {
+      id: Date.now(),
+      park: L.id,
+      date: Date.now(),
+      version: SIM_VERSION,
+      total: res.total,
+      bestTrick: res.bestTrick?.name || null,
+      name: profile.name,
+      inputs: recorder.data(),
+      saved: false,
+    };
+    replayDB.add(lastReplay);
+    replayDB.offerGhost(lastReplay);
     L.hud.show(false);
     $('fc-park').textContent = L.meta.name;
     $('fc-total').textContent = fmt(res.total);
@@ -381,6 +491,7 @@ function boot() {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (act === 'resume') pause(false);
     if (act === 'reset') {
+      recorder.mark('reset');
       loaded.run.resetPosition();
       prevPos.copy(loaded.run.rider.pos);
       prevQ.copy(loaded.run.rider.q);
@@ -393,14 +504,28 @@ function boot() {
     if (act === 'help') $('pause-help').classList.toggle('hidden');
     if (act === 'basecamp') toBasecamp();
   });
-  $('results').addEventListener('click', (e) => {
+  $('results').addEventListener('click', async (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
+    if (act === 'replay' && lastReplay) watchReplay(lastReplay, 'results');
+    if (act === 'clip' && lastReplay) watchReplay(lastReplay, 'results', true);
+    if (act === 'save' && lastReplay) {
+      const ok = await replayDB.setSaved(lastReplay.id, true);
+      if (ok) {
+        lastReplay.saved = true;
+        e.target.textContent = 'Saved ★';
+      }
+    }
     if (act === 'again') startLift();
     if (act === 'map') openMap('results');
   });
 
   // Esc steps back one menu level.
   function back() {
+    if (state === 'replay') {
+      if (!$('clip').classList.contains('hidden')) replayView.closeClip();
+      else if (!replayView.exporting) replayView.close();
+      return;
+    }
     if (touchEditor.isOpen) touchEditor.close();
     else if (settingsUI.isOpen) settingsUI.close();
     else if (!$('modal').classList.contains('hidden')) closeModal();
@@ -474,6 +599,7 @@ function boot() {
     if (input.wasPressed('pause') && !settingsUI.capturing) back();
     else if (input.wasPressed('confirm') && $('modal').classList.contains('hidden') && !settingsUI.isOpen) {
       if (state === 'basecamp') openMap('basecamp');
+      else if (state === 'replay') replayView.toggle();
       else if (state === 'map') parkMap.onRide(parkMap.currentId);
       else if (state === 'results') startLift();
       else if (state === 'finish' && finish.t > 0.8) showResultsScreen();
@@ -505,6 +631,14 @@ function boot() {
     L.time += dt;
     const run = L.run;
     const r = run.rider;
+
+    // -------------------------------------------- replay viewer
+    if (state === 'replay') {
+      placeModel(L.world.scene);
+      replayView.frame(dt, L.time);
+      input.endFrame();
+      return;
+    }
 
     // -------------------------------------------- lift ride
     if (state === 'lift' || state === 'loading') {
@@ -562,7 +696,11 @@ function boot() {
       while (acc >= DT && steps < 12) {
         prevPos.copy(r.pos);
         prevQ.copy(r.q);
-        if (state === 'riding') run.step(inp);
+        if (state === 'riding') {
+          recorder.push(inp);
+          run.step(inp);
+          if (ghost) ghost.advance();
+        }
         else run.coast(r.speed > 0.5 && r.mode === 'ground' ? coastInput : EMPTY_INPUT);
         acc -= DT;
         steps++;
@@ -649,6 +787,14 @@ function boot() {
       },
       dt
     );
+
+    // Ghost: your best run on this park.
+    if (ghost && state === 'riding' && !ghost.done) {
+      const g = ghost.rider;
+      placeRider(g, L.terrain, g.pos, g.q, ghostModel.root.position, ghostModel.root.quaternion);
+      ghostModel.update(poseFor(g), dt);
+      ghostModel.root.visible = true;
+    } else ghostModel.root.visible = false;
 
     L.spray.update(dt);
     if (state === 'finish') {
