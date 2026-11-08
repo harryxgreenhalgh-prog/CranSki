@@ -237,6 +237,17 @@ Never needed, and never to be put in the game or this repo: the secret / `servic
 
 ---
 
+# Deploying Edge Functions without a terminal
+
+The workflow `.github/workflows/deploy-functions.yml` deploys all three functions (`submit-run`, `delete-account`, `chat`) from GitHub. One-time setup:
+
+1. In Supabase: click your avatar (top right) → **Account preferences** → **Access Tokens** → **Generate new token**. Name it `GitHub deploy` and copy it. This is a personal access token, not the service_role key.
+2. On GitHub: the CranSki repository → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**. Set the name to `SUPABASE_ACCESS_TOKEN`, paste the token as the value, and save.
+3. Make sure the latest code is merged into `main`.
+4. **Actions** tab → **Deploy Supabase functions** → **Run workflow** → **Run workflow**. A green tick means all three are deployed. Check under **Edge Functions** in Supabase.
+
+After that it runs by itself whenever function code changes on `main`. Wherever this guide says `npx supabase functions deploy …`, you can run this workflow instead.
+
 # Phase 4: multiplayer
 
 ## 6. Live rooms (Phase 4, step 1)
