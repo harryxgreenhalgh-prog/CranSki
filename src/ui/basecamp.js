@@ -86,7 +86,7 @@ export class Basecamp {
   refreshFriends(f) {
     const btn = $('friends-btn');
     const online = f.online.length;
-    const asks = f.incoming.length;
+    const asks = f.incoming.length + (this.partyInvites ? this.partyInvites() : 0);
     btn.innerHTML = `Friends${online ? ` <span class="fcount" title="Friends online">${online}</span>` : ''}${asks ? ` <span class="fbadge" title="Friend requests">${asks}</span>` : ''}`;
   }
 

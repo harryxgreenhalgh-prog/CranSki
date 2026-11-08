@@ -328,3 +328,37 @@ on conflict (user_id) do update set muted_until = excluded.muted_until;
 4. At the end: **Rematch**, **Change map**, **Highlight reel** (both best runs side by side) or **Leave duel**.
 5. During your run, pausing or standing still uses up a 30-second allowance for the whole duel. When it runs out, the run ends.
 6. If the other rider drops out, you see **NOT RESPONDING** with their remaining pause time. If your own connection drops, you see **RECONNECTING**.
+
+## 10. Parties (Phase 4, step 5)
+
+1. **SQL Editor**: run `supabase/setup.sql` again, or `supabase/migrations/20261109120300_parties.sql`. It adds `parties`, `party_members`, `party_invites` and `party_bans`, the functions that manage them, and the policies for party channels.
+2. Redeploy the chat function. It now also checks party membership for party chat:
+
+   ```bash
+   npx supabase functions deploy chat --no-verify-jwt
+   ```
+
+How parties work:
+
+- **Friends** → **Start a party** → **Invite** friends (accepted friends only). Up to 4 riders, and a rider is in one party at a time.
+- Invited riders see the invite in **Friends** (and a toast) → **Join**.
+- The leader (👑) picks the park and can tick **Private room**. **GO** takes the leader there. Everyone else gets a **GO / STAY** prompt, and GO puts them in the same room.
+- Party chat works anywhere, including Basecamp. In a public room, the chat bar has a **Room / Party** switch.
+- The leader can **Remove** someone, who then can't rejoin that party for 10 minutes. If the leader leaves, the longest-standing member takes over. A party with nobody left is deleted.
+- Only a party's members can join its channels and its private room.
+
+### Test it
+
+1. Two accounts that are friends.
+2. A: **Friends** → **Start a party** → **Invite** B.
+3. B: **Friends** → **Join**.
+4. A: pick a park, tick **Private room**, then **GO**.
+5. B: **GO** → you're both in the private room.
+6. Press **T** to chat with the party.
+
+## Quick checklist for Phase 4
+
+- [ ] Run `supabase/setup.sql` in the SQL Editor. It includes everything; it's safe to run again.
+- [ ] **Realtime** → **Settings** → turn off "Allow public access".
+- [ ] `npx supabase functions deploy chat --no-verify-jwt`
+- [ ] Merge to `main` so GitHub Actions publishes the game.

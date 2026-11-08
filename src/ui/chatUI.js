@@ -15,6 +15,14 @@ export class ChatUI {
     this.onPhrase = onPhrase;
     this.lines = [];
     this.enabled = false;
+    this.targets = ['room'];
+    this.target = 'room';
+    $('chat-target').addEventListener('click', () => {
+      const i = this.targets.indexOf(this.target);
+      this.target = this.targets[(i + 1) % this.targets.length];
+      this._target();
+      $('chat-input').focus();
+    });
     $('chat-phrases').innerHTML = PHRASES.map((p, i) => `<button class="btn sm" data-phrase="${i}" title="${i < 9 ? `Key ${i + 1}` : ''}">${esc(p)}</button>`).join('');
     $('chat-phrases').addEventListener('click', (e) => {
       const b = e.target.closest('[data-phrase]');
@@ -55,6 +63,19 @@ export class ChatUI {
     return !$('chatbar').classList.contains('hidden');
   }
 
+  // Where messages can go: ['room'], ['party'] or both (toggle in the bar).
+  setTargets(list) {
+    this.targets = list.length ? list : ['room'];
+    if (!this.targets.includes(this.target)) this.target = this.targets[0];
+    this._target();
+  }
+
+  _target() {
+    const b = $('chat-target');
+    b.classList.toggle('hidden', this.targets.length < 2);
+    b.textContent = this.target === 'party' ? 'Party' : 'Room';
+  }
+
   // In a room (or party) chat, or not.
   setEnabled(on) {
     this.enabled = on && this.mode !== 'off';
@@ -86,11 +107,17 @@ export class ChatUI {
     this._render();
   }
 
-  // A message from the room: { u, tag, text, q, ts }
-  message(m, mine) {
+  // A message from the room or party: { u, tag, text, q, ts }
+  message(m, mine, from = 'room') {
+    this.shown = this.shown || new Set();
+    if (m.id) {
+      if (this.shown.has(m.id)) return;
+      this.shown.add(m.id);
+      if (this.shown.size > 300) this.shown.delete(this.shown.values().next().value);
+    }
     // Quick phrases only: free-typed messages from others aren't shown.
     if (this.mode === 'quick' && (m.q === null || m.q === undefined) && !mine) return;
-    this._push({ html: `<b>${esc(m.tag)}</b> ${esc(m.text)}`, mine });
+    this._push({ html: `${from === 'party' ? '<span class="ptag">PARTY</span> ' : ''}<b>${esc(m.tag)}</b> ${esc(m.text)}`, mine });
   }
 
   system(text) {

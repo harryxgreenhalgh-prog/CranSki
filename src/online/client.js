@@ -1,6 +1,11 @@
 // The Supabase client, loaded only when it's needed: a rider who never signs in
 // never downloads it and the game never talks to any server.
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, AUTH_STORAGE_KEY } from './config.js';
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, AUTH_STORAGE_KEY as BASE_KEY } from './config.js';
+
+// Testing several signed-in riders in tabs of one browser (?localnet&slot=2):
+// each slot keeps its own sign-in. Normal play always uses the one key.
+const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
+const AUTH_STORAGE_KEY = params.has('localnet') && /^[0-9]$/.test(params.get('slot') || '') ? `${BASE_KEY}.${params.get('slot')}` : BASE_KEY;
 
 let clientPromise = null;
 

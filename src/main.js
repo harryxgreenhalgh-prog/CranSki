@@ -45,6 +45,7 @@ import { Roster } from './ui/roster.js';
 import { IdleWatch } from './ui/idle.js';
 import { ChatChannel, mutedRiders, setMuted, REPORT_REASONS } from './online/chat.js';
 import { ChatUI } from './ui/chatUI.js';
+import { party } from './online/party.js';
 import { DuelSession, DUEL_PARKS, CHALLENGE_TIMEOUT, validPose } from './online/duel.js';
 import { Snapshots } from './online/rooms.js';
 import { Reel } from './render/reel.js';
@@ -335,9 +336,10 @@ function boot() {
   // Friends (Phase 3 step 3).
   function openFriends() {
     openModal('Friends', '<div class="acct friends" id="friends-panel"></div>');
-    mountFriends($('friends-panel'), { onAccount: () => openAccount() });
+    mountFriends($('friends-panel'), { onAccount: () => openAccount(), onPartyGo: () => partyGo() });
   }
   onFriends(() => basecamp.refreshFriends(friends));
+  basecamp.partyInvites = () => party.invites.length;
   // Tell friends where you are: Basecamp, a lift, a run or a replay.
   function reportLocation() {
     const park = loaded ? loaded.id : parkId;
@@ -345,6 +347,8 @@ function boot() {
     else if (state === 'riding' || state === 'paused' || state === 'finish' || state === 'results') setLocation('riding', park);
     else if (state === 'replay') setLocation('replay', park);
     else if (state !== 'loading' && state !== 'boot') setLocation('basecamp');
+    const where = { lift: 'lift', riding: 'riding', paused: 'paused', finish: 'results', results: 'results', replay: 'replay', duel: 'duel', duelover: 'duel', reel: 'duel' }[state] || 'basecamp';
+    if (state !== 'loading' && state !== 'boot') party.setWhere(where, where === 'basecamp' ? null : park);
   }
 
   // ------------------------------------------------------------ live rooms (Phase 4)
@@ -410,47 +414,56 @@ function boot() {
 
   // Chat (Phase 4 step 3): filtered and signed by the chat Edge Function.
   const chatUI = new ChatUI({
-    onSend: (t) => chat?.send(t),
-    onPhrase: (i) => chat?.sendPhrase(i),
+    onSend: (t) => chatFor(chatUI.target)?.send(t),
+    onPhrase: (i) => chatFor(chatUI.target)?.sendPhrase(i),
   });
-  let chat = null;
+  let chat = null; // room chat
+  let partyChat = null;
+  const chatFor = (target) => (target === 'party' ? partyChat : chat) || chat || partyChat;
   function chatTopicFor() {
     if (!live || !live.room) return null;
     return live.privateKey ? null : `chat:${live.park}:${live.number}`;
   }
-  async function syncChat() {
-    const topic = extraChatTopic?.() || chatTopicFor();
-    if (!topic) {
-      if (chat) {
-        const c = chat;
-        chat = null;
-        await c.detach();
-      }
-      chatUI.setEnabled(false);
-      chatUI.clear();
-      return;
-    }
-    const me = identity();
-    if (!me) return;
-    if (LOCAL) sessionStorage.setItem('cranski.localme', JSON.stringify(me));
-    if (!chat) chat = new ChatChannel({ me, onMessage: (m) => chatUI.message(m, m.u === me.uid), onSystem: (t) => chatUI.system(t) });
-    if (chat.topic !== topic) {
-      chatUI.clear();
-      try {
-        await chat.attach(topic);
-      } catch (e) {
-        console.warn('chat', e);
-        chatUI.system("Chat isn't available right now.");
-      }
-    }
-    chatUI.setEnabled(true);
+  // Room chat while in a public room; party chat while in a party.
+  // One sync at a time, so overlapping calls never open a channel twice.
+  let chatSync = Promise.resolve();
+  function syncChat() {
+    chatSync = chatSync.then(syncChatNow, syncChatNow);
+    return chatSync;
   }
-  let extraChatTopic = null; // parties use their own chat (step 5)
-  onSettings(() => chatUI.setEnabled(!!chat?.topic));
+  async function syncChatNow() {
+    const me = identity();
+    const roomTopic = chatTopicFor();
+    const partyTopic = party.info && account.ready ? `pchat:${party.info.id}` : null;
+    if (me && LOCAL) sessionStorage.setItem('cranski.localme', JSON.stringify(me));
+    const want = async (cur, topic, from) => {
+      if (!topic || !me) {
+        if (cur) await cur.detach();
+        return null;
+      }
+      const c = cur || new ChatChannel({ me, onMessage: (m) => chatUI.message(m, m.u === me.uid, from), onSystem: (t) => chatUI.system(t) });
+      if (c.topic !== topic) {
+        try {
+          await c.attach(topic);
+        } catch (e) {
+          console.warn('chat', e);
+          chatUI.system("Chat isn't available right now.");
+        }
+      }
+      return c;
+    };
+    chat = await want(chat, roomTopic, 'room');
+    partyChat = await want(partyChat, partyTopic, 'party');
+    const targets = [chat && 'room', partyChat && 'party'].filter(Boolean);
+    chatUI.setTargets(targets);
+    if (!targets.length) chatUI.clear();
+    chatUI.setEnabled(targets.length > 0);
+  }
+  onSettings(() => chatUI.setEnabled(!!(chat?.topic || partyChat?.topic)));
   // T opens chat (Enter too while riding).
   window.addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || chatUI.isOpen || !chatUI.enabled) return;
-    if (!['riding', 'lift', 'results', 'finish'].includes(state) || !$('modal').classList.contains('hidden')) return;
+    if (!['riding', 'lift', 'results', 'finish', 'basecamp', 'duel', 'duelover'].includes(state) || !$('modal').classList.contains('hidden')) return;
     if (e.code === 'KeyT' || (e.code === 'Enter' && state === 'riding')) {
       e.preventDefault();
       chatUI.open();
@@ -505,7 +518,7 @@ function boot() {
   const duelFrameBuf = new Float32Array(STRIDE);
   const duelView = {};
   const cards = {}; // kind -> { big, small, buttons, count }
-  const CARD_ORDER = ['conn', 'opp', 'challenge', 'leave', 'still', 'count'];
+  const CARD_ORDER = ['conn', 'opp', 'challenge', 'partygo', 'leave', 'still', 'count'];
   function setCard(kind, card) {
     if (card) cards[kind] = card;
     else delete cards[kind];
@@ -998,6 +1011,67 @@ function boot() {
     renderer.render(L.world.scene, camera);
   }
 
+  // ------------------------------------------------------------ parties (Phase 4 step 5)
+  // Leader: head to the party's park (in its private room if switched on),
+  // then tell everyone, who get a GO / STAY prompt.
+  async function partyGo() {
+    if (!party.info || !party.isLeader) return;
+    if (playMode !== 'live') await setPlayMode('live');
+    if (!live) return;
+    const park = party.info.park || parkId;
+    if (!party.info.park) await party.set(park, null).catch(() => {});
+    closeModal();
+    if (duel) leaveDuel();
+    parkId = park;
+    profile.park = park;
+    goRide({ privateKey: party.info.private_room ? party.info.id : null, announce: true, force: true });
+  }
+  party.h.onGo = (m) => {
+    if (!m || !m.park) return;
+    const priv = m.priv ? ' (private room)' : '';
+    setCard('partygo', {
+      big: `${String(m.tag || 'Your leader').slice(0, 18)} is heading to ${PARK_NAME(m.park)}${priv}`,
+      small: duel ? 'Going leaves your duel.' : 'Ride with your party?',
+      buttons: [
+        {
+          label: 'GO',
+          fn: async () => {
+            setCard('partygo', null);
+            if (playMode !== 'live') await setPlayMode('live');
+            if (!live) return;
+            if (duel) leaveDuel();
+            closeModal();
+            parkId = m.park;
+            profile.park = m.park;
+            goRide({ room: m.priv ? null : m.room, privateKey: m.priv ? m.party : null, force: true });
+          },
+        },
+        { label: 'STAY', fn: () => setCard('partygo', null) },
+      ],
+      rebuild: true,
+    });
+  };
+  const leftParty = (id, removed) => {
+    if (removed) toast('The leader removed you from the party. You can rejoin in 10 minutes.', 8000);
+    if (live && live.privateKey && live.privateKey === id) {
+      toast('You left the party, so you left its private room.', 6000);
+      toBasecamp();
+    }
+    syncChat();
+  };
+  party.h.onRemoved = (id) => leftParty(id, true);
+  party.h.onLeft = (id) => leftParty(id, false);
+  const seenInvites = new Set();
+  party.onChange(() => {
+    for (const i of party.invites)
+      if (!seenInvites.has(i.party)) {
+        seenInvites.add(i.party);
+        toast(`${i.inviter} invited you to ${i.leader}'s party. Open Friends to join.`, 7000);
+      }
+    basecamp.refreshFriends(friends);
+    syncChat();
+  });
+
   function onRoomChange() {
     syncChat();
     updateRoomBadge();
@@ -1019,11 +1093,12 @@ function boot() {
   account.onChange(() => {
     if (playMode === 'live' && !identity()) setPlayMode('solo');
   });
-  async function joinRoomFor(id) {
+  async function joinRoomFor(id, opts = {}) {
     if (!live) return;
     try {
-      const n = await live.join(id);
-      toast(`${parkMeta(id).name} · Room ${n}`, 3000);
+      const n = await live.join(id, { room: opts.room || null, privateKey: opts.privateKey || null });
+      toast(opts.privateKey ? `${parkMeta(id).name} · Private party room` : `${parkMeta(id).name} · Room ${n}`, 3000);
+      if (opts.announce) party.go({ park: id, room: n, priv: !!opts.privateKey });
     } catch (e) {
       console.warn(e);
       toast(e.message && /full/i.test(e.message) ? e.message : "Couldn't join a live room. Riding solo for now.");
@@ -1323,7 +1398,8 @@ function boot() {
   }
   $('modal-close').addEventListener('click', closeModal);
 
-  async function goRide() {
+  // opts: { room, privateKey, announce, force } for parties.
+  async function goRide(opts = {}) {
     blurMenus();
     $('musicpop').classList.add('hidden');
     $('music-btn').classList.remove('on');
@@ -1344,7 +1420,7 @@ function boot() {
       return;
     }
     loadingScreen.hide();
-    if (live && (live.park !== parkId || !live.room)) joinRoomFor(parkId);
+    if (live && (opts.force || live.park !== parkId || !live.room)) joinRoomFor(parkId, opts);
     startLift();
   }
 
@@ -1960,6 +2036,7 @@ function boot() {
     get duel() {
       return duel;
     },
+    party,
     get chat() {
       return { enabled: chatUI.enabled, open: chatUI.isOpen, topic: chat?.topic || null };
     },

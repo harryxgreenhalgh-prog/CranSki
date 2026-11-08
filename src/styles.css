@@ -2396,3 +2396,41 @@ body.touching #roombadge {
   bottom: 52px;
   pointer-events: auto;
 }
+
+.party-ctl {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0;
+}
+
+.party-ctl select {
+  font: inherit;
+  padding: 5px 8px;
+  border-radius: 8px;
+}
+
+#chatlog .ptag {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--orange);
+  color: #fff;
+}
+
+/* Chat in Basecamp (party chat): clear of the top bar and side cards. */
+#basecamp:not(.hidden) ~ #chat-btn {
+  top: auto;
+  bottom: 130px;
+  right: 16px;
+}
+
+#basecamp:not(.hidden) ~ #chatlog {
+  top: auto;
+  bottom: 170px;
+  left: 50%;
+  transform: translateX(-50%);
+}

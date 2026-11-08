@@ -4,6 +4,8 @@ import { friends, onFriends, refreshFriends, searchRiders, sendRequest, respond,
 import { parkMeta } from '../parks/index.js';
 import { tidyTag } from '../online/names.js';
 import { esc } from './accountUI.js';
+import { party, PARTY_MAX } from '../online/party.js';
+import { PARKS } from '../parks/index.js';
 
 export function whereText(f) {
   if (!f.online) return 'Offline';
@@ -16,7 +18,7 @@ export function whereText(f) {
 
 const ui = { q: '', results: null, searching: false, msg: null, confirm: null };
 
-export function mountFriends(el, { onAccount }) {
+export function mountFriends(el, { onAccount, onPartyGo }) {
   ui.q = '';
   ui.results = null;
   ui.msg = null;
@@ -32,15 +34,17 @@ export function mountFriends(el, { onAccount }) {
       return;
     }
     el.innerHTML = html();
-    wire(el, render, onAccount);
+    wire(el, render, onAccount, onPartyGo);
   };
   off = onFriends(render);
   offAcct = account.onChange(render);
+  const offParty = party.onChange(() => (el.isConnected ? render() : offParty()));
   render();
   // Faster updates while the panel is open.
   const tick = () => {
     if (!el.isConnected) return;
     refreshFriends();
+    party.refresh();
     poll = setTimeout(tick, 20000);
   };
   tick();
@@ -70,9 +74,11 @@ function html() {
   else if (ui.results)
     results = `<ul class="flist">${ui.results.map((r) => `<li><span class="fname">${esc(r.gamertag)}</span>${relationButton(r)}</li>`).join('')}</ul>`;
 
+  const canInvite = party.info && !party.full;
   const row = (f) => {
     const removing = ui.confirm === f.id;
-    return `<li><span class="fdot ${f.online ? 'on' : ''}"></span><span class="fname">${esc(f.gamertag)}</span><span class="fwhere muted">${esc(whereText(f))}</span>${
+    const invite = canInvite && !party.has(f.id) ? `<button class="btn sm" data-pinvite="${f.id}">Invite</button>` : '';
+    return `<li><span class="fdot ${f.online ? 'on' : ''}"></span><span class="fname">${esc(f.gamertag)}</span><span class="fwhere muted">${esc(whereText(f))}</span>${invite}${
       removing
         ? `<button class="btn sm" data-unfriend="${f.id}">Remove ${esc(f.gamertag)}?</button><button class="btn sm" data-a="keep">Keep</button>`
         : `<button class="btn sm ghost" data-confirm="${f.id}" title="Remove friend">✕</button>`
@@ -86,6 +92,7 @@ function html() {
     </form>
     ${results}
     ${msg}
+    ${partyHtml()}
     ${
       incoming.length
         ? `<h3>REQUESTS</h3><ul class="flist">${incoming
@@ -108,7 +115,41 @@ function html() {
     <p class="muted small">Friends see that you're online and where you're riding only after you've both accepted. Riders who aren't your friends only ever see your gamertag.</p>`;
 }
 
-function wire(el, render, onAccount) {
+const PARTY_WHERE = { basecamp: 'In Basecamp', lift: 'On a lift', riding: 'Riding', paused: 'Paused', results: 'Just finished', replay: 'Watching a replay', duel: 'In a duel' };
+
+function partyHtml() {
+  const p = party;
+  if (!p.info) {
+    const inv = p.invites.length
+      ? `<ul class="flist">${p.invites
+          .map((i) => `<li><span class="fname">${esc(i.leader)}'s party</span><span class="fwhere muted">invited by ${esc(i.inviter)} · ${i.members}/${PARTY_MAX}</span><button class="btn sm primary" data-pjoin="${i.party}">Join</button><button class="btn sm" data-pdecline="${i.party}">Decline</button></li>`)
+          .join('')}</ul>`
+      : '';
+    return `<h3>PARTY</h3>${inv}<p class="muted">Ride together with up to ${PARTY_MAX - 1} friends: the leader picks the park and everyone gets a GO / STAY prompt.</p><p><button class="btn" data-a="party-create">Start a party</button></p>${p.error ? `<p class="acct-msg bad">${esc(p.error)}</p>` : ''}`;
+  }
+  const lead = p.isLeader;
+  const park = p.info.park ? PARKS.find((x) => x.id === p.info.park)?.name : null;
+  const members = p.members
+    .map(
+      (m) =>
+        `<li><span class="fdot ${m.online ? 'on' : ''}"></span><span class="fname">${m.leader ? '👑 ' : ''}${esc(m.gamertag)}</span><span class="fwhere muted">${m.online ? PARTY_WHERE[m.where] || 'Online' : 'Offline'}${m.online && m.park ? ` · ${esc(PARKS.find((x) => x.id === m.park)?.name || '')}` : ''}</span>${
+          lead && !m.leader ? `<button class="btn sm" data-premove="${m.id}" title="Remove for 10 minutes">Remove</button>` : ''
+        }</li>`
+    )
+    .join('');
+  const controls = lead
+    ? `<div class="party-ctl">
+        <label>Park <select data-a="party-park">${PARKS.map((x) => `<option value="${x.id}" ${x.id === p.info.park ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
+        <label class="fcheck"><input type="checkbox" data-a="party-private" ${p.info.private_room ? 'checked' : ''}/> Private room (party only)</label>
+        <button class="btn primary" data-a="party-go">GO${park ? ` to ${esc(park)}` : ''}</button>
+      </div>`
+    : `<p class="muted">${park ? `The leader picked ${esc(park)}${p.info.private_room ? ' (private room)' : ''}.` : 'The leader picks the park.'} You'll get a GO / STAY prompt when they head off.</p>`;
+  return `<h3>PARTY · ${p.info.members.length}/${PARTY_MAX}</h3><ul class="flist">${members}</ul>${controls}<p class="acct-row"><button class="btn sm" data-a="party-leave">Leave party</button></p>${
+    p.full ? '' : '<p class="muted small">Invite friends from your list below.</p>'
+  }`;
+}
+
+function wire(el, render, onAccount, onPartyGo) {
   const all = (sel, fn) => el.querySelectorAll(sel).forEach((b) => b.addEventListener('click', () => fn(b)));
   const act = async (job, okText) => {
     ui.msg = null;
@@ -193,6 +234,37 @@ function wire(el, render, onAccount) {
     ui.confirm = null;
     act(() => removeFriend(b.dataset.unfriend));
   });
+  // Party
+  const pact = async (job, okText) => {
+    ui.msg = null;
+    try {
+      const r = await job();
+      if (okText) ui.msg = { text: okText(r), bad: r && !['invited', 'joined', 'removed', 'ok', undefined, null].includes(r) };
+    } catch (e) {
+      ui.msg = { text: e.message, bad: true };
+    }
+    render();
+  };
+  const PARTY_MSG = {
+    invited: 'Invite sent.',
+    not_friends: 'You can only invite riders who are your friends.',
+    full: 'The party is full.',
+    already: 'Already in the party.',
+    joined: "You're in the party.",
+    not_invited: 'That invite has gone.',
+    removed: 'Removed for 10 minutes.',
+    gone: 'That party has ended.',
+    not_leader: 'Only the leader can do that.',
+  };
+  el.querySelector('[data-a="party-create"]')?.addEventListener('click', () => pact(() => party.create()));
+  all('[data-pinvite]', (b) => pact(() => party.invite(b.dataset.pinvite), (r) => PARTY_MSG[r] || r));
+  all('[data-pjoin]', (b) => pact(() => party.join(b.dataset.pjoin), (r) => (r === 'removed' ? "The leader removed you; you can rejoin in 10 minutes." : PARTY_MSG[r] || r)));
+  all('[data-pdecline]', (b) => pact(() => party.decline(b.dataset.pdecline)));
+  all('[data-premove]', (b) => pact(() => party.remove(b.dataset.premove), (r) => PARTY_MSG[r] || r));
+  el.querySelector('[data-a="party-leave"]')?.addEventListener('click', () => pact(() => party.leave()));
+  el.querySelector('[data-a="party-park"]')?.addEventListener('change', (e) => pact(() => party.set(e.target.value, null)));
+  el.querySelector('[data-a="party-private"]')?.addEventListener('change', (e) => pact(() => party.set(null, e.target.checked)));
+  el.querySelector('[data-a="party-go"]')?.addEventListener('click', () => onPartyGo?.());
   const off = el.querySelector('[data-a="offline"]');
   off?.addEventListener('change', () => act(() => setAppearOffline(off.checked), () => (off.checked ? 'Friends now see you as offline.' : 'Friends can see you online again.')));
 }
