@@ -2186,3 +2186,95 @@ body.touching #roombadge {
   font-size: 22px;
   color: var(--orange);
 }
+
+/* ---------------------------------------------------------------- chat */
+#chatlog {
+  position: absolute;
+  left: 16px;
+  top: 76px;
+  width: min(400px, calc(100% - 140px));
+  display: grid;
+  gap: 3px;
+  pointer-events: none;
+  z-index: 3;
+  font-size: 14px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+
+#chatlog .cl {
+  padding: 3px 9px;
+  border-radius: 8px;
+  background: rgba(9, 22, 44, 0.5);
+  overflow-wrap: anywhere;
+  transition: opacity 3s;
+}
+
+#chatlog .cl b {
+  color: #9fd0ff;
+}
+
+#chatlog .cl.mine b {
+  color: #ffc49e;
+}
+
+#chatlog .cl.sys {
+  color: #ffd9a8;
+}
+
+#chatlog .cl.fading {
+  opacity: 0;
+}
+
+#chat-btn {
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  z-index: 3;
+}
+
+#chatbar {
+  position: absolute;
+  left: 50%;
+  bottom: 150px;
+  transform: translateX(-50%);
+  width: min(620px, calc(100% - 32px));
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  z-index: 8;
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
+  border-radius: 14px;
+  outline: none;
+}
+
+#chatbar.hidden {
+  display: none;
+}
+
+.chat-row {
+  display: flex;
+  gap: 8px;
+}
+
+#chat-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 16px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  outline: none;
+  color: var(--ink);
+}
+
+#chat-input:focus {
+  border-color: var(--blue);
+}
+
+#chat-phrases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}

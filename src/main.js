@@ -15,7 +15,7 @@ import { ParkMap } from './ui/map.js';
 import { PAGES, pageHtml } from './ui/pages.js';
 import { parkMeta } from './parks/index.js';
 import { profile, load } from './store.js';
-import { settings, saveSettings, looksLowEnd } from './settings.js';
+import { settings, saveSettings, looksLowEnd, onSettings } from './settings.js';
 import { SettingsUI, StatsOverlay } from './ui/settings.js';
 import { TouchControls, TouchEditor, isTouchDevice } from './ui/touch.js';
 import { Recorder, SIM_VERSION } from './replay/record.js';
@@ -43,6 +43,8 @@ import { REALTIME_BUDGET } from './online/config.js';
 import { RemoteRiders } from './render/remoteRiders.js';
 import { Roster } from './ui/roster.js';
 import { IdleWatch } from './ui/idle.js';
+import { ChatChannel, mutedRiders, setMuted, REPORT_REASONS } from './online/chat.js';
+import { ChatUI } from './ui/chatUI.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -399,7 +401,93 @@ function boot() {
     }
   }
   const roomEvents = {}; // room broadcast events by name, for later features
+
+  // Chat (Phase 4 step 3): filtered and signed by the chat Edge Function.
+  const chatUI = new ChatUI({
+    onSend: (t) => chat?.send(t),
+    onPhrase: (i) => chat?.sendPhrase(i),
+  });
+  let chat = null;
+  function chatTopicFor() {
+    if (!live || !live.room) return null;
+    return live.privateKey ? null : `chat:${live.park}:${live.number}`;
+  }
+  async function syncChat() {
+    const topic = extraChatTopic?.() || chatTopicFor();
+    if (!topic) {
+      if (chat) {
+        const c = chat;
+        chat = null;
+        await c.detach();
+      }
+      chatUI.setEnabled(false);
+      chatUI.clear();
+      return;
+    }
+    const me = identity();
+    if (!me) return;
+    if (LOCAL) sessionStorage.setItem('cranski.localme', JSON.stringify(me));
+    if (!chat) chat = new ChatChannel({ me, onMessage: (m) => chatUI.message(m, m.u === me.uid), onSystem: (t) => chatUI.system(t) });
+    if (chat.topic !== topic) {
+      chatUI.clear();
+      try {
+        await chat.attach(topic);
+      } catch (e) {
+        console.warn('chat', e);
+        chatUI.system("Chat isn't available right now.");
+      }
+    }
+    chatUI.setEnabled(true);
+  }
+  let extraChatTopic = null; // parties use their own chat (step 5)
+  onSettings(() => chatUI.setEnabled(!!chat?.topic));
+  // T opens chat (Enter too while riding).
+  window.addEventListener('keydown', (e) => {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || chatUI.isOpen || !chatUI.enabled) return;
+    if (!['riding', 'lift', 'results', 'finish'].includes(state) || !$('modal').classList.contains('hidden')) return;
+    if (e.code === 'KeyT' || (e.code === 'Enter' && state === 'riding')) {
+      e.preventDefault();
+      chatUI.open();
+    }
+  });
+  // Mute and report from the roster.
+  roster.actions.push((r) => {
+    const muted = mutedRiders().has(r.uid);
+    return `<button class="btn sm" data-ract="${muted ? 'unmute' : 'mute'}" data-uid="${r.uid}">${muted ? 'Unmute' : 'Mute'}</button> <button class="btn sm" data-ract="report" data-uid="${r.uid}">Report</button>`;
+  });
+  rosterActions.mute = (uid) => setMuted(uid, true);
+  rosterActions.unmute = (uid) => setMuted(uid, false);
+  rosterActions.report = (uid) => openReport(uid);
+  function openReport(uid) {
+    const r = live?.remotes.get(uid);
+    const tag = r ? r.tag : 'this rider';
+    roster.hide();
+    openModal(
+      'Report a rider',
+      `<p>Report <b>${esc(tag)}</b>. Your report includes the last 10 minutes of this room's chat, checked by the server, so a moderator can see what happened. It's kept until a moderator has reviewed it.</p>
+      <form id="report-form" class="report-form">
+        ${REPORT_REASONS.map(([id, label], i) => `<label class="choice"><input type="radio" name="reason" value="${id}" ${i === 0 ? 'checked' : ''}/><b>${label}</b></label>`).join('')}
+        <textarea name="note" maxlength="300" rows="2" placeholder="Anything else? (optional)"></textarea>
+        <p class="acct-row"><button class="btn primary" type="submit">Send report</button><label class="fcheck"><input type="checkbox" name="mute" checked /> Also mute them</label></p>
+        <p class="acct-msg" id="report-msg"></p>
+      </form>`
+    );
+    const form = $('report-form');
+    form.note.addEventListener('keydown', (e) => e.stopPropagation());
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = form.querySelector('button[type=submit]');
+      btn.disabled = true;
+      if (form.mute.checked) setMuted(uid, true);
+      const res = chat ? await chat.report(uid, form.reason.value, form.note.value) : { error: 'not_in_room' };
+      $('report-msg').className = `acct-msg ${res?.ok ? 'good' : 'bad'}`;
+      $('report-msg').textContent = res?.ok ? 'Thanks. Your report was sent to the moderators.' : res?.error === 'slow_down' ? "You've sent a lot of reports. Try again later." : "Couldn't send the report. Try again later.";
+      if (!res?.ok) btn.disabled = false;
+    });
+  }
+
   function onRoomChange() {
+    syncChat();
     updateRoomBadge();
     roster.render();
     if (parkMap.isOpen) parkMap.select(parkMap.sel);
@@ -1314,6 +1402,9 @@ function boot() {
     },
     remotes,
     idle,
+    get chat() {
+      return { enabled: chatUI.enabled, open: chatUI.isOpen, topic: chat?.topic || null };
+    },
     get lift() {
       return lift;
     },

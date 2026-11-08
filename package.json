@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "node --test tests/*.test.js",
     "build:sim": "node tools/build-sim.mjs",
-    "build:sql": "node tools/build-sql.mjs"
+    "build:sql": "node tools/build-sql.mjs",
+    "build:functions": "node tools/build-sim.mjs && node tools/build-functions.mjs"
   },
   "repository": {
     "type": "git",

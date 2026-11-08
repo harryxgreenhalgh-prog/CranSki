@@ -126,6 +126,7 @@ export class SettingsUI {
     else if (t === 'graphics') body.innerHTML = this._graphics();
     else if (t === 'camera') body.innerHTML = this._camera();
     else if (t === 'sound') body.innerHTML = this._sound();
+    else if (t === 'chat') body.innerHTML = this._chat();
     else body.innerHTML = this._stats();
     this._wire(body);
   }
@@ -202,6 +203,13 @@ export class SettingsUI {
     return `${slider('music', 'Music volume')}${slider('effects', 'Effects volume')}`;
   }
 
+  _chat() {
+    const o = (id, name, desc) =>
+      `<label class="choice ${settings.chat === id ? 'on' : ''}"><input type="radio" name="chat" value="${id}" ${settings.chat === id ? 'checked' : ''}/><b>${name}</b><span>${desc}</span></label>`;
+    return `${o('full', 'Full chat', 'Type messages and use quick phrases. Every message is filtered before anyone sees it.')}${o('quick', 'Quick phrases only', "Send and see only preset phrases like \"Nice one!\" and \"GG\". Nobody's typed messages are shown.")}${o('off', 'Off', 'No chat at all.')}
+      <p class="muted small">Chat only reaches your room or party and isn't stored. Mute or report any rider from the roster (hold Tab).</p>`;
+  }
+
   _stats() {
     const o = (id, name, desc) =>
       `<label class="choice ${settings.stats === id ? 'on' : ''}"><input type="radio" name="stats" value="${id}" ${settings.stats === id ? 'checked' : ''}/><b>${name}</b><span>${desc}</span></label>`;
@@ -249,6 +257,13 @@ export class SettingsUI {
     body.querySelectorAll('input[name=touchmode]').forEach((i) =>
       i.addEventListener('change', () => {
         touchSettings().mode = i.value;
+        saveSettings();
+        this.render();
+      })
+    );
+    body.querySelectorAll('input[name=chat]').forEach((i) =>
+      i.addEventListener('change', () => {
+        settings.chat = i.value;
         saveSettings();
         this.render();
       })

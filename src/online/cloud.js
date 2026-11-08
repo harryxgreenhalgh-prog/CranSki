@@ -13,7 +13,7 @@ import { getClient } from './client.js';
 
 // Settings that follow you. Graphics level, frame cap and touch layout are
 // about the device, so they stay on it.
-export const SYNCED_SETTINGS = ['camera', 'sound', 'stats', 'keys', 'pad'];
+export const SYNCED_SETTINGS = ['camera', 'sound', 'stats', 'keys', 'pad', 'chat'];
 
 export const cloud = {
   state: 'idle', // idle · syncing · synced · error · missing (not set up on the server)

@@ -267,3 +267,50 @@ Supabase **bills** every message each rider receives. One update seen by 9 other
 3. Each should see the other rider with their gamertag above them, and a blue dot on the minimap. Hold **Tab** for the roster, or use **Pause** → **Riders in this room** on a tablet.
 
 No second account? Add `?localnet` to the game's address (for example `http://localhost:5173/?localnet`) and open it in two tabs side by side. The tabs link to each other directly without a server, so you can try rooms alone.
+
+## 7. Idle rules (Phase 4, step 2)
+
+Nothing to set up. In a live room, being paused for 1 minute, having no input for 2 minutes, or leaving a replay untouched for 10 minutes shows a 10-second countdown, then sends the rider back to Basecamp. Solo is never timed out.
+
+## 8. Chat and safety (Phase 4, step 3)
+
+Chat never goes straight from one rider to another. Every message goes through the `chat` Edge Function, which:
+
+1. Removes links and contact details (emails, phone numbers, social handles), and masks crude words.
+2. Drops any message with a hate word, so it reaches nobody. This includes disguised spellings: spaced out, l33t, look-alike letters, stretched.
+3. Adds strikes for filtered messages. 3 strikes within 15 minutes mutes that rider's chat for 15 minutes.
+4. Signs the message and broadcasts it to the room. It's never stored.
+
+Riders can only listen on chat channels, so nobody can skip the filter. A report sends the reporter's last 10 minutes of that room's chat. The function keeps only messages carrying its own signature, so a report can't contain made-up lines, and saves them in the `reports` table.
+
+### Set it up
+
+1. **SQL Editor**: paste and run `supabase/setup.sql` again. It adds the chat tables, functions and channel policies (or run `supabase/migrations/20261109120100_chat_safety.sql`).
+2. Deploy the function:
+
+   ```bash
+   npx supabase functions deploy chat --no-verify-jwt
+   ```
+
+3. Optional: under **Edge Functions** → **Secrets**, add `CHAT_SIGNING_SECRET` with a long random value. Without it, the function derives a signing key from the project's secret key, which also works.
+
+### Reviewing reports
+
+Open **Table Editor** → `reports`. Each row has who reported whom, the reason, an optional note, and `messages`, the room's chat for the 10 minutes before the report. Set `status` to `actioned` or `dismissed` once you've looked at it. Delete rows you no longer need.
+
+To mute someone by hand, run this in the SQL Editor, changing the email address:
+
+```sql
+insert into private.chat_state (user_id, muted_until)
+select id, now() + interval '1 day' from auth.users where email = 'someone@example.com'
+on conflict (user_id) do update set muted_until = excluded.muted_until;
+```
+
+### Test it
+
+1. Two riders in the same live room.
+2. Press **T** to type, **Enter** to send, or pick a quick phrase.
+3. Try `that was sh1t`: it should arrive masked.
+4. Try a link: it should arrive as "[link removed]".
+5. Hold **Tab** → **Mute** or **Report** on the other rider.
+6. **Settings** → **Chat** switches between full chat, quick phrases only, and off.

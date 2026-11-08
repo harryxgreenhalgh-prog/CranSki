@@ -147,6 +147,15 @@
         </div>
       </section>
 
+      <!-- Chat (live rooms and parties): latest lines top left, chat bar -->
+      <div id="chatlog" class="hidden" aria-live="polite"></div>
+      <button id="chat-btn" class="pill hidden" title="Chat (T)">Chat <kbd>T</kbd></button>
+      <div id="chatbar" class="hidden" tabindex="-1">
+        <div class="chat-row"><input id="chat-input" type="text" placeholder="Say something nice" autocomplete="off" spellcheck="true" aria-label="Chat message" /><button class="btn sm" id="chat-close">Close</button></div>
+        <div id="chat-phrases"></div>
+        <div id="chat-hint" class="muted small"></div>
+      </div>
+
       <!-- Idle in a live room: countdown back to Basecamp -->
       <div id="idlecard" class="hidden" role="alert">
         <div class="idle-title">STILL THERE?</div>
@@ -226,7 +235,7 @@
         <div class="panel wide">
           <div class="modal-head"><h2>SETTINGS</h2><button class="btn" id="settings-close">Close <kbd>Esc</kbd></button></div>
           <nav class="stabs">
-            <button data-stab="controls">Controls</button><button data-stab="graphics">Graphics</button><button data-stab="camera">Camera</button><button data-stab="sound">Sound</button><button data-stab="stats">Stats</button>
+            <button data-stab="controls">Controls</button><button data-stab="graphics">Graphics</button><button data-stab="camera">Camera</button><button data-stab="sound">Sound</button><button data-stab="stats">Stats</button><button data-stab="chat">Chat</button>
           </nav>
           <div id="settings-body"></div>
         </div>

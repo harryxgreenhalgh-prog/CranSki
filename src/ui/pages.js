@@ -76,6 +76,10 @@ export const PAGES = {
           <tr><td>Your best server-checked score on each park, with its best trick and date</td><td>Everyone</td></tr>
           <tr><td>The recorded inputs behind each leaderboard run: which buttons were held at each moment, nothing else</td><td>Nobody through the game; kept so runs can be re-checked</td></tr>
           <tr><td>When you last submitted runs, to stop spam</td><td>Nobody; deleted after a day</td></tr>
+          <tr><td>Live rooms: your position, pose, tricks and Locker look while you ride, sent to the riders in your room</td><td>Riders in your room, live. Never stored.</td></tr>
+          <tr><td>Chat messages</td><td>Your room or party, live. Never stored: every message is filtered and passed straight on.</td></tr>
+          <tr><td>Chat strikes and mutes (how many times your messages broke the chat rules, and until when you're muted), but not the messages</td><td>Nobody; strikes reset after 15 minutes</td></tr>
+          <tr><td>Reports you make or that are made about you, with the last 10 minutes of that room's chat</td><td>Moderators only, until reviewed</td></tr>
         </tbody>
       </table>
       <p>There are no ads, no analytics and no tracking cookies. Nothing is sold or shared, and CranSki never asks for payment details or passwords.</p>
