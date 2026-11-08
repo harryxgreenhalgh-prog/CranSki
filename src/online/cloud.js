@@ -8,7 +8,7 @@
 import { load, save, remove, onSave, profile } from '../store.js';
 import { settings, saveSettings } from '../settings.js';
 import { PARKS } from '../parks/index.js';
-import { account, notifyAccount } from './account.js';
+import { account, notifyAccount, notSetUp } from './account.js';
 import { getClient } from './client.js';
 
 // Settings that follow you. Graphics level, frame cap and touch layout are
@@ -16,7 +16,7 @@ import { getClient } from './client.js';
 export const SYNCED_SETTINGS = ['camera', 'sound', 'stats', 'keys', 'pad'];
 
 export const cloud = {
-  state: 'idle', // idle · syncing · synced · error
+  state: 'idle', // idle · syncing · synced · error · missing (not set up on the server)
   lastSync: 0,
   onApplied: null, // ({ look, settings, bests }) => void, set by main.js
 };
@@ -131,7 +131,7 @@ async function run() {
     cloud.lastSync = Date.now();
   } catch (e) {
     console.warn('Cloud save failed', e);
-    cloud.state = 'error';
+    cloud.state = notSetUp(e) ? 'missing' : 'error';
     schedule(30000);
   }
   notifyAccount();
@@ -198,6 +198,7 @@ document.addEventListener('visibilitychange', () => {
 
 export function cloudStatusText() {
   if (cloud.state === 'syncing') return 'Saving to your account…';
+  if (cloud.state === 'missing') return "Cloud saves aren't set up on the server yet. Everything is safe on this device.";
   if (cloud.state === 'error') return "Couldn't reach your cloud save. Everything is safe on this device and will sync when you're back online.";
   if (cloud.state === 'synced') {
     const s = Math.round((Date.now() - cloud.lastSync) / 1000);

@@ -1,6 +1,6 @@
 // The Account panel (in the page modal): sign in with an emailed link, pick a
 // gamertag, rename, sign out. There is no password field anywhere.
-import { account, startAccount, sendSignInLink, signOut, gamertagStatus, setGamertag, deleteAccount } from '../online/account.js';
+import { account, startAccount, sendSignInLink, verifySignInCode, signOut, gamertagStatus, setGamertag, deleteAccount } from '../online/account.js';
 import { TAG_MAX, TAG_STATUS, tidyTag, cleanTag } from '../online/names.js';
 import { profile } from '../store.js';
 
@@ -70,16 +70,21 @@ function html() {
   if (ui.sentTo)
     return `
       <h3>CHECK YOUR EMAIL</h3>
-      <p>We sent a sign-in link to <b>${esc(ui.sentTo)}</b>. Open it on this device to finish signing in. It works once and expires after an hour.</p>
-      <p class="muted">Nothing there? Check spam, or wait a minute and send another.</p>
+      <p>We sent a sign-in email to <b>${esc(ui.sentTo)}</b>. Type the code from it here:</p>
+      <form class="acct-form" data-a="code" novalidate>
+        <input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="10" placeholder="Code from the email" spellcheck="false" aria-label="Sign-in code from the email" />
+        <button class="btn primary" type="submit">Sign in</button>
+      </form>
       ${err}
+      <p class="muted">Or open the email's link on this device. The code and link work once and expire after an hour; if you ask for another email, only the newest one works.</p>
+      <p class="muted">Nothing there? Check your spam folder. Gmail switches links off in spam, but the code still works.</p>
       <p class="acct-row"><button class="btn" data-a="resend">Send again</button><button class="btn" data-a="other">Use a different email</button></p>`;
   return `
     <p>Sign in to keep your settings, personal bests and Locker in your account, add friends, and post runs to the leaderboards.</p>
-    <p><b>No password.</b> Enter your email and we'll send you a one-time sign-in link.</p>
+    <p><b>No password.</b> Enter your email and we'll send you a one-time sign-in code and link.</p>
     <form class="acct-form" data-a="send" novalidate>
       <input type="email" name="email" placeholder="you@example.com" autocomplete="email" inputmode="email" spellcheck="false" required aria-label="Email address" />
-      <button class="btn primary" type="submit">Email me a sign-in link</button>
+      <button class="btn primary" type="submit">Email me a sign-in code</button>
     </form>
     ${err}
     <p class="muted small">Solo play never needs an account. <a href="#" data-a="privacy">What's stored and where</a>.</p>`;
@@ -133,6 +138,23 @@ function wire(el, render, onPrivacy) {
     });
   });
   on('resend', (e) => busy(e.currentTarget, () => sendSignInLink(ui.sentTo)));
+  on('code', (e) => {
+    e.preventDefault();
+    const code = e.currentTarget.code.value;
+    busy(e.currentTarget.querySelector('button'), async () => {
+      await verifySignInCode(ui.sentTo, code);
+      ui.sentTo = null;
+    });
+  });
+  const codeInput = el.querySelector('input[name="code"]');
+  if (codeInput) {
+    codeInput.addEventListener('keydown', (e) => e.stopPropagation());
+    codeInput.addEventListener('input', () => {
+      const v = codeInput.value.replace(/\D/g, '');
+      if (v !== codeInput.value) codeInput.value = v;
+    });
+    setTimeout(() => codeInput.focus(), 0);
+  }
   on('other', () => {
     ui.sentTo = null;
     ui.error = null;

@@ -61,3 +61,8 @@ test('no secret or service_role key in frontend code', () => {
   const cfg = readFileSync('src/online/config.js', 'utf8');
   assert.match(cfg, /sb_publishable_/);
 });
+
+test('supabase/setup.sql is all the migrations joined, and up to date', async () => {
+  const { combinedSql } = await import('../tools/build-sql.mjs');
+  assert.equal(readFileSync('supabase/setup.sql', 'utf8'), combinedSql(), 'run `npm run build:sql` and commit supabase/setup.sql');
+});

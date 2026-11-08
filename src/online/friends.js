@@ -2,7 +2,7 @@
 // Your location is only ever shown to riders you've both accepted (the
 // database enforces this; see supabase/migrations/*_friends.sql).
 import { load, save } from '../store.js';
-import { account, OnlineError, beforeSignOut } from './account.js';
+import { account, OnlineError, beforeSignOut, notSetUp } from './account.js';
 import { getClient } from './client.js';
 
 export const friends = {
@@ -31,7 +31,13 @@ async function rpc(name, args) {
   const { data, error } = await sb.rpc(name, args);
   if (error) {
     console.warn(name, error);
-    throw new OnlineError(/fetch|network/i.test(error.message || '') ? "Can't reach the CranSki servers right now." : 'Something went wrong. Try again.');
+    throw new OnlineError(
+      notSetUp(error)
+        ? "Friends aren't set up on the server yet."
+        : /fetch|network/i.test(error.message || '')
+          ? "Can't reach the CranSki servers right now."
+          : 'Something went wrong. Try again.'
+    );
   }
   return data;
 }

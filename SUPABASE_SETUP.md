@@ -9,6 +9,8 @@ Your game's address is `https://harryxgreenhalgh-prog.github.io/CranSki/`. If yo
 
 Do the sections in order. Each one says which build step needs it.
 
+> **Shortcut for the database:** `supabase/setup.sql` contains all four SQL files below, joined together. Paste it once into **SQL Editor** → **New query** and click **Run**. It's safe to run on a project that already has some of it (for example only `profiles`), and safe to run again.
+
 ---
 
 ## 1. Profiles and gamertags (step 1)
@@ -40,7 +42,20 @@ The file is safe to run again if you need to.
    - Save.
 
    The sign-in link only sends players back to addresses on this list.
-3. Optional: **Authentication** → **Emails** → **Magic Link** lets you reword the email, for example the subject "Your CranSki sign-in link". Keep the `{{ .ConfirmationURL }}` link in it.
+3. **Put the sign-in code in the emails.** The game lets players type the code from the email instead of opening its link. That works on phones and tablets, works when an email app has turned the link off (Gmail does this for anything in spam), and keeps players in the same tab. Supabase uses two email templates for this, and both need the code:
+   - **Authentication** → **Emails** → **Templates** → **Confirm signup**: sent the first time someone signs in.
+   - **Authentication** → **Emails** → **Templates** → **Magic Link**: sent every time after that.
+
+   For each one, set the **Subject** to `Your CranSki sign-in code` and replace the **Body** with this, then save:
+
+   ```html
+   <h2>Sign in to CranSki</h2>
+   <p>Your sign-in code is:</p>
+   <p style="font-size:30px;font-weight:bold;letter-spacing:6px">{{ .Token }}</p>
+   <p>Type it into the game, or <a href="{{ .ConfirmationURL }}">open this link on the device you're playing on</a>.</p>
+   <p>The code works once and expires after an hour. If you asked for more than one email, only the newest one works.</p>
+   <p>If you didn't ask to sign in to CranSki, you can ignore this email.</p>
+   ```
 
 ### Send email for real players
 
@@ -50,14 +65,27 @@ Supabase's built-in email sender is only meant for testing. It sends a few email
 2. **Authentication** → **Emails** → **SMTP Settings** → turn on **Enable custom SMTP**, enter the host, port, username, password and a sender address, and save.
 3. **Authentication** → **Rate Limits**: adjust the email limit if you need to.
 
+**Using a Gmail account instead** (fine for a small game, about 500 emails a day). Best with a Gmail account made just for the game, because players see the sender address and name:
+
+| Setting | Value |
+| --- | --- |
+| Sender email address | the same Gmail address as the username (Gmail won't send "from" any other address) |
+| Sender name | `CranSki` |
+| Host | `smtp.gmail.com` |
+| Port number | `465` |
+| Username | the Gmail address |
+| Password | a Google **App Password**, not the normal password: turn on 2-Step Verification, then create one at myaccount.google.com/apppasswords and paste its 16 letters without spaces |
+
+Emails sent this way can land in spam at first. Marking one **Not spam** helps for that inbox, and the code in the email works either way.
+
 ### Test it
 
 1. Run `npm run dev` and open the address it prints.
 2. Click **Sign in** (top right of Basecamp) and enter your email.
-3. Open the link in the email. It should open the game signed in, and ask you to pick a gamertag.
+3. Type the code from the email into the game (or open the email's link). The game should sign you in and ask you to pick a gamertag.
 4. In **Table Editor** → `profiles`, you should see your gamertag.
 
-If the link opens a "requested path is invalid" or wrong-site page, the address isn't on the Redirect URLs list.
+If the link opens a "requested path is invalid" or wrong-site page, the address isn't on the Redirect URLs list. If the game says the link has expired or was already used, you probably opened an older email: each new email cancels the one before it. Typing the code avoids all of this.
 
 ---
 
@@ -196,7 +224,8 @@ The in-game **Privacy** page (Basecamp footer → Privacy) lists what's stored o
 
 ## Quick checklist
 
-- [ ] SQL: run the four files in `supabase/migrations/` in order. Alternatively, run `npx supabase db push` after `npx supabase link`; it asks for the database password.
+- [ ] SQL: paste `supabase/setup.sql` into the SQL Editor and run it. That's the four files in `supabase/migrations/` in one go. Alternatively, run `npx supabase db push` after `npx supabase link`; it asks for the database password.
+- [ ] Email templates **Confirm signup** and **Magic Link** both include `{{ .Token }}` (section 1).
 - [ ] Authentication → Email provider on, Confirm email on.
 - [ ] Authentication → URL Configuration: Site URL and the three Redirect URLs.
 - [ ] Custom SMTP set up before inviting players.
