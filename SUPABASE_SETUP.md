@@ -91,3 +91,84 @@ How it works:
 - While the game is open, it records where you are (Basecamp, a lift, a run, a replay) about every 45 seconds. A rider counts as online if they were seen in the last 90 seconds.
 - Online status and location are only ever returned for accepted friends, and nobody can read the `presence` table directly. Riders can tick **Appear offline** in the Friends panel to stop sharing it.
 - Limits: 50 pending requests out, 200 friends.
+
+---
+
+## 4. Leaderboards and the submit-run Edge Function (step 4)
+
+### Run the SQL
+
+1. **SQL Editor** → **New query**.
+2. Paste all of `supabase/migrations/20261108120300_leaderboards.sql` and click **Run**.
+3. **Table Editor** should now list `leaderboard` and `leaderboard_runs`, both marked as RLS enabled.
+
+### Deploy the function
+
+The function lives in `supabase/functions/submit-run/`:
+
+- `index.ts` connects it to your project.
+- `handler.js` is the referee.
+- `sim.js` is the game's simulation, bundled by `npm run build:sim`.
+
+You deploy it from your computer with the Supabase CLI. You need Node.js, which you already use for `npm run dev`.
+
+1. Open a terminal in the CranSki folder.
+2. Log the CLI in to your Supabase account. It opens a browser window to confirm:
+
+   ```bash
+   npx supabase login
+   ```
+
+3. Connect this folder to your project. If it asks for the database password, you can press Enter to skip it; deploying functions doesn't need it.
+
+   ```bash
+   npx supabase link --project-ref owlralulybcvgaaahjbs
+   ```
+
+4. Deploy the function:
+
+   ```bash
+   npx supabase functions deploy submit-run --no-verify-jwt
+   ```
+
+   `--no-verify-jwt` matches `supabase/config.toml`. The function checks each rider's sign-in token itself. If the CLI complains that Docker isn't running, add `--use-api` to the end of the command so Supabase bundles it on their servers instead.
+5. In the dashboard, **Edge Functions** should now list `submit-run`.
+
+There are no secrets to set. Supabase gives every Edge Function its project URL and secret key automatically, on its servers. You can see them, but not their values, under **Edge Functions** → **Secrets**: `SUPABASE_URL`, plus `SUPABASE_SECRET_KEYS` or `SUPABASE_SERVICE_ROLE_KEY`. Never copy the secret key anywhere else.
+
+### Test it
+
+1. Sign in to the game and finish a run on BIG AIR.
+2. The results screen should say **✓ Checked by the server · #1 on BIG AIR**.
+3. **Basecamp** → **Leaderboard** shows the board.
+4. In the dashboard, the `leaderboard` table has your row. **Edge Functions** → `submit-run` → **Logs** shows each check.
+
+### When you change the physics later
+
+The server must run exactly the same simulation as the game. After any change to `src/sim/`, `src/parks/` or `src/replay/record.js`:
+
+1. If the change alters how runs play out, bump `SIM_VERSION` in `src/replay/record.js`.
+2. Rebuild the bundled simulation, then commit the new `supabase/functions/submit-run/sim.js`:
+
+   ```bash
+   npm run build:sim
+   ```
+
+3. Deploy the function again:
+
+   ```bash
+   npx supabase functions deploy submit-run --no-verify-jwt
+   ```
+
+`npm test` fails if `sim.js` is out of date, so a stale referee can't slip through. Games still running the older version are told to reload before they can post.
+
+### How the check works
+
+- The game sends the run's recorded inputs (every 120 Hz step), the pause-menu resets, the grab buttons and ski/board choice, and the score the player saw.
+- The function re-rides those inputs through the same deterministic simulation:
+  - If the run doesn't reach the finish line, it's rejected.
+  - If the score differs from the one the player saw, it's rejected.
+  - Otherwise it saves the score **it** calculated, never the one sent.
+- Riders can read the boards, but only the function can write to them. The inputs behind each board run are kept in `leaderboard_runs`, which isn't readable through the API.
+- Each rider can submit at most 30 runs per 10 minutes.
+- The simulation uses its own deterministic maths (`src/sim/dmath.js`), so Chrome, Firefox, Safari and the server all compute identical results.

@@ -1,5 +1,6 @@
 // Trick recogniser: names a trick from the rotation actually completed in the air,
 // never from the keys that were held.
+import * as dm from './dmath.js';
 
 export const GRAB_MIN_TIME = 0.25; // a grab counts after this long held
 
@@ -54,12 +55,12 @@ export function describeTrick(air) {
   let flipDir = 0;
 
   if (family && OFF_AXIS.has(family) && family !== 'flat') {
-    spinDeg = roundSpin(Math.hypot(spin, flip));
+    spinDeg = roundSpin(dm.hypot(spin, flip));
     flips = countFlips(flip);
     flipDir = Math.sign(flip);
     offAxis = family;
   } else if (family === 'flat') {
-    spinDeg = roundSpin(Math.hypot(spin, roll));
+    spinDeg = roundSpin(dm.hypot(spin, roll));
     flips = countFlips(roll);
     flipDir = Math.sign(roll);
     offAxis = 'flat';

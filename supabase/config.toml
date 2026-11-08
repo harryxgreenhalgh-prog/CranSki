@@ -1,0 +1,8 @@
+# Supabase CLI settings for deploying CranSki's Edge Functions.
+project_id = "owlralulybcvgaaahjbs"
+
+# The functions check the rider's sign-in token themselves (handler.js), so the
+# gateway's own JWT check is turned off. This also lets them work with the new
+# publishable / secret API keys.
+[functions.submit-run]
+verify_jwt = false

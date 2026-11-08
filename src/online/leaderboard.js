@@ -1,0 +1,75 @@
+// Leaderboards: post a finished run (as its recorded inputs) to the
+// submit-run Edge Function, which re-rides it and saves the score only if it
+// matches; and read the boards.
+import { account } from './account.js';
+import { getClient } from './client.js';
+import { packRuns, SIM_VERSION } from '../replay/record.js';
+import { PARKS } from '../parks/index.js';
+
+export const BOARD_PARKS = PARKS.filter((p) => p.leaderboard).map((p) => p.id);
+
+export function canPost(record) {
+  return !!record && BOARD_PARKS.includes(record.park) && record.version === SIM_VERSION;
+}
+
+export const SUBMIT_ERRORS = {
+  mismatch: "The server re-rode your run and got a different score, so it wasn't posted.",
+  not_finished: "The server's re-ride didn't reach the finish line, so it wasn't posted.",
+  old_version: 'Your game is out of date. Reload the page to post runs.',
+  slow_down: "You've posted a lot of runs. Wait a few minutes and try again.",
+  no_gamertag: 'Pick a gamertag first.',
+  not_signed_in: 'Sign in to post runs.',
+  bad_inputs: "This run's recording couldn't be read.",
+  no_leaderboard: 'This park has no leaderboard.',
+  server_not_configured: "The leaderboard server isn't set up yet.",
+};
+
+// { ok: true, total, best, improved, rank } or { ok: false, error, message, serverTotal }
+export async function submitRun(record) {
+  if (!account.ready) return { ok: false, error: 'not_signed_in', message: SUBMIT_ERRORS.not_signed_in };
+  const body = {
+    park: record.park,
+    version: record.version,
+    steps: record.inputs.steps,
+    inputs: packRuns(record.inputs.runs),
+    marks: record.inputs.marks || [],
+    grabSlots: record.grabSlots,
+    board: !!record.board,
+    claimed: { total: record.total },
+  };
+  try {
+    const sb = await getClient();
+    const { data, error } = await sb.functions.invoke('submit-run', { body });
+    if (!error) return { ok: true, ...data };
+    let info = {};
+    try {
+      info = await error.context?.json?.();
+    } catch {
+      /* not JSON */
+    }
+    const code = info?.error || 'server_error';
+    return { ok: false, error: code, serverTotal: info?.server_total ?? null, message: SUBMIT_ERRORS[code] || "Couldn't reach the leaderboard server. Try again later." };
+  } catch (e) {
+    console.warn('submit-run failed', e);
+    return { ok: false, error: 'network', message: "Couldn't reach the leaderboard server. Try again later." };
+  }
+}
+
+async function rpc(name, args) {
+  const sb = await getClient();
+  const { data, error } = await sb.rpc(name, args);
+  if (error) throw new Error("Couldn't load the leaderboard. Try again later.");
+  return data || [];
+}
+
+// scope: 'top' | 'friends'
+export async function fetchBoard(park, scope = 'top') {
+  if (scope === 'friends') return account.ready ? rpc('leaderboard_friends', { p_park: park }) : [];
+  return rpc('leaderboard_top', { p_park: park, p_limit: 50 });
+}
+
+export async function fetchMine(park) {
+  if (!account.ready) return null;
+  const rows = await rpc('leaderboard_me', { p_park: park });
+  return rows[0] || null;
+}

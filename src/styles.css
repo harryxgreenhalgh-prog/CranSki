@@ -2003,3 +2003,69 @@ body.touching #footer .credits {
   color: #fff;
   background: var(--orange);
 }
+
+/* ---------------------------------------------------------------- leaderboards */
+.seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 10px;
+}
+
+.seg button {
+  font: inherit;
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--paper);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--panel-line);
+  border-radius: 999px;
+  padding: 5px 11px;
+  cursor: pointer;
+}
+
+.seg button.on {
+  background: var(--blue);
+  border-color: transparent;
+}
+
+.board {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.board th {
+  text-align: left;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  padding: 4px 6px;
+}
+
+.board td {
+  padding: 7px 6px;
+  border-top: 1px solid var(--panel-line);
+}
+
+.board tr.me td {
+  background: rgba(30, 123, 255, 0.28);
+}
+
+.board-me {
+  margin: 8px 0;
+}
+
+.boardline {
+  min-height: 1.4em;
+  margin: 6px 0 2px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+@media (max-width: 560px) {
+  .hide-narrow {
+    display: none;
+  }
+}

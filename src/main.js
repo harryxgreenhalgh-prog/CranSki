@@ -35,6 +35,8 @@ import { mountAccount, addAccountSection, esc } from './ui/accountUI.js';
 import { cloud, cloudStatusText } from './online/cloud.js';
 import { friends, onFriends, setLocation } from './online/friends.js';
 import { mountFriends } from './ui/friendsUI.js';
+import { canPost, submitRun } from './online/leaderboard.js';
+import { mountBoard } from './ui/boardUI.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -201,6 +203,7 @@ function boot() {
       else if (tab === 'updates') openPage('updates');
       else if (tab === 'replays') openReplays();
       else if (tab === 'locker') openLocker();
+      else if (tab === 'leaderboard') openBoard();
       else openPage('online');
     },
     onPage: (p) => openPage(p),
@@ -321,6 +324,47 @@ function boot() {
     else if (state === 'replay') setLocation('replay', park);
     else if (state !== 'loading' && state !== 'boot') setLocation('basecamp');
   }
+
+  // Leaderboards (Phase 3 step 4).
+  function openBoard() {
+    openModal('Leaderboard', '<div class="boardwrap" id="board-panel"></div>');
+    mountBoard($('board-panel'), { park: loaded ? loaded.id : parkId, onAccount: () => openAccount() });
+  }
+  const fmtN = (n) => Math.round(n).toLocaleString('en-US');
+  // Every finished run on a leaderboard park is posted while signed in; the
+  // server re-rides it and only counts it if the score comes out the same.
+  async function postRun(rec) {
+    const el = $('res-board');
+    const name = parkMeta(rec.park).name;
+    if (!canPost(rec)) {
+      el.textContent = '';
+      return;
+    }
+    if (!account.ready) {
+      el.innerHTML = `<button class="btn sm" data-post="signin">${account.signedIn ? 'Pick a gamertag' : 'Sign in'}</button> to post this run to the ${name} leaderboard`;
+      el.querySelector('[data-post]').addEventListener('click', () => openAccount());
+      return;
+    }
+    if (rec.posting || rec.posted) return;
+    rec.posting = true;
+    el.textContent = 'Checking your run on the server…';
+    const r = await submitRun(rec);
+    rec.posting = false;
+    if (lastReplay !== rec) return;
+    if (r.ok) {
+      rec.posted = true;
+      el.innerHTML = `✓ Checked by the server · <b>#${r.rank}</b> on ${name}${r.improved ? ' · new leaderboard best' : ` · your board best is ${fmtN(r.best)}`}`;
+    } else {
+      el.textContent = r.message + (r.error === 'mismatch' && r.serverTotal != null ? ` (Server got ${fmtN(r.serverTotal)}.)` : '');
+      if (r.error === 'network' || r.error === 'server_error') {
+        el.insertAdjacentHTML('beforeend', ' <button class="btn sm" data-post="retry">Try again</button>');
+        el.querySelector('[data-post]').addEventListener('click', () => postRun(rec));
+      }
+    }
+  }
+  account.onChange(() => {
+    if (state === 'results' && lastReplay && account.ready && !lastReplay.posted && !lastReplay.posting) postRun(lastReplay);
+  });
 
   // Cloud saves (Phase 3 step 2): show the status, and apply what arrives.
   addAccountSection(() => `<h3>CLOUD SAVE</h3><p class="muted">${esc(cloudStatusText())}</p>`);
@@ -481,14 +525,24 @@ function boot() {
     const rows = list.length
       ? list
           .map(
-            (r) => `<tr><td><b>${parkMeta(r.park).name}</b><br><span class="muted">${new Date(r.date).toLocaleString()}</span></td><td>${r.total.toLocaleString('en-US')}<br><span class="muted">${r.bestTrick || '—'}</span></td><td>${r.version === SIM_VERSION ? `<button class="btn sm" data-watch="${r.id}">Watch</button> <button class="btn sm" data-clip="${r.id}">Clip</button>` : '<span class="muted">older version</span>'} <button class="btn sm" data-keep="${r.id}">${r.saved ? 'Kept ★' : 'Keep'}</button> <button class="btn sm" data-del="${r.id}">Delete</button></td></tr>`
+            (r) => `<tr><td><b>${parkMeta(r.park).name}</b><br><span class="muted">${new Date(r.date).toLocaleString()}</span></td><td>${r.total.toLocaleString('en-US')}<br><span class="muted">${r.bestTrick || '—'}</span></td><td>${r.version === SIM_VERSION ? `<button class="btn sm" data-watch="${r.id}">Watch</button> <button class="btn sm" data-clip="${r.id}">Clip</button>` : '<span class="muted">older version</span>'} ${account.ready && canPost(r) ? `<button class="btn sm" data-post="${r.id}">Post</button>` : ''} <button class="btn sm" data-keep="${r.id}">${r.saved ? 'Kept ★' : 'Keep'}</button> <button class="btn sm" data-del="${r.id}">Delete</button></td></tr>`
           )
           .join('')
       : '<tr><td class="muted">No replays yet. Your last 5 runs are saved here automatically.</td></tr>';
-    openModal('Replays', `<p class="muted">Your last 5 runs are kept automatically; Keep a replay to hold on to it. Your best run on each park is saved as a ghost you race next time. Everything stays in this browser.</p><table class="rlist">${rows}</table>`);
+    openModal('Replays', `<p class="muted">Your last 5 runs are kept automatically; Keep a replay to hold on to it. Your best run on each park is saved as a ghost you race next time. Replays stay in this browser; Post sends a run's inputs to the leaderboard server to be checked.</p><table class="rlist">${rows}</table>`);
     const body = $('modal-body');
     body.querySelectorAll('[data-watch]').forEach((b) => b.addEventListener('click', async () => watchReplay(await replayDB.get(Number(b.dataset.watch)), 'basecamp')));
     body.querySelectorAll('[data-clip]').forEach((b) => b.addEventListener('click', async () => watchReplay(await replayDB.get(Number(b.dataset.clip)), 'basecamp', true)));
+    body.querySelectorAll('[data-post]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        b.disabled = true;
+        b.textContent = 'Checking…';
+        const r = await submitRun(await replayDB.get(Number(b.dataset.post)));
+        b.textContent = r.ok ? `#${r.rank} ✓` : 'Not posted';
+        b.title = r.ok ? 'Checked by the server and posted' : r.message;
+        if (!r.ok) b.insertAdjacentHTML('afterend', `<br><span class="muted small">${esc(r.message)}</span>`);
+      })
+    );
     body.querySelectorAll('[data-keep]').forEach((b) =>
       b.addEventListener('click', async () => {
         const r = await replayDB.get(Number(b.dataset.keep));
@@ -661,6 +715,8 @@ function boot() {
     profile.addRun({ park: L.id, total: res.total, date: Date.now(), best: res.bestTrick?.name || null });
     showResults(res, Math.max(best, res.total), isNew);
     $('res-frost').textContent = frost > 0 ? `+${frost} FROST earned` : 'Daily FROST cap reached (100 a day)';
+    if (lastReplay) postRun(lastReplay);
+    else $('res-board').textContent = '';
     $('finishcard').classList.add('hidden');
     state = 'results';
     showOverlay('results');
@@ -1098,6 +1154,9 @@ function boot() {
     pivot,
     get state() {
       return state;
+    },
+    get lastReplay() {
+      return lastReplay;
     },
     get lift() {
       return lift;

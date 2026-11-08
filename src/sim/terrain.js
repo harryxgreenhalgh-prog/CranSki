@@ -9,6 +9,7 @@
 
 import { mulberry32 } from './rng.js';
 import { liftLayout } from './liftline.js';
+import * as dm from './dmath.js';
 
 const DEG = Math.PI / 180;
 const PSTEP = 0.05; // profile sample step (m)
@@ -35,8 +36,8 @@ function integrateProfile(points, endS) {
     const [s1, a1] = points[Math.min(seg + 1, points.length - 1)];
     let t = s1 > s0 ? (s - s0) / (s1 - s0) : 1;
     t = Math.min(1, Math.max(0, t));
-    const e = 0.5 - 0.5 * Math.cos(Math.PI * t);
-    const g = Math.tan((a0 + (a1 - a0) * e) * DEG);
+    const e = 0.5 - 0.5 * dm.cos(Math.PI * t);
+    const g = dm.tan((a0 + (a1 - a0) * e) * DEG);
     slope[i] = g;
     if (i > 0) y += 0.5 * (slope[i - 1] + g) * PSTEP;
     h[i] = y;
@@ -51,15 +52,15 @@ export function buildJumpTable(f) {
   const nFace = Math.max(1, Math.round(f.face / FSTEP));
   const curve = f.curve ?? 1.4;
   for (let i = 1; i <= nFace; i++) {
-    const a = f.lip * DEG * Math.pow(i / nFace, curve);
-    h += Math.tan(a) * FSTEP;
+    const a = f.lip * DEG * dm.pow(i / nFace, curve);
+    h += dm.tan(a) * FSTEP;
     out.push(h);
   }
   const lipH = h;
   const lipAlong = nFace * FSTEP;
   const gap = f.gap ?? 0;
   const tableH = gap > 0 ? lipH * (f.table ?? 0.85) : 0;
-  const back = Math.tan((f.back ?? 50) * DEG) * FSTEP;
+  const back = dm.tan((f.back ?? 50) * DEG) * FSTEP;
   while (h > tableH + 1e-6) {
     h = Math.max(tableH, h - back);
     out.push(h);
@@ -73,17 +74,17 @@ export function buildJumpTable(f) {
     const T = f.trans ?? 8;
     const nK = Math.round(K / FSTEP);
     for (let i = 1; i <= nK && h > 0; i++) {
-      h = Math.max(0, h - Math.tan((land * i) / nK) * FSTEP);
+      h = Math.max(0, h - dm.tan((land * i) / nK) * FSTEP);
       out.push(h);
     }
-    const hTrans = T * Math.tan(land) * 0.5;
+    const hTrans = T * dm.tan(land) * 0.5;
     while (h > hTrans) {
-      h -= Math.tan(land) * FSTEP;
+      h -= dm.tan(land) * FSTEP;
       out.push(h);
     }
     const nT = Math.round(T / FSTEP);
     for (let i = 1; i <= nT && h > 0; i++) {
-      h = Math.max(0, h - Math.tan(land * (1 - i / nT)) * FSTEP);
+      h = Math.max(0, h - dm.tan(land * (1 - i / nT)) * FSTEP);
       out.push(h);
     }
     while (h > 0) {
@@ -107,8 +108,8 @@ function sampleTable(table, along) {
 function resolveFeature(def, index) {
   const f = { ...def, index };
   const dir = (def.dir ?? 0) * DEG;
-  f.sin = Math.sin(dir);
-  f.cos = Math.cos(dir);
+  f.sin = dm.sin(dir);
+  f.cos = dm.cos(dir);
   f.u = def.u ?? 0;
   switch (def.type) {
     case 'jump': {
@@ -136,7 +137,7 @@ function resolveFeature(def, index) {
       f.a0 = -2.5;
       f.a1 = 1.6 + run;
       f.rel = (a) => {
-        if (a < 0) return 0.35 * Math.sin((Math.PI * (a + 2.5)) / 2.5);
+        if (a < 0) return 0.35 * dm.sin((Math.PI * (a + 2.5)) / 2.5);
         if (a < 1.6) return -def.drop * smoothstep(0, 1.6, a);
         return -def.drop * (1 - smoothstep(1.6, 1.6 + run, a));
       };
@@ -147,7 +148,7 @@ function resolveFeature(def, index) {
       f.side = def.side ?? 6;
       f.a0 = 0;
       f.a1 = def.len;
-      f.rel = (a) => -def.depth * Math.sin((Math.PI * a) / def.len);
+      f.rel = (a) => -def.depth * dm.sin((Math.PI * a) / def.len);
       break;
     }
     case 'block': {
@@ -190,14 +191,14 @@ export class Terrain {
       const [s1, u1] = cpts[Math.min(seg + 1, cpts.length - 1)];
       let t = s1 > s0 ? (i - s0) / (s1 - s0) : 1;
       t = Math.min(1, Math.max(0, t));
-      this.cx[i] = u0 + (u1 - u0) * (0.5 - 0.5 * Math.cos(Math.PI * t));
+      this.cx[i] = u0 + (u1 - u0) * (0.5 - 0.5 * dm.cos(Math.PI * t));
     }
 
     this.cross = { type: 'banks', hw: 20, bankK: 0.06, bankMax: 30, ...(park.cross || {}) };
     if (this.cross.type === 'pipe') {
       const c = this.cross;
-      c.R = c.wall / (1 - Math.cos(82 * DEG));
-      c.aMax = c.R * Math.sin(82 * DEG);
+      c.R = c.wall / (1 - dm.cos(82 * DEG));
+      c.aMax = c.R * dm.sin(82 * DEG);
       c.lipU = c.floor + c.aMax; // coping
       c.hw = c.lipU + c.deck;
     }
@@ -281,7 +282,7 @@ export class Terrain {
         const top = c.wall;
         const b = au - c.hw;
         if (b <= 0) return top;
-        return top + c.bankMax * (1 - Math.exp((-c.bankK * b * b) / c.bankMax));
+        return top + c.bankMax * (1 - dm.exp((-c.bankK * b * b) / c.bankMax));
       }
       case 'street': {
         const a = au - c.hw;
@@ -289,22 +290,22 @@ export class Terrain {
         const curb = c.curb * smoothstep(0, 1.2, a);
         const b = a - 1.2 - c.walk;
         if (b <= 0) return curb;
-        return curb + c.bankMax * (1 - Math.exp((-c.bankK * b * b) / c.bankMax));
+        return curb + c.bankMax * (1 - dm.exp((-c.bankK * b * b) / c.bankMax));
       }
       case 'powder': {
         const a = au - c.hw;
         if (a <= 0) return 0;
         // Untracked powder: rolling, gently rising, then black rock walls.
-        const roll = 0.7 * Math.sin(s / 23 + u / 11) * Math.sin(u / 17 + s / 41) * smoothstep(0, 8, a);
+        const roll = 0.7 * dm.sin(s / 23 + u / 11) * dm.sin(u / 17 + s / 41) * smoothstep(0, 8, a);
         let h = 0.04 * a + roll;
         const r = au - c.rockStart;
-        if (r > 0) h += c.rockMax * (1 - Math.exp((-c.rockK * r * r) / c.rockMax));
+        if (r > 0) h += c.rockMax * (1 - dm.exp((-c.rockK * r * r) / c.rockMax));
         return h;
       }
       default: {
         const a = au - c.hw;
         if (a <= 0) return 0;
-        return c.bankMax * (1 - Math.exp((-c.bankK * a * a) / c.bankMax));
+        return c.bankMax * (1 - dm.exp((-c.bankK * a * a) / c.bankMax));
       }
     }
   }
@@ -323,7 +324,9 @@ export class Terrain {
       const across = du * f.cos - ds * f.sin;
       const ac = Math.abs(across);
       if (f.type === 'bump') {
-        const q = (across / f.rx) ** 2 + (along / f.rs) ** 2;
+        const qa = across / f.rx;
+        const qb = along / f.rs;
+        const q = qa * qa + qb * qb;
         if (q < 1) h += f.h * (1 - q) * (1 - q);
         continue;
       }
@@ -345,7 +348,7 @@ export class Terrain {
     const e = 0.06;
     const hx = (this.height(x + e, z) - this.height(x - e, z)) / (2 * e);
     const hz = (this.height(x, z + e) - this.height(x, z - e)) / (2 * e);
-    const len = Math.hypot(hx, 1, hz);
+    const len = dm.hypot(hx, 1, hz);
     out.x = -hx / len;
     out.y = 1 / len;
     out.z = -hz / len;
@@ -439,7 +442,7 @@ export class Terrain {
         const t = k / (n - 1);
         const s = d.s + t * len;
         let u = u0;
-        if (kind === 'snake') u += 1.6 * Math.sin(t * Math.PI * 2);
+        if (kind === 'snake') u += 1.6 * dm.sin(t * Math.PI * 2);
         const x = this.center(s) + u;
         let y;
         if (kind === 'kink') {
@@ -450,7 +453,7 @@ export class Terrain {
         } else {
           y = null; // straight between the end heights, filled in below
         }
-        if (kind === 'rainbow') y = this.height(x, -s) + startH + (d.arc ?? 1.4) * Math.sin(Math.PI * t);
+        if (kind === 'rainbow') y = this.height(x, -s) + startH + (d.arc ?? 1.4) * dm.sin(Math.PI * t);
         pts.push({ x, y, z: -s, s });
       }
       if (pts[0].y === null) {
@@ -465,7 +468,7 @@ export class Terrain {
       for (let k = 1; k < pts.length; k++) {
         const a = pts[k - 1];
         const b = pts[k];
-        cum.push(cum[k - 1] + Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z));
+        cum.push(cum[k - 1] + dm.hypot(b.x - a.x, b.y - a.y, b.z - a.z));
       }
       const rail = { index: i, kind, pts, cum, length: cum[cum.length - 1], radius: kind === 'pipe' ? 0.35 : kind === 'box' ? 0.2 : 0.05, lip: lipF || null, def: d };
       this.rails.push(rail);
@@ -513,7 +516,7 @@ export class Terrain {
       t = Math.max(0, Math.min(1, t));
       const px = a.x + dx * t;
       const pz = a.z + dz * t;
-      const dist = Math.hypot(x - px, z - pz);
+      const dist = dm.hypot(x - px, z - pz);
       if (!best || dist < best.dist) {
         best = { d: rail.cum[k - 1] + (rail.cum[k] - rail.cum[k - 1]) * t, dist, y: a.y + (b.y - a.y) * t, t, k };
       }
