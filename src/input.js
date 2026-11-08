@@ -15,6 +15,7 @@ export const BINDINGS = {
     grab2: ['KeyQ'], // Tail
     grab3: ['KeyE'], // Japan
     restart: ['KeyR'],
+    skipLift: ['KeyF'],
     pause: ['Escape', 'KeyP'],
     confirm: ['Enter'],
   },

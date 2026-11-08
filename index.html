@@ -34,18 +34,14 @@
         <div id="hint"></div>
       </div>
 
+      <div id="liftbar" class="hidden"><span id="lift-name">GONDOLA</span><span class="muted">Riding up · <kbd>F</kbd> skip</span></div>
+
       <!-- Title / how to play -->
       <section id="title" class="overlay">
         <div class="panel">
           <h1 class="logo">CRANSKI</h1>
-          <p class="tag">Solo · Phase 1 preview</p>
-          <div class="park-card">
-            <div>
-              <div class="park-name">BIG AIR</div>
-              <div class="park-meta">~0.8 km · one mega kicker · learn big spins</div>
-            </div>
-            <span class="picked">PICKED</span>
-          </div>
+          <p class="tag">Solo · pick a park</p>
+          <div id="park-list" class="park-list"></div>
           <button id="ride" class="btn primary">RIDE <kbd>Enter</kbd></button>
           <div id="controls-help"></div>
         </div>
@@ -87,7 +83,7 @@
             <button class="btn" disabled title="Coming in Phase 2">Watch replay</button>
             <button class="btn" disabled title="Coming in Phase 2">Save replay</button>
             <button class="btn" disabled title="Coming in Phase 2">Clip</button>
-            <button class="btn" disabled title="More parks arrive in Phase 2">Map</button>
+            <button class="btn" data-act="map">Map</button>
           </div>
         </div>
       </section>

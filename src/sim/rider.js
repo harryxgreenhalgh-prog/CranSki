@@ -6,7 +6,6 @@ import { DT, PHYS, AIR, LAND, CRASH } from './constants.js';
 import { OFF_AXIS } from './tricks.js';
 
 const DEG = Math.PI / 180;
-const UP = new Vector3(0, 1, 0);
 const GRAB_SLOTS = ['mute', 'tail', 'japan'];
 
 // Scratch objects (avoid garbage every step).
@@ -59,6 +58,7 @@ export class Rider {
     this.vel = new Vector3();
     this.q = new Quaternion();
     this.omega = new Vector3(); // body-frame angular velocity, deg/s (x = flip, y = spin, z = roll)
+    this.skiDir = new Vector3(0, 0, -1); // where the ski tips point, kept on the snow plane
     this.events = [];
     this.reset();
   }
@@ -66,9 +66,10 @@ export class Rider {
   reset() {
     const t = this.terrain;
     const s = t.park.startS;
-    this.pos.set(0, t.height(0, -s), -s);
-    this.vel.set(0, 0, -1.5);
-    this.yaw = 0; // heading of the skis on snow; 0 = straight downhill
+    const x = t.center(s);
+    this.pos.set(x, t.height(x, -s), -s);
+    this.courseDir(s, this.skiDir);
+    this.vel.copy(this.skiDir).multiplyScalar(1.5);
     this.mode = 'ground'; // 'ground' | 'air' | 'crash'
     this.switchStance = false;
     this.load = 0;
@@ -95,14 +96,110 @@ export class Rider {
   }
 
   forward(out) {
-    return out.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+    return out.copy(this.skiDir);
+  }
+
+  // Horizontal direction straight down the course at distance s.
+  courseDir(s, out) {
+    return out.set(this.terrain.centerSlope(s), 0, -1).normalize();
   }
 
   _groundOrientation() {
-    this.terrain.normal(this.pos.x, this.pos.z, _n);
-    this.forward(_a);
-    projectOnPlane(_a, _n, _f);
-    basisQuat(_f, _n, this.q);
+    const n = this.terrain.normal(this.pos.x, this.pos.z, _n);
+    if (!projectOnPlane(this.skiDir, n, _f)) {
+      if (!projectOnPlane(this.vel, n, _f)) projectOnPlane(this.courseDir(-this.pos.z, _a), n, _f);
+    }
+    this.skiDir.copy(_f);
+    basisQuat(_f, n, this.q);
+  }
+
+  // Push the rider back onto the snow along the surface normal (works on steep pipe walls).
+  _snapToSurface() {
+    const t = this.terrain;
+    for (let k = 0; k < 3; k++) {
+      const gy = t.height(this.pos.x, this.pos.z);
+      const dy = gy - this.pos.y;
+      if (Math.abs(dy) < 1e-4) break;
+      const n = t.normal(this.pos.x, this.pos.z, _a);
+      const d = dy * n.y;
+      this.pos.x += n.x * d;
+      this.pos.z += n.z * d;
+      this.pos.y += n.y * d;
+    }
+    const gy = t.height(this.pos.x, this.pos.z);
+    if (this.pos.y < gy) this.pos.y = gy;
+  }
+
+  // Trees, houses and the ball push you away instead of throwing you.
+  _collide() {
+    const t = this.terrain;
+    const p = this.pos;
+    const s = -p.z;
+    for (const list of t.treesNear(s)) {
+      if (!list) continue;
+      for (const tr of list) {
+        const dx = p.x - tr.x;
+        const dz = p.z + tr.s;
+        const r = 0.45 * tr.scale + 0.35;
+        const d2 = dx * dx + dz * dz;
+        if (d2 >= r * r || d2 < 1e-8) continue;
+        const d = Math.sqrt(d2);
+        const nx = dx / d;
+        const nz = dz / d;
+        p.x += nx * (r - d);
+        p.z += nz * (r - d);
+        const into = this.vel.x * nx + this.vel.z * nz;
+        if (into < 0) {
+          this.vel.x -= into * nx * 1.3;
+          this.vel.z -= into * nz * 1.3;
+          this.vel.multiplyScalar(0.8);
+          this.events.push({ type: 'bump', what: 'tree', speed: -into });
+        }
+      }
+    }
+    for (const o of t.obstacles) {
+      if (o.type === 'house') {
+        if (p.x < o.minX - 0.4 || p.x > o.maxX + 0.4 || p.z < o.minZ - 0.4 || p.z > o.maxZ + 0.4) continue;
+        if (p.y > o.y + o.h) continue;
+        const pen = [p.x - (o.minX - 0.4), o.maxX + 0.4 - p.x, p.z - (o.minZ - 0.4), o.maxZ + 0.4 - p.z];
+        const i = pen.indexOf(Math.min(...pen));
+        if (i === 0) {
+          p.x = o.minX - 0.4;
+          if (this.vel.x > 0) this.vel.x *= -0.3;
+        } else if (i === 1) {
+          p.x = o.maxX + 0.4;
+          if (this.vel.x < 0) this.vel.x *= -0.3;
+        } else if (i === 2) {
+          p.z = o.minZ - 0.4;
+          if (this.vel.z > 0) this.vel.z *= -0.3;
+        } else {
+          p.z = o.maxZ + 0.4;
+          if (this.vel.z < 0) this.vel.z *= -0.3;
+        }
+        this.events.push({ type: 'bump', what: 'house', speed: this.vel.length() });
+      } else if (o.type === 'ball') {
+        const cx = p.x - o.x;
+        const cy = p.y + 0.9 - o.y;
+        const cz = p.z - o.z;
+        const r = o.r + 0.5;
+        const d2 = cx * cx + cy * cy + cz * cz;
+        if (d2 >= r * r || d2 < 1e-8) continue;
+        const d = Math.sqrt(d2);
+        const nx = cx / d;
+        const ny = cy / d;
+        const nz = cz / d;
+        p.x += nx * (r - d);
+        p.z += nz * (r - d);
+        if (this.mode === 'air') p.y += ny * (r - d);
+        const into = this.vel.x * nx + this.vel.y * ny + this.vel.z * nz;
+        if (into < 0) {
+          this.vel.x -= into * nx * 1.4;
+          this.vel.y -= this.mode === 'air' ? into * ny * 1.4 : 0;
+          this.vel.z -= into * nz * 1.4;
+          if (o.ring) this.events.push({ type: 'ring', speed: -into });
+        }
+      }
+    }
   }
 
   step(input) {
@@ -110,6 +207,7 @@ export class Rider {
     if (this.mode === 'ground') this._stepGround(input);
     else if (this.mode === 'air') this._stepAir(input);
     else this._stepCrash(input);
+    this._collide();
     this.prevPop = input.pop;
     for (let i = 0; i < 3; i++) this.prevGrab[i] = input.grab[i];
   }
@@ -139,7 +237,12 @@ export class Rider {
     if (this.straighten > 0) {
       this.straighten -= DT;
     }
-    this.yaw += dYaw;
+    if (!projectOnPlane(this.skiDir, n, _f)) projectOnPlane(this.vel, n, _f);
+    this.skiDir.copy(_f);
+    if (dYaw !== 0) {
+      _q.setFromAxisAngle(n, dYaw);
+      this.skiDir.applyQuaternion(_q);
+    }
     this.lean += (input.steer * (0.3 + 0.7 * speedT) - this.lean) * Math.min(1, DT * 8);
 
     // Carve: rotate velocity about the normal by the same yaw change.
@@ -168,11 +271,10 @@ export class Rider {
 
     // Snap the skis toward the travel line after a sideways landing.
     if (this.straighten > 0 && speed > 2) {
-      projectOnPlane(this.vel, n, _b);
-      const travelYaw = Math.atan2(-_b.x, -_b.z) + (this.switchStance ? Math.PI : 0);
-      let d = travelYaw - this.yaw;
-      d = Math.atan2(Math.sin(d), Math.cos(d));
-      this.yaw += d * Math.min(1, DT * 7);
+      if (projectOnPlane(this.vel, n, _b)) {
+        if (this.switchStance) _b.negate();
+        this.skiDir.lerp(_b, Math.min(1, DT * 7)).normalize();
+      }
     }
 
     // Friction, drag, brake.
@@ -207,7 +309,7 @@ export class Rider {
     const released = this.prevPop && !input.pop;
     if (released) {
       popImpulse = PHYS.popMin + (PHYS.popMax - PHYS.popMin) * this.load;
-      if (t.onKickerFace(this.pos.z)) {
+      if (t.onKickerFace(this.pos.x, this.pos.z)) {
         // Too early on the kicker: hold the pop for the lip instead of leaving the ramp.
         this.pendingPop = popImpulse;
         this.pendingPopTimer = PHYS.popBufferTime;
@@ -230,16 +332,17 @@ export class Rider {
     this.pos.addScaledVector(this.vel, DT);
 
     const gy = t.height(this.pos.x, this.pos.z);
-    const gap = this.pos.y - gy;
     const n2 = t.normal(this.pos.x, this.pos.z, _a);
+    const gap = (this.pos.y - gy) * n2.y; // distance from the snow along its normal
     const away = this.vel.dot(n2);
 
     if (!popped && gap < PHYS.stickGap && away < PHYS.stickNormalSpeed) {
-      this.pos.y = gy;
-      this.vel.addScaledVector(n2, -this.vel.dot(n2));
+      this._snapToSurface();
+      const n3 = t.normal(this.pos.x, this.pos.z, _a);
+      this.vel.addScaledVector(n3, -this.vel.dot(n3));
       this._groundOrientation();
     } else if (gap < 0 && !popped) {
-      this.pos.y = gy;
+      this._snapToSurface();
     } else {
       // Leaving the snow: a lip, a knuckle or a pop.
       if (!popped && this.pendingPop > 0) {
@@ -247,7 +350,6 @@ export class Rider {
       }
       this._takeoff(prevPos, n);
     }
-    if (this.pos.y < gy) this.pos.y = gy;
   }
 
   _takeoff(prevPos, n) {
@@ -259,7 +361,7 @@ export class Rider {
     if (_b.lengthSq() > 1e-4) {
       _b.normalize();
       const rise = -(n.x * _b.x + n.z * _b.z) / n.y;
-      uphill = rise > 0.05 && !t.onKickerFace(prevPos.z);
+      uphill = rise > 0.05 && rise < 1.2 && !t.onKickerFace(prevPos.x, prevPos.z);
     }
     const windSpin = Math.sign(this.windup);
     this.air = {
@@ -411,7 +513,7 @@ export class Rider {
 
     // Touchdown?
     if (this.pos.y <= gy) {
-      this.pos.y = gy;
+      this._snapToSurface();
       this._land(input);
     }
   }
@@ -530,9 +632,7 @@ export class Rider {
       this._startCrash(switchLand);
     } else {
       // Ride away: skis take the heading of the body, then straighten onto the travel line.
-      if (hasFb) {
-        this.yaw = Math.atan2(-_r.x, -_r.z);
-      }
+      if (hasFb) this.skiDir.copy(_r);
       this.switchStance = switchLand;
       this.mode = 'ground';
       this.groundTime = 0;
@@ -581,7 +681,7 @@ export class Rider {
       this.vel.multiplyScalar((sp - decel) / sp);
     }
     this.pos.addScaledVector(this.vel, DT);
-    this.pos.y = t.height(this.pos.x, this.pos.z);
+    this._snapToSurface();
 
     if (c.getUp > 0) {
       c.getUp -= DT;
@@ -598,9 +698,9 @@ export class Rider {
   _getUp() {
     this.mode = 'ground';
     this.crash = null;
-    this.yaw = 0;
+    this.courseDir(-this.pos.z, this.skiDir);
     this.switchStance = false;
-    this.vel.set(0, 0, -1);
+    this.vel.copy(this.skiDir);
     this.groundTime = 0;
     this._groundOrientation();
   }

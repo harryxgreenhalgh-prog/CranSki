@@ -1,0 +1,86 @@
+// Park registry. Each park's layout and scenery live in their own module and
+// are only downloaded when the park is picked (Vite splits them into chunks).
+
+export const PARKS = [
+  {
+    id: 'bigair',
+    name: 'BIG AIR',
+    purpose: 'Learn big spins',
+    length: '~0.8 km',
+    features: 'One mega kicker',
+    lift: 'Gondola',
+    leaderboard: true,
+    map: { x: 22, y: 30 },
+    load: () => import('./bigair.js'),
+  },
+  {
+    id: 'yard',
+    name: 'THE YARD',
+    purpose: 'Default all-rounder',
+    length: '~4 km',
+    features: '15 jumps, 5 rail zones',
+    lift: 'Gondola',
+    leaderboard: true,
+    map: { x: 48, y: 22 },
+    load: () => import('./yard.js'),
+  },
+  {
+    id: 'apex',
+    name: 'APEX',
+    purpose: 'Competitive, ranked home',
+    length: '~1.6 km',
+    features: '4 big kickers, 2 rail zones, stair set',
+    lift: 'Gondola',
+    leaderboard: true,
+    map: { x: 70, y: 18 },
+    load: () => import('./apex.js'),
+  },
+  {
+    id: 'forest',
+    name: 'FOREST LINE',
+    purpose: 'Rails and gaps',
+    length: '~3.8 km',
+    features: '15 jumps, 8 rail zones',
+    lift: 'Gondola',
+    leaderboard: true,
+    map: { x: 34, y: 58 },
+    load: () => import('./forest.js'),
+  },
+  {
+    id: 'shirakumo',
+    name: 'SHIRAKUMO',
+    purpose: 'Freeride powder',
+    length: '~3.2 km',
+    features: 'Groomed piste, powder, trails, cliffs',
+    lift: 'Ropeway',
+    leaderboard: false,
+    map: { x: 82, y: 44 },
+    load: () => import('./shirakumo.js'),
+  },
+  {
+    id: 'pipe',
+    name: 'ASPEN PIPE',
+    purpose: 'Pipe riding',
+    length: '600 m pipe',
+    features: 'Superpipe, 10.5 m walls',
+    lift: 'T-bar',
+    leaderboard: true,
+    map: { x: 58, y: 62 },
+    load: () => import('./pipe.js'),
+  },
+  {
+    id: 'bellevue',
+    name: 'BELLEVUE',
+    purpose: 'Street-style village',
+    length: '~3 km',
+    features: 'Kickers, hips, rails on snow decks, gaps',
+    lift: 'T-bar',
+    leaderboard: true,
+    map: { x: 16, y: 74 },
+    load: () => import('./bellevue.js'),
+  },
+];
+
+export function parkMeta(id) {
+  return PARKS.find((p) => p.id === id) || PARKS[0];
+}

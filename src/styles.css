@@ -543,3 +543,63 @@ h2 {
     font-size: 10px;
   }
 }
+
+.park-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.park-list button {
+  text-align: left;
+  font: inherit;
+  color: var(--paper);
+  background: rgba(255, 255, 255, 0.07);
+  border: 2px solid transparent;
+  border-radius: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.park-list button:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.park-list button.sel {
+  background: linear-gradient(90deg, var(--blue), var(--blue-deep));
+  border-color: #fff;
+}
+
+.park-list .pname {
+  font-family: var(--brush);
+  font-style: italic;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.park-list .pmeta {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-top: 4px;
+}
+
+#liftbar {
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  background: rgba(9, 22, 44, 0.7);
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-weight: 800;
+}
+
+#lift-name {
+  font-family: var(--brush);
+  font-style: italic;
+  font-size: 20px;
+}

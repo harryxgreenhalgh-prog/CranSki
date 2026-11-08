@@ -13,6 +13,7 @@ export const CONTROLS_HTML = `
       <tr><td>S</td><td>Brake / powerslide</td></tr>
       <tr><td>Space</td><td>Hold to load, release to pop. A/D while loading winds up a spin</td></tr>
       <tr><td>Hold R</td><td>Restart from the top</td></tr>
+      <tr><td>F</td><td>Skip the lift</td></tr>
       <tr><td>Esc / P</td><td>Pause</td></tr>
     </table>
   </div>
@@ -28,7 +29,7 @@ export const CONTROLS_HTML = `
     </table>
   </div>
   <ul class="tips">
-    <li>Tuck the whole inrun for max speed: full speed lands near the orange 225 m board.</li>
+    <li>BIG AIR: tuck the whole inrun for max speed; full speed lands near the orange 225 m board.</li>
     <li>Keep holding S with a cork spin for doubles and triples.</li>
     <li><b>Release everything before touchdown</b> so the skis line up. Holding keys into the snow is a bail.</li>
     <li>Controller: left stick carve/spin, A pop, RT tuck/frontflip, LT backflip, right stick roll, B rodeo/misty, LB/X/Y grabs.</li>
@@ -97,8 +98,9 @@ export class Hud {
       g.fillStyle = color;
       g.fillRect(x - 1.5, y - 10, 3, 10);
     };
-    mark(park.lipS, '#1e7bff');
-    mark(park.finishS, '#1e7bff');
+    if (park.profileKicker) mark(park.profileKicker.lipS, '#1e7bff');
+    for (const f of t.features) if (f.kicker && !f.paint) mark(f.s + f.lipAlong, '#1e7bff');
+    mark(park.finishS, '#ff7a2f');
     this.mapBg = c;
   }
 
@@ -222,7 +224,7 @@ export class Hud {
 
 export function showResults(res, best, isNewBest) {
   $('res-total').textContent = fmt(res.total);
-  $('res-best').textContent = isNewBest && res.total > 0 ? 'NEW PERSONAL BEST on BIG AIR' : best > 0 ? `Personal best: ${fmt(best)}` : '';
+  $('res-best').textContent = isNewBest && res.total > 0 ? `NEW PERSONAL BEST on ${res.parkName}` : best > 0 ? `Personal best: ${fmt(best)}` : '';
   $('res-tricks').textContent = fmt(res.tricksAndAir);
   $('res-grabs').textContent = fmt(res.grabsAndVariety);
   $('res-land').textContent = fmt(res.landings);

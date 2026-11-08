@@ -23,6 +23,12 @@ export class ChaseCam {
     const v = rider.vel;
     const h = new THREE.Vector3(v.x, 0, v.z);
     const sp = v.length();
+    if (this.terrain.cross.type === 'pipe') {
+      // In the pipe, look down the pipe rather than at the wall you're climbing.
+      const s = -rider.pos.z;
+      h.set(this.terrain.centerSlope(s), 0, -1).multiplyScalar(4);
+      h.x += v.x * 0.15;
+    }
     if (h.lengthSq() > 1) {
       h.normalize();
       const k = rider.mode === 'air' ? 1.2 : 3.5;
@@ -47,6 +53,13 @@ export class ChaseCam {
 
     const target = pivot.clone().addScaledVector(this.dir, -this.dist);
     target.y = pivot.y + this.height;
+    if (this.terrain.cross.type === 'pipe') {
+      // Stay near the middle of the pipe so the walls frame the rider.
+      const s = -target.z;
+      const c = this.terrain.center(s);
+      target.x = c + (pivot.x - c) * 0.45;
+      target.y = Math.max(target.y, this.terrain.profile(s) + 4);
+    }
     const ground = this.terrain.height(target.x, target.z) + 1.0;
     if (target.y < ground) target.y = ground;
 

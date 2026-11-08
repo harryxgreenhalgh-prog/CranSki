@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { DT } from './sim/constants.js';
-import { Terrain, BIG_AIR } from './sim/terrain.js';
+import { Terrain } from './sim/terrain.js';
 import { Run } from './sim/run.js';
 import { EMPTY_INPUT } from './sim/rider.js';
 import { Input } from './input.js';
@@ -9,9 +9,9 @@ import { RiderModel, COM_HEIGHT } from './render/riderModel.js';
 import { ChaseCam } from './render/camera.js';
 import { Spray } from './render/spray.js';
 import { Hud, showResults, CONTROLS_HTML } from './ui/hud.js';
+import { PARKS, parkMeta } from './parks/index.js';
 
 const $ = (id) => document.getElementById(id);
-const BEST_KEY = 'cranski.best.bigair';
 
 function hasWebGL2() {
   try {
@@ -21,21 +21,23 @@ function hasWebGL2() {
   }
 }
 
-function loadBest() {
-  try {
-    return Number(localStorage.getItem(BEST_KEY)) || 0;
-  } catch {
-    return 0;
-  }
-}
-
-function saveBest(v) {
-  try {
-    localStorage.setItem(BEST_KEY, String(v));
-  } catch {
-    /* storage blocked: bests just don't persist */
-  }
-}
+const store = {
+  get(key, fallback) {
+    try {
+      const v = localStorage.getItem(key);
+      return v === null ? fallback : JSON.parse(v);
+    } catch {
+      return fallback;
+    }
+  },
+  set(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      /* storage blocked: just don't persist */
+    }
+  },
+};
 
 function boot() {
   $('controls-help').innerHTML = CONTROLS_HTML;
@@ -53,16 +55,9 @@ function boot() {
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-  const terrain = new Terrain(BIG_AIR);
-  const run = new Run(terrain);
-  const { scene, follow } = buildWorld(terrain);
-  const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 4000);
-  const chase = new ChaseCam(camera, terrain);
+  const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 6000);
   const model = new RiderModel();
-  scene.add(model.root);
-  const spray = new Spray(scene);
   const input = new Input(window);
-  const hud = new Hud(terrain);
 
   function resize() {
     const w = window.innerWidth;
@@ -74,36 +69,124 @@ function boot() {
   window.addEventListener('resize', resize);
   resize();
 
+  // ------------------------------------------------------------ park loading
+  let parkId = store.get('cranski.park', 'bigair');
+  let loaded = null; // { id, terrain, run, world, chase, spray, hud }
+  let loading = null;
+
+  async function loadPark(id) {
+    if (loaded && loaded.id === id) return loaded;
+    if (loading && loading.id === id) return loading.promise;
+    const meta = parkMeta(id);
+    const promise = (async () => {
+      const mod = await meta.load();
+      const terrain = new Terrain(mod.park);
+      const world = buildWorld(terrain, { quality: 'high' });
+      if (loaded) {
+        loaded.world.scene.remove(model.root);
+        loaded.world.dispose();
+      }
+      const run = new Run(terrain);
+      const chase = new ChaseCam(camera, terrain);
+      const spray = new Spray(world.scene);
+      const hud = new Hud(terrain);
+      world.scene.add(model.root);
+      renderer.compile(world.scene, camera);
+      loaded = { id, meta, terrain, run, world, chase, spray, hud, time: 0 };
+      return loaded;
+    })();
+    loading = { id, promise };
+    try {
+      return await promise;
+    } finally {
+      loading = null;
+    }
+  }
+
+  // ------------------------------------------------------------ menus
+  function renderParkList() {
+    const list = $('park-list');
+    list.replaceChildren(
+      ...PARKS.map((p) => {
+        const b = document.createElement('button');
+        b.className = p.id === parkId ? 'sel' : '';
+        const best = store.get(`cranski.best.${p.id}`, 0);
+        b.innerHTML = `<div class="pname">${p.name}</div><div class="pmeta">${p.length} · ${p.features}</div><div class="pmeta">${p.lift}${best ? ` · best ${best.toLocaleString('en-US')}` : ''}</div>`;
+        b.addEventListener('click', () => {
+          parkId = p.id;
+          store.set('cranski.park', parkId);
+          renderParkList();
+        });
+        b.addEventListener('dblclick', () => goRide());
+        return b;
+      })
+    );
+  }
+  renderParkList();
+
   // ------------------------------------------------------------ state
-  let state = 'title'; // title | riding | paused | results
+  let state = 'title'; // title | loading | lift | riding | paused | results
   let acc = 0;
   let last = performance.now();
   let restartHold = 0;
   let resultsDelay = 0;
-  let best = loadBest();
   let absorb = 0;
-  let prevMode = run.rider.mode;
-  const prevPos = new THREE.Vector3().copy(run.rider.pos);
-  const prevQ = new THREE.Quaternion().copy(run.rider.q);
+  let prevMode = 'ground';
+  let lift = null; // { t, duration }
+  const prevPos = new THREE.Vector3();
+  const prevQ = new THREE.Quaternion();
 
   function setOverlay(id) {
     for (const o of ['title', 'pause', 'results']) $(o).classList.toggle('hidden', o !== id);
   }
 
-  function startRun() {
-    // Drop focus from any menu button so Space/Enter go to the game, not the button.
+  function blurMenus() {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-    run.reset();
-    prevPos.copy(run.rider.pos);
-    prevQ.copy(run.rider.q);
-    prevMode = run.rider.mode;
-    chase.snap();
-    hud.clearTrick();
+  }
+
+  async function goRide() {
+    blurMenus();
+    state = 'loading';
+    $('ride').textContent = 'LOADING…';
+    try {
+      await loadPark(parkId);
+    } finally {
+      $('ride').innerHTML = 'RIDE <kbd>Enter</kbd>';
+    }
+    startLift();
+  }
+
+  function startLift() {
+    const L = loaded;
+    L.run.reset();
+    L.hud.clearTrick();
+    setOverlay(null);
+    L.hud.show(true);
+    L.hud.show(false);
+    lift = { t: 0, duration: L.world.lift.ride.duration };
+    state = 'lift';
+    const names = { gondola: 'GONDOLA', ropeway: 'ROPEWAY', tbar: 'T-BAR' };
+    $('lift-name').textContent = names[L.world.lift.ride.type];
+    $('liftbar').classList.remove('hidden');
+  }
+
+  function startRun() {
+    blurMenus();
+    const L = loaded;
+    L.run.reset();
+    prevPos.copy(L.run.rider.pos);
+    prevQ.copy(L.run.rider.q);
+    prevMode = L.run.rider.mode;
+    L.chase.snap();
+    L.hud.clearTrick();
+    $('liftbar').classList.add('hidden');
     state = 'riding';
     setOverlay(null);
-    hud.show(true);
+    L.hud.show(true);
     acc = 0;
-    hud.hint('Hold W to tuck down the inrun · Space to pop at the lip', 4);
+    restartHold = 0;
+    resultsDelay = 0;
+    L.hud.hint(`${L.meta.name} · W tuck · Space pop`, 3);
   }
 
   function pause(on) {
@@ -117,19 +200,28 @@ function boot() {
     }
   }
 
+  function toTitle() {
+    state = 'title';
+    if (loaded) loaded.hud.show(false);
+    $('liftbar').classList.add('hidden');
+    renderParkList();
+    setOverlay('title');
+  }
+
   function finish() {
-    const res = run.results();
+    const L = loaded;
+    const res = L.run.results();
+    res.parkName = L.meta.name;
+    const key = `cranski.best.${L.id}`;
+    const best = store.get(key, 0);
     const isNew = res.total > best;
-    if (isNew) {
-      best = res.total;
-      saveBest(best);
-    }
-    showResults(res, best, isNew);
+    if (isNew) store.set(key, res.total);
+    showResults(res, Math.max(best, res.total), isNew);
     state = 'results';
     setOverlay('results');
   }
 
-  $('ride').addEventListener('click', startRun);
+  $('ride').addEventListener('click', goRide);
   $('pause').addEventListener('click', (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (act === 'resume') pause(false);
@@ -137,7 +229,9 @@ function boot() {
     if (act === 'help') $('pause-help').classList.toggle('hidden');
   });
   $('results').addEventListener('click', (e) => {
-    if (e.target.closest('[data-act]')?.dataset.act === 'again') startRun();
+    const act = e.target.closest('[data-act]')?.dataset.act;
+    if (act === 'again') startLift();
+    if (act === 'map') toTitle();
   });
 
   // ------------------------------------------------------------ loop
@@ -147,6 +241,10 @@ function boot() {
   const n = { x: 0, y: 1, z: 0 };
   const leanQ = new THREE.Quaternion();
   const zAxis = new THREE.Vector3(0, 0, 1);
+  const liftPos = new THREE.Vector3();
+  const liftDir = new THREE.Vector3();
+  const tmp = new THREE.Vector3();
+  const titleCam = { pos: new THREE.Vector3(), look: new THREE.Vector3() };
 
   function frame(now) {
     requestAnimationFrame(frame);
@@ -154,16 +252,35 @@ function boot() {
     last = now;
     input.pollFrame();
 
-    if (state === 'title' || state === 'results') {
-      if (input.wasPressed('confirm')) startRun();
+    if (state === 'title') {
+      if (input.wasPressed('confirm')) goRide();
+    } else if (state === 'results') {
+      if (input.wasPressed('confirm')) startLift();
+    } else if (state === 'lift') {
+      if (input.wasPressed('skipLift') || input.wasPressed('confirm')) lift.t = lift.duration;
     } else if (state === 'paused') {
       if (input.wasPressed('pause')) pause(false);
     } else if (state === 'riding') {
       if (input.wasPressed('pause')) pause(true);
     }
 
+    const L = loaded;
+    if (!L) {
+      renderer.setClearColor(0x9fd3ff);
+      renderer.clear();
+      input.endFrame();
+      return;
+    }
+    L.time += dt;
+    const run = L.run;
+    const r = run.rider;
+
+    if (state === 'lift') {
+      lift.t += dt;
+      if (lift.t >= lift.duration) startRun();
+    }
+
     if (state === 'riding') {
-      // Hold R for 2 s to restart from the top.
       if (input.restartHeld()) {
         restartHold += dt;
         if (restartHold >= 2) {
@@ -171,22 +288,21 @@ function boot() {
           startRun();
         }
       } else restartHold = 0;
-      hud.setRestart(Math.min(1, restartHold / 2));
+      L.hud.setRestart(Math.min(1, restartHold / 2));
 
       acc += dt;
       let steps = 0;
       const inp = run.finished ? EMPTY_INPUT : input.sample();
       while (acc >= DT && steps < 12) {
-        prevPos.copy(run.rider.pos);
-        prevQ.copy(run.rider.q);
+        prevPos.copy(r.pos);
+        prevQ.copy(r.q);
         run.step(inp);
         acc -= DT;
         steps++;
-        const r = run.rider;
         if (r.mode !== prevMode) {
-          if (r.mode === 'air') spray.burst(r.pos, r.vel, 40, 3);
+          if (r.mode === 'air') L.spray.burst(r.pos, r.vel, 40, 3);
           if (prevMode === 'air') {
-            spray.burst(r.pos, r.vel, r.mode === 'crash' ? 120 : 80, r.mode === 'crash' ? 6 : 4);
+            L.spray.burst(r.pos, r.vel, r.mode === 'crash' ? 120 : 80, r.mode === 'crash' ? 6 : 4);
             absorb = 0.35;
           }
           prevMode = r.mode;
@@ -196,27 +312,60 @@ function boot() {
 
       for (const m of run.messages) {
         if (m.type === 'finish') resultsDelay = 1.6;
-        else hud.message(m);
+        else L.hud.message(m);
       }
       run.messages.length = 0;
       if (resultsDelay > 0) {
         resultsDelay -= dt;
         if (resultsDelay <= 0) finish();
       }
-      hud.update(run, dt);
+      L.hud.update(run, dt);
     }
 
     // ------------------------------------------------ draw
-    const r = run.rider;
+    if (state === 'lift') {
+      const ride = L.world.lift.ride;
+      const t = Math.min(1, lift.t / lift.duration);
+      ride.sample(t, liftPos, liftDir);
+      if (ride.type === 'tbar') {
+        // Rider stands on the snow, pulled up the track.
+        model.root.visible = true;
+        L.terrain.normal(liftPos.x, liftPos.z, n);
+        model.root.position.set(liftPos.x, liftPos.y + COM_HEIGHT, liftPos.z);
+        tmp.set(liftDir.x, 0, liftDir.z).normalize();
+        model.root.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), tmp);
+        model.update({ crouch: 0.2, tuck: 0, legsUp: 0, lean: 0, look: 0, armsOut: 0, grab: null, grabSide: 1 }, dt);
+        camera.position.copy(liftPos).addScaledVector(tmp, -7).add(tmp.set(0, 3, 0));
+        camera.lookAt(liftPos.x + liftDir.x * 20, liftPos.y + liftDir.y * 20 + 1, liftPos.z + liftDir.z * 20);
+      } else {
+        model.root.visible = false;
+        camera.position.copy(liftPos).addScaledVector(liftDir, -9).add(tmp.set(4, 3.5, 0));
+        camera.lookAt(liftPos.x + liftDir.x * 30, liftPos.y + liftDir.y * 30, liftPos.z + liftDir.z * 30);
+      }
+      if (Math.abs(camera.fov - 65) > 0.1) {
+        camera.fov = 65;
+        camera.updateProjectionMatrix();
+      }
+      L.world.update(L.time, liftPos, camera);
+      renderer.render(L.world.scene, camera);
+      input.endFrame();
+      return;
+    }
+
+    model.root.visible = true;
     const alpha = state === 'riding' ? acc / DT : 1;
     renderPos.lerpVectors(prevPos, r.pos, alpha);
     renderQ.slerpQuaternions(prevQ, r.q, alpha);
+    if (state === 'title' || state === 'loading') {
+      renderPos.copy(r.pos);
+      renderQ.copy(r.q);
+    }
 
     if (r.mode === 'crash') {
-      terrain.normal(renderPos.x, renderPos.z, n);
+      L.terrain.normal(renderPos.x, renderPos.z, n);
       pivot.set(renderPos.x + n.x * 0.25, renderPos.y + n.y * 0.25, renderPos.z + n.z * 0.25);
     } else if (r.mode === 'ground') {
-      terrain.normal(renderPos.x, renderPos.z, n);
+      L.terrain.normal(renderPos.x, renderPos.z, n);
       pivot.set(renderPos.x + n.x * COM_HEIGHT, renderPos.y + n.y * COM_HEIGHT, renderPos.z + n.z * COM_HEIGHT);
     } else {
       pivot.set(renderPos.x, renderPos.y + COM_HEIGHT, renderPos.z);
@@ -244,20 +393,48 @@ function boot() {
       dt
     );
 
-    spray.update(dt);
-    chase.update(r, pivot, dt);
-    follow(pivot);
-    renderer.render(scene, camera);
+    L.spray.update(dt);
+    if (state === 'title') {
+      // Slow orbit around the start gate behind the menu.
+      const ang = L.time * 0.08;
+      titleCam.pos.set(pivot.x + Math.sin(ang) * 14, pivot.y + 5, pivot.z + Math.cos(ang) * 14);
+      camera.position.copy(titleCam.pos);
+      camera.lookAt(pivot);
+    } else {
+      L.chase.update(r, pivot, dt);
+    }
+    L.world.update(L.time, pivot, camera);
+    renderer.render(L.world.scene, camera);
     input.endFrame();
   }
+
+  // Show the last-picked park behind the menu.
+  loadPark(parkId).catch((e) => console.error(e));
 
   requestAnimationFrame((t) => {
     last = t;
     frame(t);
   });
 
-  // Expose a tiny debug handle for automated checks in the console.
-  window.__cranski = { run, camera, pivot, get state() { return state; }, startRun };
+  // Small debug handle for automated checks in the console.
+  window.__cranski = {
+    get run() {
+      return loaded?.run;
+    },
+    get terrain() {
+      return loaded?.terrain;
+    },
+    camera,
+    pivot,
+    get state() {
+      return state;
+    },
+    startRun,
+    goRide,
+    selectPark(id) {
+      parkId = id;
+    },
+  };
 }
 
 boot();
