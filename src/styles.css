@@ -2153,3 +2153,36 @@ body.touching #roombadge {
   bottom: auto;
   top: 64px;
 }
+
+#idlecard {
+  position: absolute;
+  left: 50%;
+  top: 38%;
+  transform: translate(-50%, -50%);
+  z-index: 12;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  text-align: center;
+  padding: 18px 26px;
+  background: var(--panel);
+  border: 2px solid var(--orange);
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+}
+
+#idlecard.hidden {
+  display: none;
+}
+
+.idle-title {
+  font-family: var(--brush);
+  font-size: 30px;
+  font-style: italic;
+}
+
+.idle-count b {
+  font-size: 22px;
+  color: var(--orange);
+}

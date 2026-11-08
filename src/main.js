@@ -42,6 +42,7 @@ import { LOCAL } from './online/net.js';
 import { REALTIME_BUDGET } from './online/config.js';
 import { RemoteRiders } from './render/remoteRiders.js';
 import { Roster } from './ui/roster.js';
+import { IdleWatch } from './ui/idle.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -449,6 +450,14 @@ function boot() {
     }
   }
   let rosterTimer = 0;
+  // Idle in a live room: countdown, then back to Basecamp (solo never times out).
+  const idle = new IdleWatch({
+    onTimeout: () => {
+      if (state === 'replay' && replayView.isOpen) replayView.close();
+      toBasecamp();
+      toast('Back in Basecamp: you were idle in a live room.', 8000);
+    },
+  });
   // Hold Tab for the roster.
   window.addEventListener('keydown', (e) => {
     if (e.code !== 'Tab' || !live || !live.room || e.target instanceof HTMLInputElement) return;
@@ -953,6 +962,7 @@ function boot() {
     time += dt;
     input.pollFrame();
     stats.update(dt);
+    idle.update(dt, { active: !!(live && live.room), state });
     if (state !== reportedState) {
       reportedState = state;
       reportLocation();
@@ -1303,6 +1313,7 @@ function boot() {
       return live;
     },
     remotes,
+    idle,
     get lift() {
       return lift;
     },
