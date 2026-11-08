@@ -367,7 +367,9 @@ function boot() {
       pivot.set(renderPos.x + n.x * 0.25, renderPos.y + n.y * 0.25, renderPos.z + n.z * 0.25);
     } else if (r.mode === 'ground') {
       L.terrain.normal(renderPos.x, renderPos.z, n);
-      pivot.set(renderPos.x + n.x * COM_HEIGHT, renderPos.y + n.y * COM_HEIGHT, renderPos.z + n.z * COM_HEIGHT);
+      const h = COM_HEIGHT - r.sink; // sink into powder
+      pivot.set(renderPos.x + n.x * h, renderPos.y + n.y * h, renderPos.z + n.z * h);
+      if (r.powder > 0.5 && r.speed > 4 && state === 'riding') L.spray.burst(r.pos, r.vel, 2, 1.5 + r.speed * 0.05);
     } else if (r.mode === 'rail') {
       pivot.set(renderPos.x, renderPos.y + COM_HEIGHT, renderPos.z);
     } else {

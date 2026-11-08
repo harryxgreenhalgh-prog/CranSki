@@ -2,7 +2,7 @@
 // Same inputs in, same run out, so replays and server re-rides can come later.
 
 import { Vector3, Quaternion, Matrix4 } from 'three';
-import { DT, PHYS, AIR, LAND, CRASH, RAIL, BUTTER } from './constants.js';
+import { DT, PHYS, AIR, LAND, CRASH, RAIL, BUTTER, POWDER, PIPE } from './constants.js';
 import { OFF_AXIS } from './tricks.js';
 
 const DEG = Math.PI / 180;
@@ -89,6 +89,8 @@ export class Rider {
     this.lastRail = -1;
     this.butter = null; // pressing a butter: { kind, time, turned, carry, deep, fromLanding }
     this.butterCooldown = 0;
+    this.powder = 0; // 0..1 depth of snow underfoot
+    this.sink = 0; // how far the rider has sunk into powder (m), for the renderer
     this.lean = 0; // visual carve lean, -1..1
     this.tucking = false;
     this.braking = false;
@@ -234,6 +236,11 @@ export class Rider {
     const n = t.normal(this.pos.x, this.pos.z, _n);
     this.groundTime += DT;
     const speed = this.vel.length();
+    // Deep snow: you sink in (less as you plane at speed) and it slows you.
+    const pw = t.powder(this.pos.x, this.pos.z);
+    this.powder = pw;
+    const sinkTarget = pw * POWDER.sink * (1 - 0.5 * Math.min(1, speed / 25));
+    this.sink += (sinkTarget - this.sink) * Math.min(1, DT * 5);
 
     // Load the pop while Space is held; A/D winds the chest up for a spin.
     if (input.pop) {
@@ -253,6 +260,7 @@ export class Rider {
     const speedT = clamp(speed / 45, 0, 1);
     let turnRate = PHYS.turnRateSlow + (PHYS.turnRateFast - PHYS.turnRateSlow) * speedT;
     if (this.braking) turnRate = PHYS.turnRateSlide;
+    turnRate *= 1 - (1 - POWDER.turnFactor) * pw;
     if (input.pop) turnRate *= 0.5;
     let dYaw = B ? 0 : -input.steer * turnRate * DT;
     if (this.straighten > 0) {
@@ -315,6 +323,7 @@ export class Rider {
       const drag = (this.tucking ? PHYS.dragTuck : PHYS.dragStand) * sp * sp;
       const fric = PHYS.snowFriction * PHYS.gravity * Math.max(0, -gn / PHYS.gravity);
       let decel = drag + fric + (this.braking ? PHYS.brakeDecel : 0) + (B ? BUTTER.drag : 0);
+      decel += pw * (POWDER.drag + POWDER.dragQuad * sp * sp);
       decel = Math.min(decel * DT, sp);
       this.vel.multiplyScalar((sp - decel) / sp);
     }
@@ -379,12 +388,20 @@ export class Rider {
     const gap = (this.pos.y - gy) * n2.y; // distance from the snow along its normal
     const away = this.vel.dot(n2);
 
-    if (!popped && gap < PHYS.stickGap && away < PHYS.stickNormalSpeed) {
+    // Superpipe: riding out over the coping always launches you (the top is vertical).
+    let overCoping = false;
+    if (t.cross.type === 'pipe') {
+      const uPrev = Math.abs(prevPos.x - t.center(-prevPos.z));
+      const uNow = Math.abs(this.pos.x - t.center(-this.pos.z));
+      overCoping = uPrev < t.cross.lipU - 0.02 && uNow >= t.cross.lipU - 0.02;
+    }
+
+    if (!popped && !overCoping && gap < PHYS.stickGap && away < PHYS.stickNormalSpeed) {
       this._snapToSurface();
       const n3 = t.normal(this.pos.x, this.pos.z, _a);
       this.vel.addScaledVector(n3, -this.vel.dot(n3));
       this._groundOrientation();
-    } else if (gap < 0 && !popped) {
+    } else if (gap < 0 && !popped && !overCoping) {
       this._snapToSurface();
     } else {
       // Leaving the snow: a lip, a knuckle or a pop.
@@ -597,6 +614,20 @@ export class Rider {
       uphill = rise > 0.05 && rise < 1.2 && !t.onKickerFace(prevPos.x, prevPos.z);
     }
     if (opts.fromRail) uphill = false;
+    // Superpipe: the top of the wall is vertical, so whatever speed carries you
+    // out over the coping turns into height and you come back down into the pipe.
+    if (t.cross.type === 'pipe') {
+      const u = this.pos.x - t.center(-this.pos.z);
+      if (Math.abs(u) > t.cross.floor + 2) {
+        const out = Math.sign(u);
+        const vOut = this.vel.x * out;
+        if (vOut > -0.6) {
+          this.vel.y = Math.hypot(Math.max(0, this.vel.y), Math.max(0, vOut) * 0.95);
+          this.vel.x = -out * 0.6;
+        }
+        uphill = false;
+      }
+    }
     const windSpin = Math.sign(this.windup);
     this.air = {
       time: 0,
@@ -788,7 +819,9 @@ export class Rider {
       const d = _r.dot(_g);
       const sign = d >= 0 ? 1 : -1;
       const folded = Math.acos(clamp(Math.abs(d), 0, 1)) / DEG;
-      if (folded < 40) target = _g.multiplyScalar(sign);
+      // More help lining up on a pipe wall, where the travel line bends a lot in the air.
+      const help = this.terrain.cross.type === 'pipe' && n.y < PIPE.wallSlope ? 65 : 40;
+      if (folded < help) target = _g.multiplyScalar(sign);
       else target = _r; // too far round: just level out, keep the yaw
     }
     basisQuat(target.clone(), n, _q2);
@@ -830,7 +863,9 @@ export class Rider {
     const scoredAir = !air.uphill && (air.time >= LAND.minScoredAir || air.clearance >= LAND.minScoredHeight);
     const rotHeld =
       (input.steer !== 0 || input.tuck || input.brake || input.roll !== 0) && this.omega.length() > LAND.maxSpinHeld;
-    const grabHeld = input.grab[0] || input.grab[1] || input.grab[2];
+    // Landing a low grab in powder releases it on touch.
+    const inPowder = t.powder(this.pos.x, this.pos.z) > 0.5;
+    const grabHeld = !inPowder && (input.grab[0] || input.grab[1] || input.grab[2]);
     const butterLand = !!input.butter && scoredAir;
     const impact = -this.vel.dot(n);
 
@@ -880,11 +915,18 @@ export class Rider {
     };
 
     // Keep only the along-slope part of the velocity; a flat landing smacks off some speed.
+    const speedIn = this.vel.length();
     const into = -this.vel.dot(n);
     this.vel.addScaledVector(n, into);
-    if (into > 0) {
+    const wall = t.cross.type === 'pipe' && n.y < PIPE.wallSlope;
+    if (wall && quality !== 'crash' && this.vel.lengthSq() > 1e-6) {
+      // Superpipe: wall landings keep speed, so good hits climb higher.
+      const keepSpeed = speedIn * (quality === 'clean' ? PIPE.cleanKeep : PIPE.sidewaysKeep);
+      this.vel.setLength(keepSpeed);
+      landing.wall = true;
+    } else if (into > 0) {
       const sp = this.vel.length();
-      const loss = Math.min(sp, into * 0.15);
+      const loss = Math.min(sp, into * (inPowder ? POWDER.landingLoss : 0.15));
       if (sp > 0) this.vel.multiplyScalar((sp - loss) / sp);
     }
 

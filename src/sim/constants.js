@@ -64,6 +64,20 @@ export const CRASH = {
   getUpTime: 0.6,
 };
 
+export const POWDER = {
+  drag: 2.2, // flat extra deceleration in deep snow (m/s^2)
+  dragQuad: 0.003, // plus this times speed squared
+  sink: 0.38, // how far you sink in (m), less as you plane at speed
+  turnFactor: 0.8, // turns are a little lazier in deep snow
+  landingLoss: 0.08, // soft landings: less speed lost into the snow
+};
+
+export const PIPE = {
+  wallSlope: 0.7, // normal.y below this counts as a wall (steeper than ~45 degrees)
+  cleanKeep: 1.02, // clean wall landings keep (and pump) their speed
+  sidewaysKeep: 0.92,
+};
+
 export const RAIL = {
   captureAir: 0.8, // horizontal distance (m) to catch a rail from the air
   captureGround: 0.7, // ...or riding onto a box from the snow

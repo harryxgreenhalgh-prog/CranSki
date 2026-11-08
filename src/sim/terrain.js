@@ -195,8 +195,8 @@ export class Terrain {
     this.cross = { type: 'banks', hw: 20, bankK: 0.06, bankMax: 30, ...(park.cross || {}) };
     if (this.cross.type === 'pipe') {
       const c = this.cross;
-      c.R = c.wall / (1 - Math.cos(85 * DEG));
-      c.aMax = c.R * Math.sin(85 * DEG);
+      c.R = c.wall / (1 - Math.cos(82 * DEG));
+      c.aMax = c.R * Math.sin(82 * DEG);
       c.lipU = c.floor + c.aMax; // coping
       c.hw = c.lipU + c.deck;
     }
