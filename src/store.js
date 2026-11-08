@@ -49,6 +49,12 @@ export const profile = {
   setBest(parkId, v) {
     save(`best.${parkId}`, v);
   },
+  get look() {
+    return load('look', {});
+  },
+  set look(v) {
+    save('look', v);
+  },
   get frost() {
     return load('frost', 0);
   },

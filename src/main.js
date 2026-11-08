@@ -22,6 +22,8 @@ import { Recorder, SIM_VERSION } from './replay/record.js';
 import { replayDB } from './replay/db.js';
 import { Ghost } from './replay/player.js';
 import { ReplayView } from './ui/replayUI.js';
+import { Locker } from './ui/locker.js';
+import { DEFAULT_LOOK } from './render/riderModel.js';
 import { placeRider, poseFor } from './render/pose.js';
 
 const $ = (id) => document.getElementById(id);
@@ -75,8 +77,9 @@ function boot() {
   applyQuality();
 
   const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 6000);
-  const model = new RiderModel();
-  const ghostModel = new RiderModel();
+  const look = () => ({ ...DEFAULT_LOOK, ...profile.look });
+  const model = new RiderModel(look());
+  const ghostModel = new RiderModel(look());
   ghostModel.makeGhost();
   const recorder = new Recorder();
   let ghost = null;
@@ -170,7 +173,7 @@ function boot() {
       if (tab === 'ride') openMap('basecamp');
       else if (tab === 'updates') openPage('updates');
       else if (tab === 'replays') openReplays();
-      else if (tab === 'locker') openSoon('Locker');
+      else if (tab === 'locker') openLocker();
       else openPage('online');
     },
     onPage: (p) => openPage(p),
@@ -274,6 +277,36 @@ function boot() {
     settingsUI.open(tab);
   }
   const stats = new StatsOverlay(renderer);
+
+  // ------------------------------------------------------------ locker
+  let lockerYaw = 0;
+  const locker = new Locker({
+    model,
+    onClose: () => {
+      ghostModel.applyLook(look());
+      toBasecamp();
+    },
+  });
+  function openLocker() {
+    blurMenus();
+    basecamp.hide();
+    showOverlay(null);
+    state = 'locker';
+    lockerYaw = 0;
+    locker.open();
+  }
+  {
+    let drag = null;
+    $('game').addEventListener('pointerdown', (e) => {
+      if (state === 'locker') drag = e.clientX;
+    });
+    window.addEventListener('pointerup', () => (drag = null));
+    window.addEventListener('pointermove', (e) => {
+      if (drag === null || state !== 'locker') return;
+      lockerYaw += (e.clientX - drag) * 0.01;
+      drag = e.clientX;
+    });
+  }
 
   // ------------------------------------------------------------ replays
   let replayReturn = 'basecamp';
@@ -401,6 +434,9 @@ function boot() {
     const L = loaded;
     placeModel(L.world.scene);
     L.run.reset();
+    const lk = look();
+    L.run.rider.grabSlots = lk.grabs.slice();
+    L.run.rider.board = lk.ride === 'board';
     prevPos.copy(L.run.rider.pos);
     prevQ.copy(L.run.rider.q);
     prevMode = L.run.rider.mode;
@@ -460,6 +496,8 @@ function boot() {
       bestTrick: res.bestTrick?.name || null,
       name: profile.name,
       inputs: recorder.data(),
+      grabSlots: L.run.rider.grabSlots.slice(),
+      board: L.run.rider.board,
       saved: false,
     };
     replayDB.add(lastReplay);
@@ -521,6 +559,10 @@ function boot() {
 
   // Esc steps back one menu level.
   function back() {
+    if (state === 'locker') {
+      locker.close(false);
+      return;
+    }
     if (state === 'replay') {
       if (!$('clip').classList.contains('hidden')) replayView.closeClip();
       else if (!replayView.exporting) replayView.close();
@@ -607,12 +649,14 @@ function boot() {
     } else if (state === 'lift' && input.wasPressed('skipLift')) lift.t = lift.duration;
 
     // -------------------------------------------- Basecamp and map: the lobby scene
-    const inLobby = state === 'basecamp' || state === 'map' || (state === 'loading' && !loaded);
+    const inLobby = state === 'basecamp' || state === 'map' || state === 'locker' || (state === 'loading' && !loaded);
     if (inLobby) {
       placeModel(basecampScene.scene);
       model.root.visible = true;
+      model.root.position.set(0, COM_HEIGHT, 0);
+      model.root.quaternion.setFromAxisAngle(tmp.set(0, 1, 0), Math.PI - 0.35 + (state === 'locker' ? lockerYaw + 0.35 : 0));
       model.update({ ...IDLE, crouch: 0.05 + 0.05 * Math.sin(time * 1.6) }, dt);
-      basecampScene.frameCamera(camera, camera.aspect);
+      basecampScene.frameCamera(camera, camera.aspect, state === 'locker' ? (locker.focus === 'full' ? 'locker' : locker.focus) : 'full', dt);
       basecampScene.update(time, camera);
       if (camera.fov !== 50) {
         camera.fov = 50;

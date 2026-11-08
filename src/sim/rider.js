@@ -6,7 +6,7 @@ import { DT, PHYS, AIR, LAND, CRASH, RAIL, BUTTER, POWDER, PIPE } from './consta
 import { OFF_AXIS } from './tricks.js';
 
 const DEG = Math.PI / 180;
-const GRAB_SLOTS = ['mute', 'tail', 'japan'];
+const DEFAULT_GRABS = ['mute', 'tail', 'japan'];
 
 // Scratch objects (avoid garbage every step).
 const _n = new Vector3();
@@ -63,6 +63,8 @@ export class Rider {
     this.q = new Quaternion();
     this.omega = new Vector3(); // body-frame angular velocity, deg/s (x = flip, y = spin, z = roll)
     this.skiDir = new Vector3(0, 0, -1); // where the ski tips point, kept on the snow plane
+    this.grabSlots = DEFAULT_GRABS.slice(); // which grab sits on each of the 3 grab buttons (Locker)
+    this.board = false; // riding a snowboard: tricks add FS / BS / Cab
     this.events = [];
     this.reset();
   }
@@ -683,7 +685,7 @@ export class Rider {
 
     // Grabs: the last one pressed among those held wins.
     for (let i = 0; i < 3; i++) {
-      const name = GRAB_SLOTS[i];
+      const name = this.grabSlots[i];
       if (input.grab[i] && !this.prevGrab[i]) {
         air.grabStack = air.grabStack.filter((g) => g !== name);
         air.grabStack.push(name);

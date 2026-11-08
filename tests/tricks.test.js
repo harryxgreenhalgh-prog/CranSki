@@ -51,3 +51,16 @@ test('ranking at equal rotation: double cork > cork > flatspin', () => {
   const f = inv({ family: 'flat', spin: 1000, roll: 450 });
   assert.ok(dc > c && c > f);
 });
+
+test('snowboard tricks add FS / BS / Cab', () => {
+  assert.equal(name({ family: 'spin', spin: 720, board: true }), 'FS 720');
+  assert.equal(name({ family: 'spin', spin: -540, board: true }), 'BS 540');
+  assert.equal(name({ family: 'spin', spin: 1080, board: true, switchStance: true }), 'CAB 1080');
+  assert.equal(name({ family: 'cork', spin: -800, flip: 720, board: true }), 'BS DOUBLE CORK 1080');
+});
+
+test('every Locker grab has a display name', () => {
+  assert.equal(name({ family: 'spin', spin: 360, grabs: [{ name: 'rocket', time: 0.5 }] }), '360 ROCKET AIR');
+  assert.equal(name({ family: 'spin', spin: 360, grabs: [{ name: 'truenose', time: 0.5 }] }), '360 TRUE NOSE');
+  assert.equal(name({ family: null, grabs: [{ name: 'backscratcher', time: 0.5 }] }), 'BACKSCRATCHER');
+});

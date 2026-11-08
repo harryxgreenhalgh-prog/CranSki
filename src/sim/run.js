@@ -135,6 +135,7 @@ export class Run {
       roll: a.roll,
       switchStance: a.switchStance,
       fromRail: a.fromRail,
+      board: this.rider.board,
       grabs,
     });
 

@@ -74,12 +74,31 @@ export function buildBasecamp() {
   const anchor = new THREE.Group(); // the rider stands here
   scene.add(anchor);
 
-  function frameCamera(camera, aspect, focus = 'full') {
-    // Rider slightly left of centre so the lift pass card fits beside them.
-    const close = focus === 'close';
-    const dist = close ? 2.6 : aspect < 0.8 ? 6.2 : 4.6;
-    camera.position.set(close ? 0.4 : 0.9, close ? 1.4 : 1.25, dist);
-    camera.lookAt(close ? 0.4 : 0.6, close ? 1.15 : 1.0, 0);
+  const camPos = new THREE.Vector3(0.9, 1.25, 4.6);
+  const camLook = new THREE.Vector3(0.6, 1.0, 0);
+  const wantPos = new THREE.Vector3();
+  const wantLook = new THREE.Vector3();
+  // focus: full (lobby), close (head and goggles), low (skis and boots), locker (full, centred)
+  function frameCamera(camera, aspect, focus = 'full', dt = 1) {
+    const narrow = aspect < 0.8;
+    if (focus === 'close') {
+      wantPos.set(0.15, 1.75, narrow ? 1.6 : 1.25);
+      wantLook.set(0.15, 1.6, 0);
+    } else if (focus === 'low') {
+      wantPos.set(0.5, 1.15, narrow ? 4.2 : 3.3);
+      wantLook.set(0.3, 0.5, 0);
+    } else if (focus === 'locker') {
+      wantPos.set(0.2, 1.2, narrow ? 5.6 : 3.8);
+      wantLook.set(0.15, 0.95, 0);
+    } else {
+      wantPos.set(0.9, 1.25, narrow ? 6.2 : 4.6);
+      wantLook.set(0.6, 1.0, 0);
+    }
+    const k = 1 - Math.exp(-dt * 6);
+    camPos.lerp(wantPos, k);
+    camLook.lerp(wantLook, k);
+    camera.position.copy(camPos);
+    camera.lookAt(camLook);
   }
 
   function update(time, camera) {

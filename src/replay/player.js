@@ -11,6 +11,8 @@ export function simulateReplay(terrain, data) {
   if (data.version !== SIM_VERSION) throw new Error('This replay was recorded with an older version of the game.');
   const run = new Run(terrain);
   const r = run.rider;
+  if (data.grabSlots) r.grabSlots = data.grabSlots.slice();
+  r.board = !!data.board;
   const stream = new InputStream(data.inputs);
   const maxFrames = Math.ceil(stream.steps / 2) + 200;
   const frames = new Float32Array(maxFrames * STRIDE);
@@ -73,6 +75,8 @@ export function simulateReplay(terrain, data) {
 export class Ghost {
   constructor(terrain, data) {
     this.run = new Run(terrain);
+    if (data.grabSlots) this.run.rider.grabSlots = data.grabSlots.slice();
+    this.run.rider.board = !!data.board;
     this.stream = new InputStream(data.inputs);
     this.step = 0;
     this.done = false;

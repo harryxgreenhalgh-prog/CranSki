@@ -15,6 +15,8 @@ const FAMILY_NAME = {
 };
 
 const MULTI = ['', '', 'DOUBLE ', 'TRIPLE ', 'QUAD '];
+
+const GRAB_DISPLAY = { rocket: 'ROCKET AIR', truenose: 'TRUE NOSE' };
 function multiWord(n) {
   return n < MULTI.length ? MULTI[n] : `${n}X `;
 }
@@ -111,9 +113,14 @@ export function describeTrick(air) {
   for (const g of grabs) if (!grabNames.includes(g.name)) grabNames.push(g.name);
 
   const parts = [];
-  if (switchStance && name) parts.push('SWITCH');
+  if (air.board && name && spinDeg > 0) {
+    // Snowboard: direction too. Regular stance: spinning left is frontside.
+    const fs = spinDir > 0;
+    if (switchStance) parts.push(fs ? 'CAB' : 'SWITCH BS');
+    else parts.push(fs ? 'FS' : 'BS');
+  } else if (switchStance && name) parts.push('SWITCH');
   if (name) parts.push(name);
-  parts.push(...grabNames.map((g) => g.toUpperCase()));
+  parts.push(...grabNames.map((g) => GRAB_DISPLAY[g] || g.toUpperCase()));
 
   const longestGrab = grabs.reduce((m, g) => Math.max(m, g.time), 0);
 

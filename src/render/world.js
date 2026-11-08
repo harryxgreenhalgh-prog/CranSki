@@ -4,6 +4,9 @@ import { mulberry32 } from '../sim/rng.js';
 import { Sky } from './sky.js';
 import { buildLift } from './lift.js';
 import { SkiTracks } from './tracks.js';
+import { textTexture } from './textTexture.js';
+
+export { textTexture };
 
 export const BLUE = 0x1e7bff;
 const CHUNK = 120; // terrain chunk length along s (m)
@@ -31,23 +34,6 @@ function corduroyTexture() {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
   _cordTex = tex;
-  return tex;
-}
-
-export function textTexture(text, { w = 1024, h = 128, bg = '#1e7bff', fg = '#ffffff', font = 'italic 900 88px Impact, "Arial Black", sans-serif' } = {}) {
-  const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
-  const g = c.getContext('2d');
-  g.fillStyle = bg;
-  g.fillRect(0, 0, w, h);
-  g.fillStyle = fg;
-  g.font = font;
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.fillText(text, w / 2, h / 2 + 4);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
 
