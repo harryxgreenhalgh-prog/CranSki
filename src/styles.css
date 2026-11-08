@@ -374,9 +374,6 @@ h2 {
   background: #ff8d4d;
 }
 
-#ride {
-  width: 100%;
-}
 
 #pause-help {
   display: grid;
@@ -602,4 +599,490 @@ h2 {
   font-family: var(--brush);
   font-style: italic;
   font-size: 20px;
+}
+
+/* ---------------------------------------------------------------- Basecamp */
+.layer {
+  position: absolute;
+  inset: 0 0 30px 0;
+  pointer-events: none;
+}
+
+.layer > * {
+  pointer-events: auto;
+}
+
+.topbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  background: linear-gradient(180deg, rgba(9, 22, 44, 0.75), rgba(9, 22, 44, 0));
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabs button,
+.footlinks button {
+  font: inherit;
+  color: var(--paper);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.tabs button {
+  font-family: var(--brush);
+  font-style: italic;
+  font-size: 20px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  border-radius: 8px;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+.tabs button:hover,
+.tabs button.on {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.tabs button.on {
+  box-shadow: inset 0 -3px 0 var(--orange);
+}
+
+.topright {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.brand {
+  font-family: var(--brush);
+  font-style: italic;
+  font-size: 24px;
+  text-shadow: 0 3px 0 var(--blue);
+}
+
+.frost {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(9, 22, 44, 0.6);
+  border-radius: 999px;
+  padding: 5px 12px;
+  color: #bfe3ff;
+}
+
+.frost b {
+  color: #fff;
+}
+
+.frost small {
+  font-weight: 800;
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.pill,
+.icon {
+  font: inherit;
+  font-weight: 800;
+  color: var(--paper);
+  background: rgba(9, 22, 44, 0.6);
+  border: 1px solid var(--panel-line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.pill {
+  padding: 5px 12px;
+}
+
+.icon {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+}
+
+.icon:hover,
+.pill:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.icon.on {
+  background: var(--blue);
+}
+
+.leftcol {
+  position: absolute;
+  left: 16px;
+  top: 70px;
+  bottom: 120px;
+  width: 270px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-size: 13px;
+}
+
+.card h4 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.card p {
+  margin: 0;
+}
+
+.card .bar,
+.tierbar {
+  height: 8px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.12);
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.card .bar span,
+.tierbar span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--blue), #7cc4ff);
+}
+
+#podium {
+  margin: 0;
+  padding-left: 18px;
+}
+
+#podium li {
+  margin: 3px 0;
+}
+
+.passcard {
+  position: absolute;
+  left: calc(50% + 120px);
+  top: 30%;
+  width: 230px;
+  transform: rotate(-4deg);
+  background: linear-gradient(135deg, #ffffff, #dfeeff);
+  color: var(--ink);
+  border-radius: 14px;
+  padding: 12px 14px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35);
+}
+
+.pc-top,
+.pc-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  color: var(--blue-deep);
+}
+
+#rider-name {
+  width: 100%;
+  margin: 8px 0;
+  border: 0;
+  border-bottom: 2px dashed rgba(11, 61, 145, 0.4);
+  background: transparent;
+  font-family: var(--brush);
+  font-style: italic;
+  font-size: 28px;
+  color: var(--ink);
+  outline: none;
+}
+
+.pc-code {
+  margin-top: 8px;
+  height: 22px;
+  background: repeating-linear-gradient(90deg, var(--ink) 0 2px, transparent 2px 4px, var(--ink) 4px 5px, transparent 5px 8px);
+  opacity: 0.8;
+}
+
+.modes {
+  position: absolute;
+  right: 18px;
+  bottom: 40px;
+  width: 260px;
+  display: grid;
+  gap: 6px;
+}
+
+.mode {
+  font: inherit;
+  font-weight: 800;
+  text-align: left;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--paper);
+  background: var(--panel);
+  border: 2px solid var(--panel-line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.mode.on {
+  border-color: var(--orange);
+}
+
+.mode:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.party {
+  font-size: 12px;
+  text-align: right;
+}
+
+.ride-big {
+  position: absolute;
+  left: 16px;
+  bottom: 52px;
+  font-size: 40px !important;
+  padding: 12px 34px !important;
+  box-shadow: 0 10px 30px rgba(255, 122, 47, 0.45);
+}
+
+.footlinks {
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.footlinks button:hover {
+  text-decoration: underline;
+}
+
+/* ---------------------------------------------------------------- map */
+.mapwrap {
+  width: min(1200px, 100%);
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 14px;
+  align-items: center;
+}
+
+.mapart {
+  background: linear-gradient(180deg, #7ec0ff, #d9efff);
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+}
+
+#map-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+#map-svg .pk {
+  cursor: pointer;
+}
+
+#map-svg .pk circle {
+  fill: #ffffff;
+  stroke: #0b3d91;
+  stroke-width: 0.6;
+}
+
+#map-svg .pk.sel circle {
+  fill: #ff7a2f;
+  stroke: #fff;
+}
+
+#map-svg .pk text {
+  font-family: Impact, 'Arial Black', sans-serif;
+  font-style: italic;
+  font-size: 3.2px;
+  fill: #0b3d91;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 0.8px;
+}
+
+#map-svg .here {
+  font-family: system-ui, sans-serif;
+  font-weight: 900;
+  font-size: 2.2px;
+  fill: #fff;
+}
+
+.mapside h2 {
+  font-size: 30px;
+}
+
+.mapside .breakdown td:last-child {
+  max-width: 170px;
+}
+
+/* ---------------------------------------------------------------- finish + modal */
+#finishcard {
+  position: absolute;
+  right: 6%;
+  top: 22%;
+  width: min(320px, 80vw);
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
+  border-radius: 18px;
+  padding: 18px 20px;
+  transform: skewX(-4deg);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+}
+
+.fc-park {
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.fc-total {
+  font-family: var(--brush);
+  font-style: italic;
+  font-size: 58px;
+  color: #fff6a8;
+  text-shadow: 0 4px 0 var(--blue-deep);
+}
+
+.fc-line {
+  font-weight: 700;
+  margin: 2px 0;
+}
+
+.frostline {
+  color: #bfe3ff;
+  font-weight: 800;
+  margin-top: 4px;
+}
+
+.modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+#modal .panel {
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  width: min(820px, 100%);
+}
+
+#modal-body {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+#modal-body h3 {
+  margin: 16px 0 4px;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+}
+
+#modal-body a {
+  color: #9fd0ff;
+}
+
+@media (max-width: 860px) {
+  .leftcol {
+    display: none;
+  }
+  .passcard {
+    left: auto;
+    right: 12px;
+    top: 74px;
+    width: 190px;
+  }
+  .mapwrap {
+    grid-template-columns: 1fr;
+  }
+  .modes {
+    width: 200px;
+    bottom: 120px;
+  }
+  .ride-big {
+    font-size: 30px !important;
+  }
+  .brand,
+  #friends-btn {
+    display: none;
+  }
+  .footlinks {
+    font-size: 11px;
+  }
+}
+
+.howto {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.howto h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.howto table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.howto td {
+  padding: 3px 0;
+  vertical-align: top;
+}
+
+.howto td:first-child {
+  white-space: nowrap;
+  padding-right: 10px;
+  font-weight: 800;
+}
+
+.howto .tips {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  padding-left: 18px;
 }

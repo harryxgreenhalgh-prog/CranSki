@@ -49,6 +49,18 @@ export class Run {
     }
   }
 
+  // After the finish line: keep the rider moving (braking to a stop) but score nothing.
+  coast(input) {
+    this.rider.step(input);
+    this.rider.events.length = 0;
+  }
+
+  resetPosition() {
+    this.rider.resetPosition();
+    this.line = new Line();
+    this.bankTimer = 0;
+  }
+
   _bank() {
     this.bankTimer = 0;
     if (this.line.empty) return;

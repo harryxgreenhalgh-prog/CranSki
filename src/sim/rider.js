@@ -1019,6 +1019,22 @@ export class Rider {
     this._groundOrientation();
   }
 
+  // Pause menu "reset position": back on the piste where you are, standing still.
+  resetPosition() {
+    const t = this.terrain;
+    const s = Math.max(t.park.startS, Math.min(t.park.finishS - 5, -this.pos.z));
+    const x = t.center(s);
+    this.pos.set(x, t.height(x, -s), -s);
+    this.courseDir(s, this.skiDir);
+    this.vel.copy(this.skiDir).multiplyScalar(0.5);
+    this.mode = 'ground';
+    this.air = this.rail = this.butter = this.crash = null;
+    this.omega.set(0, 0, 0);
+    this.switchStance = false;
+    this.load = this.windup = 0;
+    this._groundOrientation();
+  }
+
   // Grab and pose info for the renderer.
   get activeGrab() {
     return this.air ? this.air.activeGrab : null;

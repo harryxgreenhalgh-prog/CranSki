@@ -32,7 +32,7 @@ export const PARKS = [
     features: '4 big kickers, 2 rail zones, stair set',
     lift: 'Gondola',
     leaderboard: true,
-    map: { x: 70, y: 18 },
+    map: { x: 64, y: 20 },
     load: () => import('./apex.js'),
   },
   {
@@ -54,7 +54,7 @@ export const PARKS = [
     features: 'Groomed piste, powder, trails, cliffs',
     lift: 'Ropeway',
     leaderboard: false,
-    map: { x: 82, y: 44 },
+    map: { x: 72, y: 42 },
     load: () => import('./shirakumo.js'),
   },
   {

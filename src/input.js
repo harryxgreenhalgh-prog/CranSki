@@ -47,6 +47,8 @@ export class Input {
     this.padPressed = new Set();
 
     target.addEventListener('keydown', (e) => {
+      // Typing in a text box (the rider name) never drives the game.
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (GAME_KEYS.has(e.code)) e.preventDefault();
       if (!e.repeat) this.pressed.add(e.code);
       this.down.add(e.code);
