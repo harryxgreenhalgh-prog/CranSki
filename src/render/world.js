@@ -1,6 +1,7 @@
 // Builds a park scene from simple shapes: snow, features, forest, gates, lift, sky.
 import * as THREE from 'three';
 import { mulberry32 } from '../sim/rng.js';
+import { smoothstep } from '../sim/terrain.js';
 import { Sky } from './sky.js';
 import { buildLift } from './lift.js';
 import { SkiTracks } from './tracks.js';
@@ -267,6 +268,106 @@ function buildTrees(terrain, group, quality) {
     chunks.push(g);
   }
   return chunks;
+}
+
+// Beyond the park: forested slopes rising into ridges on every side, so the
+// edge of the map never shows (from the lifts or anywhere else).
+function buildFarTerrain(terrain, group, quality) {
+  const park = terrain.park;
+  const ext = crossExtent(terrain);
+  const step = quality === 'performance' ? 45 : 30;
+  const S0 = -700;
+  const S1 = park.endS + 700;
+  const U = 950;
+  const endH = terrain.profile(park.endS);
+  const farH = (u, s) => {
+    const base = s > park.endS ? endH - (s - park.endS) * 0.12 : terrain.profile(s);
+    const au = Math.abs(u);
+    const cross = terrain.crossSection(Math.sign(u) * Math.min(au, ext), Math.min(Math.max(s, 0), park.endS));
+    const k = smoothstep(ext - 10, ext + 160, au);
+    const ridge = k * ((au - ext) * 0.32 + 26 * Math.sin(s / 140 + u / 70) + 14 * Math.sin(s / 57 - u / 43) + 20);
+    return base + cross + ridge;
+  };
+  const inside = (u, s) => Math.abs(u) < ext - 4 && s > -36 && s < park.endS + 36;
+  const us = [];
+  for (let u = -U; u <= U + 1e-6; u += step) us.push(u);
+  for (const e of [ext - 6, -(ext - 6)]) us.push(e);
+  us.sort((a, b) => a - b);
+  const ss = [];
+  for (let s = S0; s <= S1; s += step) ss.push(s);
+  for (const e of [-40, park.endS + 40]) ss.push(e);
+  ss.sort((a, b) => a - b);
+  const W2 = us.length;
+  const pos = new Float32Array(ss.length * W2 * 3);
+  const col = new Float32Array(ss.length * W2 * 3);
+  let k = 0;
+  for (const s of ss) {
+    const cs = terrain.center(Math.min(Math.max(s, 0), park.endS));
+    for (const u of us) {
+      const y = inside(u, s) ? terrain.height(cs + u, -s) - 0.8 : farH(u, s);
+      pos.set([cs + u, y, -s], k * 3);
+      k++;
+    }
+  }
+  const idx = [];
+  for (let i = 0; i < ss.length - 1; i++) {
+    for (let j = 0; j < W2 - 1; j++) {
+      const a = i * W2 + j;
+      const um = (us[j] + us[j + 1]) / 2;
+      const sm = (ss[i] + ss[i + 1]) / 2;
+      if (inside(um, sm) && inside(us[j], ss[i]) && inside(us[j + 1], ss[i + 1])) continue;
+      idx.push(a, a + 1, a + W2, a + 1, a + W2 + 1, a + W2);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  // Snow, with grey rock where it gets steep.
+  const nrm = geo.attributes.normal;
+  for (let i = 0; i < nrm.count; i++) {
+    const ny = nrm.getY(i);
+    const rock = smoothstep(0.82, 0.62, ny);
+    col.set([0.97 - rock * 0.55, 0.98 - rock * 0.53, 1.0 - rock * 0.48], i * 3);
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  mesh.receiveShadow = quality !== 'performance';
+  group.add(mesh);
+
+  // A forest on the near slopes.
+  const rnd = mulberry32(4242);
+  const spots = [];
+  const n = quality === 'performance' ? 1400 : 3200;
+  for (let i = 0; i < n * 3 && spots.length < n; i++) {
+    const side = rnd() < 0.5 ? -1 : 1;
+    const u = side * (ext - 4 + Math.pow(rnd(), 1.6) * 420);
+    const s = -250 + rnd() * (park.endS + 500);
+    if (inside(u, s)) continue;
+    const cs = terrain.center(Math.min(Math.max(s, 0), park.endS));
+    if (terrain.lift && terrain.lift.inCorridor(cs + u, s)) continue;
+    const y = farH(u, s);
+    spots.push([cs + u, y, -s, 0.8 + rnd() * 0.9, rnd() * 6.28]);
+  }
+  const trunk = new THREE.CylinderGeometry(0.3, 0.4, 3, 5);
+  trunk.translate(0, 1.5, 0);
+  const crown = new THREE.ConeGeometry(2.8, 9, 6);
+  crown.translate(0, 7, 0);
+  const tm = new THREE.InstancedMesh(trunk, new THREE.MeshLambertMaterial({ color: 0x4a3222 }), spots.length);
+  const cm = new THREE.InstancedMesh(crown, new THREE.MeshLambertMaterial({ color: 0x1d4f35 }), spots.length);
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const sc = new THREE.Vector3();
+  const p = new THREE.Vector3();
+  const yAxis = new THREE.Vector3(0, 1, 0);
+  spots.forEach(([x, y, z, s, r], i) => {
+    m.compose(p.set(x, y - 0.3, z), q.setFromAxisAngle(yAxis, r), sc.set(s, s, s));
+    tm.setMatrixAt(i, m);
+    cm.setMatrixAt(i, m);
+  });
+  tm.computeBoundingSphere();
+  cm.computeBoundingSphere();
+  group.add(tm, cm);
 }
 
 function buildMountains(terrain, group) {
@@ -553,6 +654,7 @@ export function buildWorld(terrain, { quality = 'high', renderer = null } = {}) 
   const sky = new Sky(scene, park.sky || 'day', { hemi, sun });
 
   buildMountains(terrain, group);
+  buildFarTerrain(terrain, group, quality);
   buildTerrain(terrain, group, quality);
   buildPaint(terrain, group);
   const treeChunks = buildTrees(terrain, group, quality);

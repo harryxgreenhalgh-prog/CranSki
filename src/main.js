@@ -212,6 +212,7 @@ function boot() {
 
   function toBasecamp() {
     blurMenus();
+    endLift();
     state = 'basecamp';
     showOverlay(null);
     $('finishcard').classList.add('hidden');
@@ -285,7 +286,7 @@ function boot() {
   });
   // Tap the lift bar to skip; tap the finish card for results.
   $('liftbar').addEventListener('click', () => {
-    if (state === 'lift') lift.t = lift.duration;
+    if (state === 'lift') lift.d = lift.ride.length;
   });
   $('finishcard').addEventListener('click', () => {
     if (state === 'finish') showResultsScreen();
@@ -319,6 +320,21 @@ function boot() {
   document.addEventListener('click', (e) => {
     if (e.target.closest('button')) sfx.ui();
   });
+
+  // Look around on the lift: drag with the mouse or a finger.
+  {
+    let drag = null;
+    $('game').addEventListener('pointerdown', (e) => {
+      if (state === 'lift') drag = { x: e.clientX, y: e.clientY };
+    });
+    window.addEventListener('pointerup', () => (drag = null));
+    window.addEventListener('pointermove', (e) => {
+      if (!drag || state !== 'lift' || !lift) return;
+      lift.yaw += (e.clientX - drag.x) * 0.006;
+      lift.pitch = Math.max(-0.4, Math.min(1.2, lift.pitch - (e.clientY - drag.y) * 0.004));
+      drag = { x: e.clientX, y: e.clientY };
+    });
+  }
 
   // ------------------------------------------------------------ locker
   let lockerYaw = 0;
@@ -470,15 +486,23 @@ function boot() {
     L.hud.show(false);
     showOverlay(null);
     $('finishcard').classList.add('hidden');
-    lift = { t: 0, duration: L.world.lift.ride.duration };
+    const ride = L.world.lift.ride;
+    ride.start();
+    lift = { d: 0, ride, cam: null, look: null, yaw: 0, pitch: 0 };
     state = 'lift';
     const names = { gondola: 'GONDOLA', ropeway: 'ROPEWAY', tbar: 'T-BAR' };
-    $('lift-name').textContent = names[L.world.lift.ride.type];
+    $('lift-name').textContent = names[ride.type];
     $('liftbar').classList.remove('hidden');
+  }
+
+  function endLift() {
+    if (lift) lift.ride.stop();
+    lift = null;
   }
 
   function startRun() {
     blurMenus();
+    endLift();
     const L = loaded;
     placeModel(L.world.scene);
     L.run.reset();
@@ -708,8 +732,8 @@ function boot() {
       else if (state === 'map') parkMap.onRide(parkMap.currentId);
       else if (state === 'results') startLift();
       else if (state === 'finish' && finish.t > 0.8) showResultsScreen();
-      else if (state === 'lift') lift.t = lift.duration;
-    } else if (state === 'lift' && input.wasPressed('skipLift')) lift.t = lift.duration;
+      else if (state === 'lift') lift.d = lift.ride.length;
+    } else if (state === 'lift' && input.wasPressed('skipLift')) lift.d = lift.ride.length;
 
     if (state === 'boot') {
       input.endFrame();
@@ -752,38 +776,58 @@ function boot() {
       return;
     }
 
-    // -------------------------------------------- lift ride
+    // -------------------------------------------- lift ride (third person, real lift speed)
     if (state === 'lift' || state === 'loading') {
-      if (state === 'lift') {
-        lift.t += dt;
-        if (lift.t >= lift.duration) {
-          startRun();
-          input.endFrame();
-          return;
-        }
-      }
       placeModel(L.world.scene);
-      const ride = L.world.lift.ride;
-      const t = state === 'lift' ? Math.min(1, lift.t / lift.duration) : 0;
-      ride.sample(t, liftPos, liftDir);
-      if (ride.type === 'tbar') {
-        model.root.visible = true;
-        model.root.position.set(liftPos.x, liftPos.y + COM_HEIGHT, liftPos.z);
-        tmp.set(liftDir.x, 0, liftDir.z).normalize();
-        model.root.quaternion.setFromUnitVectors(tmp2.set(0, 0, -1), tmp);
-        model.update({ ...IDLE, crouch: 0.2 }, dt);
-        camera.position.copy(liftPos).addScaledVector(tmp, -7).add(tmp2.set(0, 3, 0));
-        camera.lookAt(liftPos.x + liftDir.x * 20, liftPos.y + liftDir.y * 20 + 1, liftPos.z + liftDir.z * 20);
-      } else {
-        model.root.visible = false;
-        camera.position.copy(liftPos).addScaledVector(liftDir, -9).add(tmp.set(4, 3.5, 0));
-        camera.lookAt(liftPos.x + liftDir.x * 30, liftPos.y + liftDir.y * 30, liftPos.z + liftDir.z * 30);
+      if (state === 'loading' || !lift) {
+        L.world.update(L.time, camera.position, camera);
+        renderer.render(L.world.scene, camera);
+        input.endFrame();
+        return;
       }
-      if (camera.fov !== 65) {
-        camera.fov = 65;
+      const ride = lift.ride;
+      lift.d += ride.speed * dt;
+      if (lift.d >= ride.length) {
+        startRun();
+        input.endFrame();
+        return;
+      }
+      const feet = ride.place(lift.d, L.time, liftPos, liftDir);
+      const left = (ride.length - lift.d) / ride.speed;
+      $('lift-time').textContent = `${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')} to the top`;
+      // Rider: standing in the cabin, or on the snow holding the T-bar.
+      const fwd = tmp.set(liftDir.x, 0, liftDir.z).normalize();
+      model.root.visible = true;
+      model.root.position.set(feet.x, feet.y + COM_HEIGHT, feet.z);
+      model.root.quaternion.setFromUnitVectors(tmp2.set(0, 0, -1), fwd);
+      model.update({ ...IDLE, crouch: ride.type === 'tbar' ? 0.22 : 0.05 + 0.03 * Math.sin(L.time * 1.4) }, dt);
+      // Third-person camera behind and beside, smoothed; drag to look around.
+      const tbar = ride.type === 'tbar';
+      const dist = tbar ? 6.5 : ride.type === 'ropeway' ? 16 : 9.5;
+      const up = tbar ? 2.3 : ride.type === 'ropeway' ? 5 : 3.2;
+      const back = tmp2.copy(fwd).negate().applyAxisAngle(new THREE.Vector3(0, 1, 0), lift.yaw);
+      const want = new THREE.Vector3().copy(feet).addScaledVector(back, dist);
+      want.x += -fwd.z * (tbar ? 1.2 : 2.5);
+      want.z += fwd.x * (tbar ? 1.2 : 2.5);
+      want.y = feet.y + up + lift.pitch * 4;
+      const gy = L.terrain.height(want.x, want.z) + 1.2;
+      if (want.y < gy) want.y = gy;
+      const look = new THREE.Vector3().copy(feet).addScaledVector(fwd, tbar ? 6 : 8);
+      look.y = feet.y + (tbar ? 1.1 : 0.8);
+      if (!lift.cam) {
+        lift.cam = want.clone();
+        lift.look = look.clone();
+      } else {
+        lift.cam.lerp(want, 1 - Math.exp(-dt * 2.5));
+        lift.look.lerp(look, 1 - Math.exp(-dt * 4));
+      }
+      camera.position.copy(lift.cam);
+      camera.lookAt(lift.look);
+      if (camera.fov !== 60) {
+        camera.fov = 60;
         camera.updateProjectionMatrix();
       }
-      L.world.update(L.time, liftPos, camera);
+      L.world.update(L.time, feet, camera);
       renderer.render(L.world.scene, camera);
       input.endFrame();
       return;
@@ -982,6 +1026,9 @@ function boot() {
     pivot,
     get state() {
       return state;
+    },
+    get lift() {
+      return lift;
     },
     startRun,
     goRide,
