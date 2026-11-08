@@ -77,6 +77,13 @@ export class Basecamp {
     $('pc-mode').textContent = account.ready ? 'ONLINE' : 'SOLO';
   }
 
+  refreshFriends(f) {
+    const btn = $('friends-btn');
+    const online = f.online.length;
+    const asks = f.incoming.length;
+    btn.innerHTML = `Friends${online ? ` <span class="fcount" title="Friends online">${online}</span>` : ''}${asks ? ` <span class="fbadge" title="Friend requests">${asks}</span>` : ''}`;
+  }
+
   refresh() {
     $('frost').textContent = fmt(profile.frost);
     this.refreshAccount();

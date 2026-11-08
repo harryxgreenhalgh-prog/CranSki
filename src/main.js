@@ -33,6 +33,8 @@ import { placeRider, poseFor } from './render/pose.js';
 import { account, resumeAccount, displayName } from './online/account.js';
 import { mountAccount, addAccountSection, esc } from './ui/accountUI.js';
 import { cloud, cloudStatusText } from './online/cloud.js';
+import { friends, onFriends, setLocation } from './online/friends.js';
+import { mountFriends } from './ui/friendsUI.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -203,6 +205,7 @@ function boot() {
     },
     onPage: (p) => openPage(p),
     onAccount: () => openAccount(),
+    onFriends: () => openFriends(),
     onGear: () => openSettings(),
     onMusic: () => {
       $('musicpop').classList.toggle('hidden');
@@ -304,6 +307,21 @@ function boot() {
     basecamp.refreshAccount();
     maybeWelcome();
   });
+  // Friends (Phase 3 step 3).
+  function openFriends() {
+    openModal('Friends', '<div class="acct friends" id="friends-panel"></div>');
+    mountFriends($('friends-panel'), { onAccount: () => openAccount() });
+  }
+  onFriends(() => basecamp.refreshFriends(friends));
+  // Tell friends where you are: Basecamp, a lift, a run or a replay.
+  function reportLocation() {
+    const park = loaded ? loaded.id : parkId;
+    if (state === 'lift') setLocation('lift', parkId);
+    else if (state === 'riding' || state === 'paused' || state === 'finish' || state === 'results') setLocation('riding', park);
+    else if (state === 'replay') setLocation('replay', park);
+    else if (state !== 'loading' && state !== 'boot') setLocation('basecamp');
+  }
+
   // Cloud saves (Phase 3 step 2): show the status, and apply what arrives.
   addAccountSection(() => `<h3>CLOUD SAVE</h3><p class="muted">${esc(cloudStatusText())}</p>`);
   cloud.onApplied = (changed) => {
@@ -728,6 +746,7 @@ function boot() {
   const IDLE = { crouch: 0.05, tuck: 0, legsUp: 0, lean: 0, look: 0, armsOut: 0, grab: null, grabSide: 1 };
 
   let lastDraw = 0;
+  let reportedState = null;
   let lastVy = 0;
   let slowFrames = 0;
   let fastFrames = 0;
@@ -741,6 +760,10 @@ function boot() {
     time += dt;
     input.pollFrame();
     stats.update(dt);
+    if (state !== reportedState) {
+      reportedState = state;
+      reportLocation();
+    }
     {
       const R = loaded?.run?.rider;
       const live = (state === 'riding' || state === 'finish') && R;

@@ -135,8 +135,14 @@ export async function sendSignInLink(email) {
   if (error) throw friendly(error);
 }
 
+const signOutHooks = [];
+export function beforeSignOut(fn) {
+  signOutHooks.push(fn);
+}
+
 export async function signOut() {
   const sb = await startAccount();
+  for (const fn of signOutHooks) await fn();
   await sb.auth.signOut({ scope: 'local' });
   account.user = null;
   account.profile = null;

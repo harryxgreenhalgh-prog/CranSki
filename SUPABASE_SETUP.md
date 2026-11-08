@@ -75,3 +75,19 @@ That's all. When a signed-in rider changes a setting, sets a personal best or sa
 Graphics level, the 30 fps cap and the touch layout stay on each device.
 
 Signed out, or offline, the game uses this browser's local saves exactly as before. Riders can only read their own row, and they can only change it through the merge function.
+
+---
+
+## 3. Friends (step 3)
+
+1. **SQL Editor** → **New query**.
+2. Paste all of `supabase/migrations/20261108120200_friends.sql` and click **Run**.
+3. **Table Editor** should now list `friendships` and `presence`, both marked as RLS enabled.
+
+How it works:
+
+- Riders find each other by gamertag, ignoring case, spaces and dashes. Search needs a signed-in rider and typing at least 2 letters, and shows at most 10 results.
+- A request shows only the sender's gamertag. If both riders ask each other, they become friends straight away.
+- While the game is open, it records where you are (Basecamp, a lift, a run, a replay) about every 45 seconds. A rider counts as online if they were seen in the last 90 seconds.
+- Online status and location are only ever returned for accepted friends, and nobody can read the `presence` table directly. Riders can tick **Appear offline** in the Friends panel to stop sharing it.
+- Limits: 50 pending requests out, 200 friends.
