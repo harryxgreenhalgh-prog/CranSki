@@ -30,6 +30,8 @@ import { Music } from './audio/music.js';
 import { LoadingScreen } from './ui/loading.js';
 import { loadAssets, ASSETS, preloadScenes, sceneCopy, modelBounds } from './render/assets.js';
 import { placeRider, poseFor } from './render/pose.js';
+import { account, resumeAccount, displayName } from './online/account.js';
+import { mountAccount } from './ui/accountUI.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -199,6 +201,7 @@ function boot() {
       else openPage('online');
     },
     onPage: (p) => openPage(p),
+    onAccount: () => openAccount(),
     onGear: () => openSettings(),
     onMusic: () => {
       $('musicpop').classList.toggle('hidden');
@@ -229,6 +232,7 @@ function boot() {
     model.root.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI - 0.35);
     model.root.visible = true;
     basecamp.show();
+    maybeWelcome();
   }
 
   function openMap(from) {
@@ -266,6 +270,40 @@ function boot() {
       });
     }
   }
+
+  // ------------------------------------------------------------ account (Phase 3)
+  function openAccount() {
+    openModal('Account', '<div class="acct" id="acct"></div>');
+    mountAccount($('acct'), { onPrivacy: () => openPage('privacy') });
+  }
+  function toast(text, ms = 6000) {
+    $('toast-text').textContent = text;
+    $('toast-btn').classList.add('hidden');
+    $('toast').classList.remove('hidden');
+    clearTimeout(toast.t);
+    toast.t = setTimeout(() => {
+      $('toast').classList.add('hidden');
+      $('toast-btn').classList.remove('hidden');
+    }, ms);
+  }
+  // Back from a sign-in link: welcome, or ask for a gamertag first.
+  function maybeWelcome() {
+    if (state !== 'basecamp' || !$('modal').classList.contains('hidden')) return;
+    if (account.notice) openAccount();
+    else if (account.justSignedIn) {
+      account.justSignedIn = false;
+      if (account.ready) toast(`Signed in as ${account.gamertag}`);
+      else openAccount();
+    } else if (account.signedIn && !account.profile && !maybeWelcome.asked) {
+      maybeWelcome.asked = true;
+      openAccount();
+    }
+  }
+  account.onChange(() => {
+    basecamp.refreshAccount();
+    maybeWelcome();
+  });
+  resumeAccount();
 
   let settingsReturn = null;
   const settingsUI = new SettingsUI({
@@ -572,7 +610,7 @@ function boot() {
       version: SIM_VERSION,
       total: res.total,
       bestTrick: res.bestTrick?.name || null,
-      name: profile.name,
+      name: displayName(profile.name),
       inputs: recorder.data(),
       grabSlots: L.run.rider.grabSlots.slice(),
       board: L.run.rider.board,

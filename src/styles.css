@@ -1840,3 +1840,94 @@ body.touching #footer .credits {
 .pause-music span {
   flex: 1;
 }
+
+/* ---------------------------------------------------------------- account (Phase 3) */
+.pill.on {
+  background: var(--blue);
+  border-color: transparent;
+}
+
+.acct {
+  max-width: 560px;
+}
+
+.acct-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.acct-form input,
+.acct input[type='search'] {
+  flex: 1 1 220px;
+  min-width: 0;
+  font: inherit;
+  font-size: 16px; /* no zoom-on-focus on phones */
+  padding: 9px 12px;
+  color: var(--ink);
+  background: #fff;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  outline: none;
+}
+
+.acct-form input:focus,
+.acct input[type='search']:focus {
+  border-color: var(--blue);
+}
+
+.acct-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.acct-msg {
+  min-height: 1.4em;
+  margin: 4px 0;
+  font-weight: 700;
+}
+
+.acct-msg.good {
+  color: var(--green);
+}
+
+.acct-msg.bad {
+  color: #ff8a8a;
+}
+
+.acct-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin: 6px 0 12px;
+}
+
+.acct-tag {
+  font-family: var(--brush);
+  font-size: 28px;
+  letter-spacing: 0.02em;
+}
+
+.small {
+  font-size: 12px;
+}
+
+#rider-name[readonly] {
+  cursor: pointer;
+}
+
+#account-btn {
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1400px) {
+  .topright .brand {
+    display: none;
+  }
+}

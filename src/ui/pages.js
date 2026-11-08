@@ -42,9 +42,10 @@ export const PAGES = {
   privacy: {
     title: 'Privacy',
     html: `
-      <p>Solo CranSki has no accounts and sends nothing to any server. The game is static files hosted on GitHub Pages.</p>
+      <p>Solo CranSki needs no account and sends nothing to any server. The game is static files hosted on GitHub Pages.</p>
       <h3>WHAT IS STORED, AND WHERE</h3>
-      <p>Only in this browser, on this device: your rider name, Locker choices, settings, personal bests, FROST balance, recent run summaries, and saved replays and ghosts. Clearing your browser's site data removes all of it, or use the button below.</p>
+      <p>In this browser, on this device: your rider name, Locker choices, settings, personal bests, FROST balance, recent run summaries, and saved replays and ghosts. Clearing your browser's site data removes all of it, or use the button below.</p>
+      <p>If you sign in (optional): your email address and sign-in records are held by Supabase Auth, the hosted service that sends your sign-in link, and your gamertag is stored in CranSki's Supabase database where other riders can see it. Your email is never shown to other riders.</p>
       <p><button class="btn" id="wipe-data">Delete my CranSki data on this device</button></p>
       <p class="muted">GitHub, which hosts the site, may keep standard web server logs. See GitHub's privacy statement.</p>`,
   },
