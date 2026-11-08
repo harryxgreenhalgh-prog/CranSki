@@ -156,6 +156,30 @@
         <div id="chat-hint" class="muted small"></div>
       </div>
 
+      <!-- Duels: score strip, big cards (challenge, 3-2-1, connection), results, highlight reel -->
+      <div id="duelhud" class="hidden"><span id="dh-title"></span><span id="dh-score"></span></div>
+      <div id="duelcard" class="hidden"><div id="dc-big"></div><div id="dc-small"></div><div id="dc-buttons"></div></div>
+      <section id="duelover" class="overlay hidden">
+        <div class="panel">
+          <h2 id="do-title">DUEL</h2>
+          <table class="breakdown" id="do-table"></table>
+          <p class="acct-msg" id="do-msg"></p>
+          <div id="do-parks" class="seg hidden"></div>
+          <div class="buttons">
+            <button class="btn primary" data-dact="rematch">Rematch</button>
+            <button class="btn" data-dact="map">Change map</button>
+            <button class="btn" data-dact="reel">Highlight reel</button>
+            <button class="btn" data-dact="leave">Leave duel</button>
+          </div>
+        </div>
+      </section>
+      <div id="reel" class="hidden">
+        <div class="rl-side rl-left"><b id="rl-l-name"></b><span id="rl-l-trick"></span></div>
+        <div class="rl-side rl-right"><b id="rl-r-name"></b><span id="rl-r-trick"></span></div>
+        <div class="rl-divider"></div>
+        <button class="btn" id="rl-skip">Skip <kbd>Esc</kbd></button>
+      </div>
+
       <!-- Idle in a live room: countdown back to Basecamp -->
       <div id="idlecard" class="hidden" role="alert">
         <div class="idle-title">STILL THERE?</div>

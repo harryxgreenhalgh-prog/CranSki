@@ -5,6 +5,7 @@ import { STRIDE } from '../src/render/pose.js';
 import { Terrain } from '../src/sim/terrain.js';
 import { Run } from '../src/sim/run.js';
 import { park as YARD } from '../src/parks/yard.js';
+import { memoryNet } from './helpers/memnet.js';
 
 test('room sizes follow the design: new room at 20 (14 on BIG AIR), 20 max on SHIRAKUMO and BELLEVUE', () => {
   assert.deepEqual(roomRules('yard'), { openAt: 20, max: 30 });
@@ -91,38 +92,6 @@ test('a pose packet is small and rounds to millimetres', () => {
   assert.ok(Math.abs(p[2] - run.rider.pos.z) < 0.006);
   assert.ok(JSON.stringify(p).length < 220, `packet ${JSON.stringify(p).length} chars`);
 });
-
-// Two riders meeting in a room through an in-memory stand-in for Realtime.
-function memoryNet() {
-  const topics = new Map(); // topic -> Set(client)
-  return (who) =>
-    async (topic, { key, onBroadcast = {}, onPresence }) => {
-      const set = topics.get(topic) || new Set();
-      topics.set(topic, set);
-      const me = { key, payload: null, onBroadcast, onPresence };
-      set.add(me);
-      const members = () => [...set].filter((c) => c.payload).map((c) => ({ ...c.payload, key: c.key }));
-      const sync = () => set.forEach((c) => c.onPresence?.(members()));
-      return {
-        topic,
-        track: async (p) => {
-          me.payload = p;
-          sync();
-        },
-        untrack: async () => {
-          me.payload = null;
-          sync();
-        },
-        send: (event, payload) => set.forEach((c) => c !== me && c.onBroadcast[event]?.(payload)),
-        members,
-        close: async () => {
-          set.delete(me);
-          sync();
-        },
-        who,
-      };
-    };
-}
 
 test('two riders join the same room, see each other move, and leave cleanly', async () => {
   const net = memoryNet();

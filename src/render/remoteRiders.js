@@ -188,6 +188,12 @@ export class RemoteRiders {
     e.group.add(e.trick);
   }
 
+  // Hide one rider this frame (e.g. your duel opponent, drawn separately).
+  hideUid(uid) {
+    const e = this.entries.get(uid);
+    if (e) e.group.visible = false;
+  }
+
   // Where everyone is, for the minimap: [{ s, y }]
   dots() {
     const out = [];

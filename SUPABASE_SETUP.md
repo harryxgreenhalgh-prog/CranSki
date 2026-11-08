@@ -314,3 +314,17 @@ on conflict (user_id) do update set muted_until = excluded.muted_until;
 4. Try a link: it should arrive as "[link removed]".
 5. Hold **Tab** → **Mute** or **Report** on the other rider.
 6. **Settings** → **Chat** switches between full chat, quick phrases only, and off.
+
+## 9. Friendly 1v1 duels (Phase 4, step 4)
+
+1. **SQL Editor**: run `supabase/setup.sql` again, or `supabase/migrations/20261109120200_duels.sql` on its own. It lets riders with a gamertag use private `duel:<id>` channels.
+2. Nothing to deploy. A duel's two riders talk to each other over Realtime, and each re-rides the other's runs from their recorded inputs to check the score.
+
+### Test it
+
+1. Two riders in a live room on APEX, BIG AIR, FOREST LINE, ASPEN PIPE or BELLEVUE.
+2. Press **V** near the other rider, or hold **Tab** and press **1V1**. They get a card: **Y** accepts, **N** declines.
+3. 3-2-1 → the challenger rides while the other watches → then they swap, 2 runs each. Best run wins.
+4. At the end: **Rematch**, **Change map**, **Highlight reel** (both best runs side by side) or **Leave duel**.
+5. During your run, pausing or standing still uses up a 30-second allowance for the whole duel. When it runs out, the run ends.
+6. If the other rider drops out, you see **NOT RESPONDING** with their remaining pause time. If your own connection drops, you see **RECONNECTING**.
