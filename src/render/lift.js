@@ -2,6 +2,7 @@
 // Moving carriers for the scenery, and a third-person ride for the player at real
 // lift speed.
 import * as THREE from 'three';
+import { ASSETS, partMaterials } from './assets.js';
 
 class Path {
   constructor(points) {
@@ -40,8 +41,26 @@ function std(color, extra = {}) {
   return new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.2, ...extra });
 }
 
+let cabinMats = null;
 // A gondola cabin with glass all round so you can see who's riding.
 function makeCabin(big, glassOpacity = 0.28) {
+  const part = ASSETS.ready && ASSETS.parts.cabin;
+  if (part) {
+    cabinMats ||= {
+      cabinBody: new THREE.MeshStandardMaterial({ color: 0xff5a36, roughness: 0.35, metalness: 0.1 }),
+      cabinFrame: new THREE.MeshStandardMaterial({ color: 0xf2f4f7, roughness: 0.35, metalness: 0.4 }),
+      darkSteel: new THREE.MeshStandardMaterial({ color: 0x3a3f46, roughness: 0.45, metalness: 0.6 }),
+    };
+    const glass = new THREE.MeshStandardMaterial({ color: 0x9fd0ff, transparent: true, opacity: glassOpacity, roughness: 0.05, metalness: 0.3, depthWrite: false });
+    const m = new THREE.Mesh(part.geometry, partMaterials(part, { ...cabinMats, cabinGlass: glass }, cabinMats.cabinBody));
+    m.castShadow = true;
+    const g = new THREE.Group();
+    g.add(m);
+    const k = big ? 2.6 : 1;
+    m.scale.setScalar(k);
+    g.userData.height = 3.4 * k;
+    return g;
+  }
   const g = new THREE.Group();
   const w = big ? 5.6 : 2.1;
   const h = big ? 3.0 : 2.3;
@@ -100,8 +119,19 @@ export function buildLift(terrain, scene) {
   const dark = std(0x3a3f46, { metalness: 0.5 });
 
   // Towers with a crossarm and sheave wheels.
+  const towerPart = ASSETS.ready && ASSETS.parts.tower && layout.type !== 'tbar' ? ASSETS.parts.tower : null;
+  const towerMats = towerPart ? { steel, darkSteel: dark } : null;
   for (const t of layout.towers) {
     const h = k.towerH;
+    if (towerPart) {
+      const m = new THREE.Mesh(towerPart.geometry, partMaterials(towerPart, towerMats, steel));
+      const sx = layout.type === 'ropeway' ? 1.6 : 1;
+      m.scale.set(sx, h / 16, sx);
+      m.position.set(t.x + (layout.side * 4.5) / 2, t.g, t.z);
+      m.castShadow = true;
+      group.add(m);
+      continue;
+    }
     const r = layout.type === 'ropeway' ? 0.9 : layout.type === 'tbar' ? 0.22 : 0.4;
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.7, r, h, 10), steel);
     pole.position.set(t.x + (layout.side * 4.5) / 2, t.g + h / 2, t.z);

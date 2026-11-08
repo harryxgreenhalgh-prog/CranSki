@@ -5,7 +5,8 @@ import { smoothstep } from '../sim/terrain.js';
 import { Sky } from './sky.js';
 import { buildLift } from './lift.js';
 import { SkiTracks } from './tracks.js';
-import { pineGeometries, treeMaterial } from './trees.js';
+import { pineSet } from './trees.js';
+import { ASSETS, partMaterials } from './assets.js';
 import { textTexture } from './textTexture.js';
 
 export { textTexture };
@@ -290,8 +291,7 @@ function buildPaint(terrain, group) {
 
 function buildTrees(terrain, group, quality) {
   const trees = terrain.trees;
-  const geos = pineGeometries();
-  const mat = treeMaterial();
+  const pines = pineSet();
   // One instanced batch per 200 m (and per variant) so far forest can be culled.
   const byChunk = new Map();
   for (const t of trees) {
@@ -310,7 +310,7 @@ function buildTrees(terrain, group, quality) {
     for (const variant of ['snowy', 'dark']) {
       const list = lists[variant];
       if (!list.length) continue;
-      const im = new THREE.InstancedMesh(geos[variant], mat, list.length);
+      const im = new THREE.InstancedMesh(pines[variant].geometry, pines[variant].material, list.length);
       list.forEach((t, i) => {
         p.set(t.x, terrain.height(t.x, -t.s) - 0.2, -t.s);
         q.setFromAxisAngle(yAxis, t.rot);
@@ -408,7 +408,8 @@ function buildFarTerrain(terrain, group, quality) {
     const y = farH(u, s);
     spots.push([cs + u, y, -s, 0.8 + rnd() * 0.9, rnd() * 6.28]);
   }
-  const im = new THREE.InstancedMesh(pineGeometries().far, treeMaterial(), spots.length);
+  const far = pineSet().far;
+  const im = new THREE.InstancedMesh(far.geometry, far.material, spots.length);
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const sc = new THREE.Vector3();
@@ -513,9 +514,27 @@ function buildGates(terrain, group) {
   const c0 = terrain.center(s0);
   const y0 = terrain.height(c0, -s0);
   const rot0 = courseYaw(terrain, s0);
-  post(group, c0 - 5, y0, -s0, 5.4, 0xffffff, 0.18);
-  post(group, c0 + 5, y0, -s0, 5.4, 0xffffff, 0.18);
-  banner(group, `CRANSKI · ${park.name}`, c0, y0 + 5.2, -s0, 10.4, 1.3, undefined, rot0);
+  const archPart = ASSETS.ready && ASSETS.parts.arch;
+  const archMats = archPart
+    ? { archBlue: new THREE.MeshStandardMaterial({ color: BLUE, roughness: 0.55 }), archWhite: new THREE.MeshStandardMaterial({ color: 0xf7f9fc, roughness: 0.55 }) }
+    : null;
+  const arch = (x, y, z, sx, sy, rot) => {
+    const m = new THREE.Mesh(archPart.geometry, partMaterials(archPart, archMats, archMats.archBlue));
+    m.position.set(x, y - 0.3, z);
+    m.scale.set(sx, sy, 1);
+    m.rotation.y = rot;
+    m.castShadow = true;
+    group.add(m);
+  };
+  if (archPart) {
+    // An inflatable arch to drop in through.
+    arch(c0, y0, -s0, 1.15, 1.0, rot0);
+    banner(group, `CRANSKI · ${park.name}`, c0, y0 + 4.4, -s0, 7.5, 1.0, undefined, rot0);
+  } else {
+    post(group, c0 - 5, y0, -s0, 5.4, 0xffffff, 0.18);
+    post(group, c0 + 5, y0, -s0, 5.4, 0xffffff, 0.18);
+    banner(group, `CRANSKI · ${park.name}`, c0, y0 + 5.2, -s0, 10.4, 1.3, undefined, rot0);
+  }
   const hut = new THREE.Mesh(new THREE.BoxGeometry(4, 3, 3), new THREE.MeshLambertMaterial({ color: 0xd0473a }));
   hut.position.set(c0 - 9, terrain.height(c0 - 9, -s0 + 8) + 1.5, -s0 + 8);
   hut.castShadow = true;
@@ -539,7 +558,10 @@ function buildGates(terrain, group) {
     m.position.set(xn, terrain.height(xn, zn) + 1.5, zn);
     group.add(m);
   }
-  banner(group, 'FINISH', cf, yf + 8, -sf, hw * 2 - 1, 2.4, undefined, rotF);
+  if (archPart) {
+    arch(cf, yf, -sf, (hw * 2) / 10, 1.35, rotF);
+    banner(group, 'FINISH', cf, yf + 6.4, -sf, Math.min(hw * 1.2, 16), 1.8, undefined, rotF);
+  } else banner(group, 'FINISH', cf, yf + 8, -sf, hw * 2 - 1, 2.4, undefined, rotF);
 }
 
 function buildObstacles(terrain, group, sky) {
@@ -804,8 +826,10 @@ export function buildWorld(terrain, { quality = 'high', renderer = null } = {}) 
 
   function dispose() {
     if (envTex) envTex.dispose();
+    const shared = new Set(Object.values(ASSETS.parts).map((p) => p.geometry));
     scene.traverse((o) => {
-      if (o.geometry) o.geometry.dispose();
+      if (o.userData.sharedMaterial) return;
+      if (o.geometry && !shared.has(o.geometry)) o.geometry.dispose();
       if (o.material) {
         const mats = Array.isArray(o.material) ? o.material : [o.material];
         for (const m of mats) {

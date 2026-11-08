@@ -3,6 +3,7 @@
 // applied with applyLook().
 import * as THREE from 'three';
 import { textTexture } from './textTexture.js';
+import { unitAlongY } from './assets.js';
 
 const COM_HEIGHT = 0.9; // pivot for tricks, metres above the feet
 
@@ -88,6 +89,35 @@ const GRABS = {
   truenose: { hand: 'same', at: [0, 0.1, -0.72], noseUp: 0.3 },
   backscratcher: { hand: 'both', at: [0, 0.1, 0.62], tailUp: 1.0, feetBack: true },
 };
+
+// Ski topsheet graphic (greyscale, tinted by the ski colour).
+let _topsheet = null;
+function topsheetTexture() {
+  if (_topsheet) return _topsheet;
+  const c = document.createElement('canvas');
+  c.width = 64;
+  c.height = 512;
+  const g = c.getContext('2d');
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 0, 64, 512);
+  g.fillStyle = '#b9c0c8';
+  g.fillRect(0, 0, 64, 40);
+  g.fillRect(0, 472, 64, 40);
+  g.fillStyle = '#5c6670';
+  g.fillRect(26, 40, 12, 432);
+  g.save();
+  g.translate(32, 256);
+  g.rotate(-Math.PI / 2);
+  g.fillStyle = '#20252b';
+  g.font = 'italic 900 34px Impact, "Arial Black", sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText('CRANSKI', 0, 0);
+  g.restore();
+  _topsheet = new THREE.CanvasTexture(c);
+  _topsheet.colorSpace = THREE.SRGBColorSpace;
+  return _topsheet;
+}
 
 export const GRAB_INFO = {
   mute: 'Front hand crosses to the opposite ski, skis cross in an X',
@@ -197,6 +227,8 @@ export class RiderModel {
     const pelvis = mesh(new THREE.CapsuleGeometry(0.13, 0.17, 6, 14), M.pants, this.hips);
     pelvis.rotation.z = Math.PI / 2;
     pelvis.scale.set(1, 1, 1.05);
+    this.pelvis = pelvis;
+    this.torsoBase = [1.12, 0.9, 0.74];
 
     this.head = new THREE.Group();
     this.head.position.y = 0.76;
@@ -250,6 +282,7 @@ export class RiderModel {
     M.top.color.setHex(L.topColor);
     M.trim.color.setHex(L.trimColor);
     M.forearm.color.setHex(L.top === 'tee' ? L.skin : L.trimColor);
+    if (this.upgraded && !this.ghost) for (const f of this.foreArm) f.material = L.top === 'tee' ? [M.skin, M.skin] : [M.top, M.trim];
     M.pants.color.setHex(L.pants);
     M.skin.color.setHex(L.skin);
     M.face.color.setHex(L.head === 'balaclava' ? 0x1a1a1a : L.skin);
@@ -280,7 +313,8 @@ export class RiderModel {
 
     // Body type: a slightly narrower build for Woman.
     const w = L.body === 'woman';
-    this.torso.scale.set(1.12 * (w ? 0.88 : 1), 0.9 * (w ? 0.96 : 1), 0.74 * (w ? 0.92 : 1));
+    const tb = this.torsoBase;
+    this.torso.scale.set(tb[0] * (w ? 0.9 : 1), tb[1] * (w ? 0.97 : 1), tb[2] * (w ? 0.93 : 1));
     this.shoulder = w ? 0.24 : 0.27;
 
     // Head items and hair.
@@ -298,8 +332,92 @@ export class RiderModel {
     this.pocket.visible = L.top === 'hoodie';
   }
 
+  // Swap the placeholder shapes for the Blender-built parts (src/render/assets.js).
+  upgrade(parts) {
+    if (!parts || !parts.jacket || this.upgraded) return;
+    const M = this.mats;
+    M.helmetTrim = new THREE.MeshStandardMaterial({ color: 0x2a2e33, roughness: 0.5 });
+    M.gogFrame = new THREE.MeshStandardMaterial({ color: 0xf2f4f7, roughness: 0.4 });
+    M.skiBase = new THREE.MeshStandardMaterial({ color: 0x1a1c20, roughness: 0.45 });
+    M.buckle = new THREE.MeshStandardMaterial({ color: 0xc9ced6, roughness: 0.25, metalness: 0.9 });
+    M.grip = new THREE.MeshStandardMaterial({ color: 0x1b1d21, roughness: 0.9 });
+    M.ski.map = topsheetTexture();
+    M.ski.roughness = 0.35;
+    M.lens.side = THREE.DoubleSide;
+    const byName = {
+      top: M.top, trim: M.trim, pants: M.pants, skin: M.face, helmet: M.helmet, helmetTrim: M.helmetTrim,
+      gogFrame: M.gogFrame, lens: M.lens, beanie: M.beanie, mitt: M.mitt, skiTop: M.ski, skiBase: M.skiBase,
+      binding: M.binding, boot: M.boot, buckle: M.buckle, pole: M.pole, grip: M.grip, board: M.board,
+    };
+    const mats = (p) => parts[p].mats.map((n) => byName[n] || M.top);
+    const set = (m, p, unit = false) => {
+      m.geometry = unit ? unitAlongY(parts[p].geometry) : parts[p].geometry;
+      m.material = mats(p);
+      m.position.set(0, 0, 0);
+      m.rotation.set(0, 0, 0);
+      m.scale.set(1, 1, 1);
+      m.castShadow = true;
+    };
+    set(this.torso, 'jacket');
+    this.torsoBase = [1, 1, 1];
+    set(this.hood, 'collar');
+    set(this.bigHood, 'hood');
+    set(this.pocket, 'pocket');
+    set(this.zip, 'zip');
+    set(this.pelvis, 'pelvis');
+    for (let i = 0; i < 2; i++) {
+      set(this.thigh[i], 'thigh', true);
+      set(this.shin[i], 'shin', true);
+      set(this.upperArm[i], 'upperArm', true);
+      set(this.foreArm[i], 'foreArm', true);
+      set(this.mitts[i], 'mitt');
+      set(this.poles[i], 'pole', true);
+      // Joint caps sit just inside the new sleeves and pant legs.
+      this.knees[i].scale.setScalar(0.98);
+      this.elbows[i].scale.setScalar(1.12);
+    }
+    set(this.face, 'head');
+    set(this.helmet, 'helmetShell');
+    set(this.goggles, 'goggles');
+    this.goggles.position.y = -0.03;
+    this.goggles.scale.set(1.0, 1.15, 1.0);
+    this.strap.scale.set(1.14, 1.5, 1.14);
+    this.strap.position.y = -0.03;
+    // Neck gaiter tucked into the collar.
+    this.gaiter = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.112, 0.12, 24), M.helmetTrim);
+    this.gaiter.position.y = -0.105;
+    this.gaiter.castShadow = true;
+    this.head.add(this.gaiter);
+    for (const c of this.beanie.children) c.visible = false;
+    const hat = new THREE.Mesh(parts.beanieHat.geometry, mats('beanieHat'));
+    hat.castShadow = true;
+    this.beanie.add(hat);
+    this.beanie.position.y = 0;
+    for (const ski of this.skis) {
+      for (const c of ski.children) c.visible = false;
+      const s = new THREE.Mesh(parts.ski.geometry, mats('ski'));
+      const b = new THREE.Mesh(parts.boot.geometry, mats('boot'));
+      b.position.y = 0.03;
+      s.castShadow = b.castShadow = true;
+      ski.add(s, b);
+    }
+    for (const c of this.board.children) c.visible = false;
+    const bd = new THREE.Mesh(parts.board.geometry, mats('board'));
+    bd.castShadow = true;
+    this.board.add(bd);
+    for (const z of [-0.24, 0.24]) {
+      const bb = new THREE.Mesh(parts.boardBoot.geometry, mats('boardBoot'));
+      bb.position.set(0, 0.03, z);
+      bb.castShadow = true;
+      this.board.add(bb);
+    }
+    this.upgraded = true;
+    this.applyLook(this.look);
+  }
+
   // Ghost: see-through and pale blue.
   makeGhost() {
+    this.ghost = true;
     const mat = new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.35, depthWrite: false });
     this.root.traverse((o) => {
       if (o.isMesh) {
@@ -451,6 +569,7 @@ export class RiderModel {
       this.elbows[i].position.copy(v.elbow);
       placeLimb(this.foreArm[i], v.elbow, hand);
       this.mitts[i].position.copy(hand);
+      if (this.upgraded) this.mitts[i].quaternion.copy(this.foreArm[i].quaternion);
       // Poles trail back from the hands.
       v.tip.copy(hand).add(new THREE.Vector3(sx * 0.12, -1.05 + 0.4 * p.tuck, 0.45 + 0.4 * p.tuck));
       placeLimb(this.poles[i], hand, v.tip);

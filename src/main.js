@@ -28,6 +28,7 @@ import { startAudio } from './audio/engine.js';
 import { Sfx } from './audio/sfx.js';
 import { Music } from './audio/music.js';
 import { LoadingScreen } from './ui/loading.js';
+import { loadAssets, ASSETS } from './render/assets.js';
 import { placeRider, poseFor } from './render/pose.js';
 
 const $ = (id) => document.getElementById(id);
@@ -984,6 +985,15 @@ function boot() {
   // for a tap or key (needed to start sound) before showing Basecamp.
   state = 'boot';
   (async () => {
+    loadingScreen.set(0.15, 'Loading models…');
+    try {
+      await loadAssets((p) => loadingScreen.set(0.15 + p * 0.1, 'Loading models…'));
+      model.upgrade(ASSETS.parts);
+      ghostModel.upgrade(ASSETS.parts);
+      ghostModel.makeGhost();
+    } catch (e) {
+      console.error('Models failed to load; using simple shapes', e);
+    }
     loadingScreen.set(0.25, 'Warming up shaders…');
     await new Promise((r) => setTimeout(r, 0));
     placeModel(basecampScene.scene);
