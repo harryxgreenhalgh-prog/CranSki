@@ -1261,3 +1261,212 @@ h2 {
     grid-column: 1 / -1;
   }
 }
+
+/* ---------------------------------------------------------------- touch */
+#game,
+#touch,
+#touch-editor {
+  touch-action: none;
+}
+
+body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+input {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+#touch {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+}
+
+.tbtn {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(9, 22, 44, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  color: #fff;
+  font-weight: 900;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+.tbtn.big {
+  background: rgba(255, 122, 47, 0.75);
+  font-size: 15px;
+}
+
+.tbtn.on {
+  background: var(--blue);
+  transform: scale(0.94);
+}
+
+#stick-base {
+  position: absolute;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  background: rgba(9, 22, 44, 0.35);
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+#stick-knob {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+#touch-pause {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(9, 22, 44, 0.6);
+  color: #fff;
+  font-weight: 900;
+}
+
+#touch-editor {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  background: rgba(9, 22, 44, 0.55);
+}
+
+#touch-editor .tbtn,
+#touch-editor .tstick {
+  pointer-events: auto;
+  cursor: grab;
+}
+
+#touch-editor .sel {
+  box-shadow: 0 0 0 4px var(--orange);
+}
+
+#touch-editor .ghost {
+  border-style: dashed;
+}
+
+.tstick {
+  position: absolute;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  border: 2px dashed rgba(255, 255, 255, 0.8);
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.tstick .knob {
+  position: absolute;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.tstick span {
+  position: absolute;
+  bottom: -18px;
+  white-space: nowrap;
+}
+
+.edbar {
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  transform: translateX(-50%);
+  width: min(760px, 96vw);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel);
+  border-radius: 14px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.edgroup {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.edbar .btn.on {
+  background: var(--blue);
+}
+
+.primary-sm {
+  background: var(--orange) !important;
+}
+
+.edsel {
+  flex-basis: 100%;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+}
+
+#liftbar {
+  cursor: pointer;
+  z-index: 3;
+}
+
+/* While touch controls are up, move the HUD out of the thumbs' way. */
+body.touching #minimap {
+  top: 10px;
+  bottom: auto;
+  left: 10px;
+  width: 150px;
+  height: 60px;
+}
+
+body.touching #speedbox {
+  top: 64px;
+  bottom: auto;
+  right: 12px;
+}
+
+body.touching #speed {
+  font-size: 32px;
+}
+
+body.touching #hint {
+  bottom: auto;
+  top: 76px;
+}
+
+body.touching #footer {
+  background: transparent;
+  font-size: 9px;
+  line-height: 1.2;
+  min-height: 0;
+  padding: 2px 8px;
+  opacity: 0.8;
+}
+
+body.touching #footer .credits {
+  display: none;
+}

@@ -1,6 +1,7 @@
 // Settings panel: Controls (rebinding), Graphics, Camera, Sound, Stats.
 import { settings, saveSettings, resetSection } from '../settings.js';
 import { BINDINGS } from '../input.js';
+import { touchSettings } from './touch.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -159,6 +160,7 @@ export class SettingsUI {
           <table class="bind">${pad}</table>
           <button class="btn sm" data-reset="pad">Reset controller</button>
           <h3>TOUCH</h3>
+          <div>${['auto', 'on', 'off'].map((m) => `<label class="choice inline ${touchSettings().mode === m ? 'on' : ''}"><input type="radio" name="touchmode" value="${m}" ${touchSettings().mode === m ? 'checked' : ''}/><b>${{ auto: 'Auto', on: 'Always on', off: 'Off' }[m]}</b></label>`).join('')}</div>
           <button class="btn sm" data-touch-editor>Edit touch layout</button>
         </div>
       </div>`;
@@ -240,6 +242,13 @@ export class SettingsUI {
     body.querySelectorAll('input[name=cap]').forEach((i) =>
       i.addEventListener('change', () => {
         settings.frameCap = Number(i.value);
+        saveSettings();
+        this.render();
+      })
+    );
+    body.querySelectorAll('input[name=touchmode]').forEach((i) =>
+      i.addEventListener('change', () => {
+        touchSettings().mode = i.value;
         saveSettings();
         this.render();
       })

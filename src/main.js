@@ -17,6 +17,7 @@ import { parkMeta } from './parks/index.js';
 import { profile, load } from './store.js';
 import { settings, saveSettings, looksLowEnd } from './settings.js';
 import { SettingsUI, StatsOverlay } from './ui/settings.js';
+import { TouchControls, TouchEditor, isTouchDevice } from './ui/touch.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -236,7 +237,25 @@ function boot() {
       showOverlay(r.overlay);
       state = r.state;
     },
-    onTouchEditor: () => openSoon('Touch layout editor'),
+    onTouchEditor: () => {
+      $('settings').classList.add('hidden');
+      touchEditor.open();
+    },
+  });
+  const touch = new TouchControls({ onPause: () => back() });
+  const touchEditor = new TouchEditor({
+    onDone: () => {
+      touch.build();
+      $('settings').classList.remove('hidden');
+      settingsUI.render();
+    },
+  });
+  // Tap the lift bar to skip; tap the finish card for results.
+  $('liftbar').addEventListener('click', () => {
+    if (state === 'lift') lift.t = lift.duration;
+  });
+  $('finishcard').addEventListener('click', () => {
+    if (state === 'finish') showResultsScreen();
   });
   function openSettings(tab) {
     settingsReturn = { state, overlay: OVERLAYS.find((o) => o !== 'settings' && !$(o).classList.contains('hidden')) || null };
@@ -382,7 +401,8 @@ function boot() {
 
   // Esc steps back one menu level.
   function back() {
-    if (settingsUI.isOpen) settingsUI.close();
+    if (touchEditor.isOpen) touchEditor.close();
+    else if (settingsUI.isOpen) settingsUI.close();
     else if (!$('modal').classList.contains('hidden')) closeModal();
     else if (state === 'map') closeMap();
     else if (state === 'paused') {
@@ -428,6 +448,11 @@ function boot() {
     time += dt;
     input.pollFrame();
     stats.update(dt);
+    const wantTouch = state === 'riding' && isTouchDevice() && !touchEditor.isOpen;
+    if (wantTouch !== touch.enabled) {
+      touch.show(wantTouch);
+      document.body.classList.toggle('touching', wantTouch);
+    }
     if (settingsUI.isOpen) settingsUI.tick(input.pad());
 
     // Performance mode: dynamic resolution to hold the frame rate.
@@ -533,7 +558,7 @@ function boot() {
 
       acc += dt;
       let steps = 0;
-      const inp = state === 'riding' ? input.sample() : null;
+      const inp = state === 'riding' ? touch.apply(input.sample()) : null;
       while (acc >= DT && steps < 12) {
         prevPos.copy(r.pos);
         prevQ.copy(r.q);
@@ -542,6 +567,7 @@ function boot() {
         acc -= DT;
         steps++;
         if (r.mode !== prevMode) {
+          if (r.mode === 'air' || prevMode === 'air') touch.haptic(); // tick on every pop and landing
           if (r.mode === 'air') L.spray.burst(r.pos, r.vel, settings.graphics === 'ultra' ? 70 : 40, 3);
           if (prevMode === 'air') {
             L.spray.burst(r.pos, r.vel, r.mode === 'crash' ? 120 : 80, r.mode === 'crash' ? 6 : 4);
