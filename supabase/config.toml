@@ -6,3 +6,6 @@ project_id = "owlralulybcvgaaahjbs"
 # publishable / secret API keys.
 [functions.submit-run]
 verify_jwt = false
+
+[functions.delete-account]
+verify_jwt = false

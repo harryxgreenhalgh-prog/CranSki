@@ -2069,3 +2069,35 @@ body.touching #footer .credits {
     display: none;
   }
 }
+
+.btn.danger {
+  background: var(--red);
+  border-color: transparent;
+  color: #fff;
+}
+
+.ptable {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 6px 0 10px;
+  font-size: 13px;
+}
+
+.ptable th {
+  text-align: left;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  padding: 4px 8px 4px 0;
+}
+
+.ptable td {
+  vertical-align: top;
+  padding: 7px 8px 7px 0;
+  border-top: 1px solid var(--panel-line);
+}
+
+.ptable td:last-child {
+  width: 34%;
+  color: var(--muted);
+}

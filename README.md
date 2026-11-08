@@ -4,7 +4,7 @@ A free 3D freeski game that runs in the browser from GitHub Pages. Drop into a t
 
 > CranSki is an independent fan-made game inspired by Cork7. It is not affiliated with, endorsed by, or connected to Cork7 or its developers. Not affiliated with SSX, EA, X Games or Red Bull.
 
-This is **Phase 2 (full solo game)** from [DESIGN.md](DESIGN.md). Everything runs as static files with no server: progress, replays and settings stay in your browser.
+This is **Phase 3 (online basics)** from [DESIGN.md](DESIGN.md). The game is still static files on GitHub Pages and solo play needs no account. Signing in is optional: an email sign-in link (no passwords) unlocks cloud saves, friends and server-checked leaderboards, backed by [Supabase](https://supabase.com).
 
 ## What's in it
 
@@ -16,6 +16,16 @@ This is **Phase 2 (full solo game)** from [DESIGN.md](DESIGN.md). Everything run
 - **Replays**: last 5 runs auto-saved, keep favourites, best-run ghost per park, 7 replay cameras, clip export (MP4 or WebM, rendered on the device).
 - **Locker**: body, helmets (some earned), beanies, goggles, tops, pants, mittens, skis or snowboard, bindings, boots, poles, and which grab sits on each button.
 - **Loading scenes, sound effects and music**: four original illustrations; all sound effects and nine synthwave tracks are synthesised in the browser.
+
+### Online (Phase 3, optional)
+
+- **Sign in by email link**: no password, anywhere. Pick a gamertag: letters, spaces and dashes, one rider per name (ignoring case, accents, spaces and dashes), offensive names blocked.
+- **Cloud saves**: settings, personal bests and Locker choices follow you to any device. Signed out, local saves work exactly as before.
+- **Friends**: search by gamertag, send and accept requests, see who's online and where they're riding. Only friends you've both accepted see your location.
+- **Leaderboards** for every park except SHIRAKUMO. A finished run is sent as its recorded inputs. The `submit-run` Edge Function re-rides them through the same deterministic simulation and saves only the score it calculates itself. If the result doesn't match, the run is rejected.
+- **Privacy page**: what's stored and where, and account deletion.
+
+Setting up the Supabase side (SQL, sign-in settings, deploying the Edge Functions) is a few clicks and three commands: see **[SUPABASE_SETUP.md](SUPABASE_SETUP.md)**.
 
 ## Play
 
@@ -50,26 +60,33 @@ npm test
 npm run build
 ```
 
-`npm run build` writes static files to `dist/`. The workflow in `.github/workflows/deploy.yml` tests, builds and publishes `dist/` to GitHub Pages on every push to `main` (repository **Settings → Pages → Source: GitHub Actions**).
+`npm run build` writes static files to `dist/`. `npm run build:sim` bundles the simulation for the leaderboard Edge Function (`supabase/functions/submit-run/sim.js`); `npm test` fails if that bundle is out of date. The workflow in `.github/workflows/deploy.yml` tests, builds and publishes `dist/` to GitHub Pages on every push to `main` (repository **Settings → Pages → Source: GitHub Actions**).
 
 ## Project layout
 
 ```
-src/sim/       deterministic simulation: terrain, rider, rails, butters, tricks, scoring, run
+src/sim/       deterministic simulation: terrain, rider, rails, butters, tricks, scoring, run,
+               its own bit-exact maths (dmath.js) and the leaderboard referee (verify.js)
 src/parks/     the seven park layouts (each its own chunk) and the park registry
 src/render/    Three.js scenes: world, sky, lifts, rider model, cameras, ski tracks
 src/replay/    input recording, IndexedDB storage, re-riding, replay cameras, clip export
 src/audio/     synthesised sound effects and music
-src/ui/        Basecamp, map, HUD, settings, touch controls, Locker, replays, loading screen
-tests/         node:test suites (scoring, tricks, physics, every park, rails, powder/pipe, replays)
+src/ui/        Basecamp, map, HUD, settings, touch controls, Locker, replays, loading screen,
+               Account, Friends and Leaderboard panels
+src/online/    Supabase config (publishable key only), sign-in, cloud saves, friends, leaderboards
+supabase/      database tables and Row Level Security (migrations/), Edge Functions (functions/)
+tools/         Blender model builders and the simulation bundler for the Edge Function
+tests/         node:test suites (scoring, tricks, physics, every park, rails, powder/pipe, replays,
+               determinism, the leaderboard referee, gamertag rules, privacy)
 ```
 
-The simulation runs on a fixed 120 Hz step with no randomness, so a replay is just the inputs and re-rides exactly. That is also the base for server-checked leaderboards later.
+The simulation runs on a fixed 120 Hz step with no randomness, so a replay is just the inputs and re-rides exactly. It never calls the browser's `Math.sin`, `Math.exp` and friends, which can differ in the last digit between Chrome, Firefox, Safari and the server: it uses its own versions built from exact arithmetic (`src/sim/dmath.js`). That's what lets the server re-ride a leaderboard run and get the identical score.
 
 ## Credits
 
 - [Three.js](https://threejs.org) (MIT licence)
 - [Vite](https://vite.dev) (MIT licence), build tool
+- [supabase-js](https://github.com/supabase/supabase-js) (MIT licence), online features; loaded only when you sign in or open a leaderboard
 - Music: nine original tracks composed for CranSki and played by an in-browser synthesiser. Sound effects are synthesised in the browser too.
 - 3D models used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (resized for the web; see `public/models/CREDITS.md`):
   - [“Snowy Wooden Hut”](https://sketchfab.com/3d-models/snowy-wooden-hut-857c02ab61834df8a8d125ccce6fec2a) by [gecko0307](https://sketchfab.com/gecko0307)

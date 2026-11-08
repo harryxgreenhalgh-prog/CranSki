@@ -172,3 +172,36 @@ The server must run exactly the same simulation as the game. After any change to
 - Riders can read the boards, but only the function can write to them. The inputs behind each board run are kept in `leaderboard_runs`, which isn't readable through the API.
 - Each rider can submit at most 30 runs per 10 minutes.
 - The simulation uses its own deterministic maths (`src/sim/dmath.js`), so Chrome, Firefox, Safari and the server all compute identical results.
+
+---
+
+## 5. Account deletion and the Privacy page (step 5)
+
+Riders can delete their own account from **Account** → **Delete account**. That calls a second small Edge Function, which removes the Supabase Auth user. Every CranSki table is linked to the account with `on delete cascade`, so the profile, cloud save, friendships, online status, leaderboard scores and stored run inputs all go with it.
+
+Deploy it the same way as `submit-run`:
+
+```bash
+npx supabase functions deploy delete-account --no-verify-jwt
+```
+
+To test it, sign in with a spare email address, then **Account** → **Delete account** → type `DELETE`. In the dashboard:
+
+- **Authentication** → **Users** no longer lists that address.
+- In **Table Editor**, its rows in `profiles`, `saves` and `leaderboard` are gone.
+
+The in-game **Privacy** page (Basecamp footer → Privacy) lists what's stored on the device and on the server, and who can see each thing. If you change what the game stores, update `src/ui/pages.js` to match.
+
+---
+
+## Quick checklist
+
+- [ ] SQL: run the four files in `supabase/migrations/` in order. Alternatively, run `npx supabase db push` after `npx supabase link`; it asks for the database password.
+- [ ] Authentication → Email provider on, Confirm email on.
+- [ ] Authentication → URL Configuration: Site URL and the three Redirect URLs.
+- [ ] Custom SMTP set up before inviting players.
+- [ ] `npx supabase functions deploy submit-run --no-verify-jwt`
+- [ ] `npx supabase functions deploy delete-account --no-verify-jwt`
+- [ ] Merge to `main` so GitHub Actions publishes the game.
+
+Never needed, and never to be put in the game or this repo: the secret / `service_role` key.

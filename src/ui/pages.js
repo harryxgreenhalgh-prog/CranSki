@@ -9,6 +9,16 @@ export const DISCLAIMER =
 
 export const UPDATES = [
   {
+    title: 'Phase 3 · Online basics',
+    items: [
+      'Sign in with an email link (no passwords) and pick a gamertag. Solo play still needs no account.',
+      'Cloud saves: settings, personal bests and Locker choices follow you to any device.',
+      'Friends: search by gamertag, send and accept requests, and see who is online and where they are riding.',
+      "Leaderboards for every park except SHIRAKUMO. The server re-rides each run from its inputs and only posts the score if it comes out the same.",
+      'A new Privacy page that says exactly what is stored and where, and lets you delete your account.',
+    ],
+  },
+  {
     title: 'Phase 2 · Full solo game',
     items: [
       'All seven parks: BIG AIR, THE YARD, APEX, FOREST LINE, SHIRAKUMO, ASPEN PIPE and BELLEVUE, each with its own lift.',
@@ -42,19 +52,54 @@ export const PAGES = {
   privacy: {
     title: 'Privacy',
     html: `
-      <p>Solo CranSki needs no account and sends nothing to any server. The game is static files hosted on GitHub Pages.</p>
-      <h3>WHAT IS STORED, AND WHERE</h3>
-      <p>In this browser, on this device: your rider name, Locker choices, settings, personal bests, FROST balance, recent run summaries, and saved replays and ghosts. Clearing your browser's site data removes all of it, or use the button below.</p>
-      <p>If you sign in (optional): your email address and sign-in records are held by Supabase Auth, the hosted service that sends your sign-in link, and your gamertag is stored in CranSki's Supabase database where other riders can see it. Your email is never shown to other riders.</p>
+      <p>Playing solo needs no account and sends nothing to any server. The game is static files on GitHub Pages, and your progress stays in this browser. Signing in is optional; you only need it for cloud saves, friends and leaderboards.</p>
+
+      <h3>ON THIS DEVICE</h3>
+      <p>Kept in this browser (local storage and IndexedDB):</p>
+      <ul>
+        <li>Your rider name, settings, Locker choices, personal bests, FROST balance and recent run summaries.</li>
+        <li>Replays and best-run ghosts. They stay here unless you press <b>Post</b> on one, which sends that run's inputs to the leaderboard (see below).</li>
+        <li>If you sign in: your sign-in session (so you stay signed in), when your cloud save last synced, and your <b>Appear offline</b> choice.</li>
+      </ul>
       <p><button class="btn" id="wipe-data">Delete my CranSki data on this device</button></p>
-      <p class="muted">GitHub, which hosts the site, may keep standard web server logs. See GitHub's privacy statement.</p>`,
+
+      <h3>ON CRANSKI'S SERVER (ONLY IF YOU SIGN IN)</h3>
+      <p>CranSki's server is a <a href="https://supabase.com" target="_blank" rel="noopener">Supabase</a> project: Supabase hosts the sign-in service and the database. It keeps:</p>
+      <table class="ptable">
+        <thead><tr><th>What</th><th>Who can see it</th></tr></thead>
+        <tbody>
+          <tr><td>Your email address and sign-in history, used only to send your sign-in links. Supabase also keeps security logs of sign-ins, such as IP address and time.</td><td>Only you. Never shown to other riders.</td></tr>
+          <tr><td>Your gamertag</td><td>Everyone (leaderboards, friend search)</td></tr>
+          <tr><td>Your cloud save: settings (camera, sound, controls), personal bests and Locker choices</td><td>Only you</td></tr>
+          <tr><td>Your friends and friend requests</td><td>You and that rider</td></tr>
+          <tr><td>That you're online and where (Basecamp, a lift, which park, a replay), updated about every 45 seconds while the game is open</td><td>Only friends you've both accepted. <b>Appear offline</b> in Friends turns it off.</td></tr>
+          <tr><td>Your best server-checked score on each park, with its best trick and date</td><td>Everyone</td></tr>
+          <tr><td>The recorded inputs behind each leaderboard run: which buttons were held at each moment, nothing else</td><td>Nobody through the game; kept so runs can be re-checked</td></tr>
+          <tr><td>When you last submitted runs, to stop spam</td><td>Nobody; deleted after a day</td></tr>
+        </tbody>
+      </table>
+      <p>There are no ads, no analytics and no tracking cookies. Nothing is sold or shared, and CranSki never asks for payment details or passwords.</p>
+
+      <h3>SIGNING OUT AND DELETING</h3>
+      <ul>
+        <li><b>Sign out:</b> Account → Sign out on this device.</li>
+        <li><b>Delete your account:</b> Account → Delete account. This removes your sign-in, email, gamertag, cloud save, friends, online status and leaderboard scores from the server in one go.</li>
+        <li><b>Clear this device:</b> the button above, or clear this site's data in your browser.</li>
+      </ul>
+      <p><button class="btn" id="privacy-account">Open Account</button></p>
+
+      <h3>YOUNGER RIDERS</h3>
+      <p>If you're under 13, ask a parent or guardian before signing in. Solo play needs no account at all.</p>
+
+      <p class="muted">GitHub, which hosts the game's files, may keep standard web server logs (see GitHub's privacy statement). Supabase's own privacy policy covers how it runs its service.</p>`,
   },
   credits: {
     title: 'Credits',
     html: `
       <h3>LIBRARIES</h3>
       <p><a href="https://threejs.org" target="_blank" rel="noopener">Three.js</a>, MIT licence, for 3D rendering.<br>
-      <a href="https://vite.dev" target="_blank" rel="noopener">Vite</a>, MIT licence, for building the site.</p>
+      <a href="https://vite.dev" target="_blank" rel="noopener">Vite</a>, MIT licence, for building the site.<br>
+      <a href="https://github.com/supabase/supabase-js" target="_blank" rel="noopener">supabase-js</a>, MIT licence, for sign-in, cloud saves, friends and leaderboards (loaded only when you use them).</p>
       <h3>MUSIC</h3>
       <p>Original soundtrack composed for CranSki and played live by an in-browser synthesiser (no recordings, no samples). Artist: CranSki.</p>
       <ol>${TRACKS.map((t) => `<li>${t.name}</li>`).join('')}</ol>
@@ -78,11 +123,10 @@ export const PAGES = {
       UPDATES.map((u) => `<h3>${u.title.toUpperCase()}</h3><ul>${u.items.map((i) => `<li>${i}</li>`).join('')}</ul>`).join(''),
   },
   online: {
-    title: 'Coming with online play',
+    title: 'Coming later',
     html: `
-      <p>The Item Shop, Season Pass, leaderboards, friends and multiplayer need a server, and CranSki is currently static files on GitHub Pages with no server at all.</p>
-      <p>They're planned for later phases: sign-in by email link, cloud saves and leaderboards where the server re-rides each run to check the score, then live rooms, duels and seasons.</p>
-      <p>Until then, everything you earn (FROST, bests, Locker picks) stays on this device.</p>`,
+      <p>The Item Shop, the Season Pass and multiplayer (live rooms, duels and parties) arrive in later phases.</p>
+      <p>Available now: sign in with an email link for cloud saves, friends and leaderboards where the server re-rides each run to check the score. Everything you earn still works on this device without an account.</p>`,
   },
 };
 

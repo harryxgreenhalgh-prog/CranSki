@@ -1,13 +1,13 @@
 // The Account panel (in the page modal): sign in with an emailed link, pick a
 // gamertag, rename, sign out. There is no password field anywhere.
-import { account, startAccount, sendSignInLink, signOut, gamertagStatus, setGamertag } from '../online/account.js';
+import { account, startAccount, sendSignInLink, signOut, gamertagStatus, setGamertag, deleteAccount } from '../online/account.js';
 import { TAG_MAX, TAG_STATUS, tidyTag, cleanTag } from '../online/names.js';
 import { profile } from '../store.js';
 
 export const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-const ui = { sentTo: null, renaming: false, error: null, draftTag: null, extra: [] };
+const ui = { sentTo: null, renaming: false, deleting: false, deleted: false, error: null, draftTag: null, extra: [] };
 
 // Other steps (cloud saves, friends) add their own sections to the signed-in view.
 export function addAccountSection(fn) {
@@ -17,6 +17,8 @@ export function addAccountSection(fn) {
 export function mountAccount(el, { onPrivacy } = {}) {
   let off = null;
   ui.error = null;
+  ui.deleting = false;
+  ui.deleted = false;
   if (account.notice) {
     ui.error = account.notice;
     account.notice = null;
@@ -43,15 +45,28 @@ function html() {
   if (s === 'signedIn' && !account.profile) return claimHtml(err, true);
   if (s === 'signedIn') {
     if (ui.renaming) return claimHtml(err, false);
+    if (ui.deleting)
+      return `
+      <h3>DELETE YOUR ACCOUNT</h3>
+      <p>This permanently deletes your CranSki account: your email sign-in, your gamertag <b>${esc(account.gamertag || '')}</b>, your cloud save, your friends and requests, and your leaderboard scores. It can't be undone.</p>
+      <p>Your progress, settings and replays on this device stay; you can clear those from the Privacy page.</p>
+      <form class="acct-form" data-a="delete" novalidate>
+        <input name="confirm" placeholder="Type DELETE to confirm" autocomplete="off" spellcheck="false" aria-label="Type DELETE to confirm" />
+        <button class="btn danger" type="submit">Delete my account</button>
+      </form>
+      ${err}
+      <p class="acct-row"><button class="btn" data-a="keepacct">Keep my account</button></p>`;
     return `
       <div class="acct-who"><span class="acct-tag">${esc(account.gamertag)}</span><span class="muted">${esc(account.email || '')}</span></div>
       ${err}
       <p class="acct-row"><button class="btn" data-a="rename">Change gamertag</button><button class="btn" data-a="signout">Sign out on this device</button></p>
       ${ui.extra.map((fn) => fn()).join('')}
+      <p class="acct-row"><button class="btn sm ghost" data-a="askdelete">Delete account…</button></p>
       <p class="muted small">Your email is only used to sign you in; other riders only ever see your gamertag. <a href="#" data-a="privacy">What's stored and where</a>.</p>`;
   }
 
   // Signed out (or never started).
+  if (ui.deleted) return '<h3>ACCOUNT DELETED</h3><p>Your account and everything stored with it on the server are gone. Solo play still works as before, and you can make a new account any time.</p>';
   if (ui.sentTo)
     return `
       <h3>CHECK YOUR EMAIL</h3>
@@ -130,6 +145,31 @@ function wire(el, render, onPrivacy) {
       ui.renaming = false;
     })
   );
+  on('askdelete', () => {
+    ui.deleting = true;
+    ui.error = null;
+    render();
+  });
+  on('keepacct', () => {
+    ui.deleting = false;
+    ui.error = null;
+    render();
+  });
+  on('delete', (e) => {
+    e.preventDefault();
+    if (e.currentTarget.confirm.value.trim().toUpperCase() !== 'DELETE') {
+      ui.error = 'Type DELETE to confirm.';
+      render();
+      return;
+    }
+    busy(e.currentTarget.querySelector('button'), async () => {
+      await deleteAccount();
+      ui.deleting = false;
+      ui.deleted = true;
+      ui.sentTo = null;
+    });
+  });
+  el.querySelector('input[name="confirm"]')?.addEventListener('keydown', (e) => e.stopPropagation());
   on('rename', () => {
     ui.renaming = true;
     ui.error = null;

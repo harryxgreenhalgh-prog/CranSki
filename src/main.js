@@ -30,7 +30,7 @@ import { Music } from './audio/music.js';
 import { LoadingScreen } from './ui/loading.js';
 import { loadAssets, ASSETS, preloadScenes, sceneCopy, modelBounds } from './render/assets.js';
 import { placeRider, poseFor } from './render/pose.js';
-import { account, resumeAccount, displayName } from './online/account.js';
+import { account, resumeAccount, displayName, signOut } from './online/account.js';
 import { mountAccount, addAccountSection, esc } from './ui/accountUI.js';
 import { cloud, cloudStatusText } from './online/cloud.js';
 import { friends, onFriends, setLocation } from './online/friends.js';
@@ -273,8 +273,11 @@ function boot() {
           /* nothing stored */
         }
         $('wipe-data').textContent = 'Deleted';
+        // The sign-in session lived in that storage too: sign out properly.
+        if (account.signedIn) signOut().catch(() => {});
         basecamp.refresh();
       });
+      $('privacy-account')?.addEventListener('click', () => openAccount());
     }
   }
 

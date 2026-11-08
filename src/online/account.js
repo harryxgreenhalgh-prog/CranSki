@@ -151,6 +151,32 @@ export async function signOut() {
   emit();
 }
 
+// Permanently delete the account and everything stored with it on the server
+// (the delete-account Edge Function). Local saves on this device stay.
+export async function deleteAccount() {
+  const sb = await startAccount();
+  if (!account.user) throw new OnlineError('Sign in first.');
+  for (const fn of signOutHooks) await fn();
+  const { error } = await sb.functions.invoke('delete-account', { body: { confirm: 'DELETE' } });
+  if (error) {
+    let code = '';
+    try {
+      code = (await error.context?.json?.())?.error || '';
+    } catch {
+      /* not JSON */
+    }
+    throw new OnlineError(
+      code === 'server_not_configured' ? "Account deletion isn't set up on the server yet." : "Couldn't delete your account right now. Try again later."
+    );
+  }
+  await sb.auth.signOut({ scope: 'local' }).catch(() => {});
+  account.user = null;
+  account.profile = null;
+  profileFor = null;
+  account.status = 'signedOut';
+  emit();
+}
+
 // 'ok' | 'yours' | 'taken' | 'length' | 'chars' | 'blocked'
 export async function gamertagStatus(name) {
   const tag = cleanTag(name);
