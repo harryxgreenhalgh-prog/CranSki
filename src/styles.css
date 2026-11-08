@@ -2101,3 +2101,55 @@ body.touching #footer .credits {
   width: 34%;
   color: var(--muted);
 }
+
+/* ---------------------------------------------------------------- live rooms (Phase 4) */
+.mode:not(.on) .picked {
+  display: none;
+}
+
+#roombadge {
+  position: absolute;
+  left: 16px;
+  bottom: 142px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(9, 22, 44, 0.6);
+  border: 1px solid var(--panel-line);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+}
+
+#roster {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 6;
+  pointer-events: none;
+}
+
+#roster .panel {
+  width: min(560px, calc(100% - 32px));
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
+#roster-list td {
+  vertical-align: middle;
+}
+
+#roster-list tr.me td {
+  background: rgba(30, 123, 255, 0.25);
+}
+
+.rstatus {
+  font-size: 12px;
+}
+
+body.touching #roombadge {
+  bottom: auto;
+  top: 64px;
+}

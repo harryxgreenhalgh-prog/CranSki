@@ -18,7 +18,7 @@ const CHALLENGES = [
 ];
 
 export class Basecamp {
-  constructor({ onRide, onTab, onPage, onGear, onMusic, onAccount, onFriends }) {
+  constructor({ onRide, onTab, onPage, onGear, onMusic, onAccount, onFriends, onMode }) {
     $('ride').addEventListener('click', onRide);
     document.querySelectorAll('#basecamp .tabs button').forEach((b) =>
       b.addEventListener('click', () => {
@@ -31,6 +31,7 @@ export class Basecamp {
     $('music-btn').addEventListener('click', onMusic);
     $('friends-btn').addEventListener('click', () => (onFriends ? onFriends() : onPage('online')));
     $('account-btn').addEventListener('click', onAccount);
+    document.querySelectorAll('#basecamp .mode').forEach((b) => b.addEventListener('click', () => onMode?.(b.dataset.mode === 'multi' ? 'live' : 'solo')));
     const name = $('rider-name');
     // Signed in, the lift pass shows your gamertag; change it from Account.
     name.addEventListener('click', () => {
@@ -75,6 +76,11 @@ export class Basecamp {
     name.title = account.ready ? 'Your gamertag (change it in Account)' : 'Rider name';
     if (document.activeElement !== name) name.value = account.ready ? account.gamertag : profile.name;
     $('pc-mode').textContent = account.ready ? 'ONLINE' : 'SOLO';
+  }
+
+  setMode(mode, note) {
+    document.querySelectorAll('#basecamp .mode').forEach((b) => b.classList.toggle('on', (b.dataset.mode === 'multi') === (mode === 'live')));
+    $('mode-note').textContent = note;
   }
 
   refreshFriends(f) {

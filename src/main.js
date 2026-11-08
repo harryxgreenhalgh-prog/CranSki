@@ -37,6 +37,11 @@ import { friends, onFriends, setLocation } from './online/friends.js';
 import { mountFriends } from './ui/friendsUI.js';
 import { canPost, submitRun } from './online/leaderboard.js';
 import { mountBoard } from './ui/boardUI.js';
+import { LiveRoom } from './online/rooms.js';
+import { LOCAL } from './online/net.js';
+import { REALTIME_BUDGET } from './online/config.js';
+import { RemoteRiders } from './render/remoteRiders.js';
+import { Roster } from './ui/roster.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -209,6 +214,7 @@ function boot() {
     onPage: (p) => openPage(p),
     onAccount: () => openAccount(),
     onFriends: () => openFriends(),
+    onMode: (m) => setPlayMode(m),
     onGear: () => openSettings(),
     onMusic: () => {
       $('musicpop').classList.toggle('hidden');
@@ -235,6 +241,9 @@ function boot() {
     $('liftbar').classList.add('hidden');
     $('ghosttag').classList.add('hidden');
     if (loaded) loaded.hud.show(false);
+    if (live) live.leaveRoom();
+    remotes.clear();
+    roster.hide();
     placeModel(basecampScene.scene);
     model.root.position.set(0, COM_HEIGHT, 0);
     model.root.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI - 0.35);
@@ -328,6 +337,127 @@ function boot() {
     else if (state === 'replay') setLocation('replay', park);
     else if (state !== 'loading' && state !== 'boot') setLocation('basecamp');
   }
+
+  // ------------------------------------------------------------ live rooms (Phase 4)
+  let playMode = 'solo'; // solo | live
+  let live = null; // LiveRoom while in live mode
+  const remotes = new RemoteRiders();
+  const roster = new Roster({ onAction: (act, uid) => onRosterAction(act, uid) });
+  const rosterActions = {}; // filled in by chat (mute/report) and duels (1V1)
+  function onRosterAction(act, uid) {
+    rosterActions[act]?.(uid);
+    roster.render();
+  }
+  // Who you are online. With ?localnet (testing in several tabs) a made-up rider.
+  function identity() {
+    if (account.ready) return { uid: account.user.id, tag: account.gamertag };
+    if (LOCAL) {
+      let id = sessionStorage.getItem('cranski.localid');
+      if (!id) sessionStorage.setItem('cranski.localid', (id = 'local-' + Math.random().toString(36).slice(2, 8)));
+      return { uid: id, tag: `${profile.name} ${id.slice(6, 9).toUpperCase()}` };
+    }
+    return null;
+  }
+  const MODE_NOTE = {
+    solo: 'Ride alone, race your ghost, never timed out.',
+    live: 'Ride with up to 30 riders. Hold Tab for the roster.',
+  };
+  async function setPlayMode(m) {
+    if (m === playMode) return;
+    if (m === 'live') {
+      const me = identity();
+      if (!me) {
+        openAccount();
+        toast(account.signedIn ? 'Pick a gamertag to ride in live rooms.' : 'Sign in to ride in live rooms.');
+        return;
+      }
+      playMode = 'live';
+      basecamp.setMode('live', MODE_NOTE.live);
+      const lk = look();
+      live = new LiveRoom({
+        me: { ...me, look: lk, board: lk.ride === 'board' },
+        budget: REALTIME_BUDGET,
+        onChange: () => onRoomChange(),
+        onTrick: (r) => remotes.showTrick(r),
+        onEvent: (e, m2) => roomEvents[e]?.(m2),
+      });
+      live.openLobby().catch((err) => {
+        console.warn(err);
+        toast("Couldn't reach the live rooms. Back to solo.");
+        setPlayMode('solo');
+      });
+    } else {
+      playMode = 'solo';
+      basecamp.setMode('solo', MODE_NOTE.solo);
+      const l = live;
+      live = null;
+      remotes.clear();
+      roster.hide();
+      updateRoomBadge();
+      if (l) await l.close();
+    }
+  }
+  const roomEvents = {}; // room broadcast events by name, for later features
+  function onRoomChange() {
+    updateRoomBadge();
+    roster.render();
+    if (parkMap.isOpen) parkMap.select(parkMap.sel);
+  }
+  function updateRoomBadge() {
+    const el = $('roombadge');
+    if (!live || !live.room) {
+      el.classList.add('hidden');
+      return;
+    }
+    const where = live.privateKey ? 'PRIVATE ROOM' : `ROOM ${live.number}`;
+    el.textContent = `${where} · ${live.riders} rider${live.riders === 1 ? '' : 's'} · Tab`;
+    el.classList.remove('hidden');
+  }
+  parkMap.riderCount = (id) => (live && live.lobby ? live.parkCount(id) : null);
+  // Leaving to Basecamp, or signing out, takes you out of the room.
+  account.onChange(() => {
+    if (playMode === 'live' && !identity()) setPlayMode('solo');
+  });
+  async function joinRoomFor(id) {
+    if (!live) return;
+    try {
+      const n = await live.join(id);
+      toast(`${parkMeta(id).name} · Room ${n}`, 3000);
+    } catch (e) {
+      console.warn(e);
+      toast(e.message && /full/i.test(e.message) ? e.message : "Couldn't join a live room. Riding solo for now.");
+    }
+  }
+  const STATUS_OF = { lift: 'lift', riding: 'riding', paused: 'paused', finish: 'results', results: 'results', replay: 'replay' };
+  // Send your state and place everyone else, every frame you're in a park.
+  function liveFrame(L, dt) {
+    if (!live || !live.room || live.park !== L.id) {
+      if (remotes.entries.size) remotes.clear();
+      L.hud.others = null;
+      return;
+    }
+    live.tick(L.run.rider, STATUS_OF[state] || 'lift');
+    remotes.attach(L.world.scene);
+    remotes.update(live, dt, camera, L.terrain);
+    L.hud.others = remotes.dots();
+    if (roster.isOpen) {
+      rosterTimer -= dt;
+      if (rosterTimer <= 0) {
+        roster.render();
+        rosterTimer = 1;
+      }
+    }
+  }
+  let rosterTimer = 0;
+  // Hold Tab for the roster.
+  window.addEventListener('keydown', (e) => {
+    if (e.code !== 'Tab' || !live || !live.room || e.target instanceof HTMLInputElement) return;
+    e.preventDefault();
+    if (!e.repeat && !roster.pinned) roster.show(live);
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.code === 'Tab' && !roster.pinned) roster.hide();
+  });
 
   // Leaderboards (Phase 3 step 4).
   function openBoard() {
@@ -602,6 +732,7 @@ function boot() {
       return;
     }
     loadingScreen.hide();
+    if (live && (live.park !== parkId || !live.room)) joinRoomFor(parkId);
     startLift();
   }
 
@@ -657,7 +788,7 @@ function boot() {
     if (ghostModel.root.parent !== L.world.scene) L.world.scene.add(ghostModel.root);
     ghostModel.root.visible = false;
     const runId = L.run;
-    replayDB.ghost(L.id).then((g) => {
+    if (playMode !== 'live') replayDB.ghost(L.id).then((g) => {
       if (!g || g.version !== SIM_VERSION || loaded !== L || L.run !== runId || state !== 'riding') return;
       // Catch the ghost up to where you are now, so it starts with you.
       ghost = new Ghost(L.terrain, g);
@@ -670,6 +801,7 @@ function boot() {
   function pause(on) {
     if (on && state === 'riding') {
       state = 'paused';
+      $('pause-roster').classList.toggle('hidden', !(live && live.room));
       showOverlay('pause');
     } else if (!on && state === 'paused') {
       state = 'riding';
@@ -739,6 +871,7 @@ function boot() {
     }
     if (act === 'restart') startRun();
     if (act === 'map') openMap('paused');
+    if (act === 'roster' && live && live.room) roster.show(live, true);
     if (act === 'settings') openSettings();
     if (act === 'help') $('pause-help').classList.toggle('hidden');
     if (act === 'basecamp') toBasecamp();
@@ -905,6 +1038,7 @@ function boot() {
     // -------------------------------------------- replay viewer
     if (state === 'replay') {
       placeModel(L.world.scene);
+      if (live && live.room) live.tick(L.run.rider, 'replay');
       replayView.frame(dt, L.time);
       input.endFrame();
       return;
@@ -926,6 +1060,7 @@ function boot() {
         input.endFrame();
         return;
       }
+      liveFrame(L, dt);
       const feet = ride.place(lift.d, L.time, liftPos, liftDir);
       const left = (ride.length - lift.d) / ride.speed;
       $('lift-time').textContent = `${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')} to the top`;
@@ -1020,6 +1155,7 @@ function boot() {
         else {
           if (m.type === 'railTrick') sfx.tick();
           L.hud.message(m);
+          if (live && m.type === 'trick' && m.name) live.sendTrick(m.name, m.points);
         }
       }
       run.messages.length = 0;
@@ -1107,6 +1243,7 @@ function boot() {
       L.chase.update(r, pivot, dt);
     }
     L.world.update(L.time, pivot, camera, state === 'riding' ? r : null);
+    liveFrame(L, dt);
     renderer.render(L.world.scene, camera);
     input.endFrame();
   }
@@ -1162,6 +1299,10 @@ function boot() {
     get lastReplay() {
       return lastReplay;
     },
+    get live() {
+      return live;
+    },
+    remotes,
     get lift() {
       return lift;
     },

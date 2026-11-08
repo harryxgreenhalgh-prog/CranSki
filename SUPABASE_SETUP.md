@@ -234,3 +234,36 @@ The in-game **Privacy** page (Basecamp footer → Privacy) lists what's stored o
 - [ ] Merge to `main` so GitHub Actions publishes the game.
 
 Never needed, and never to be put in the game or this repo: the secret / `service_role` key.
+
+---
+
+# Phase 4: multiplayer
+
+## 6. Live rooms (Phase 4, step 1)
+
+Live rooms use **Supabase Realtime**:
+
+- **Broadcast** carries positions and tricks.
+- **Presence** tracks who's in each room.
+
+Both run on private channels that only signed-in riders with a gamertag can join. Nothing sent over them is stored.
+
+1. **SQL Editor** → **New query** → paste all of `supabase/setup.sql` → **Run**. It's safe to run again; it adds the new policies on `realtime.messages`. If you prefer separate files, run `supabase/migrations/20261109120000_live_rooms.sql`.
+2. **Realtime** → **Settings**: turn **off** "Allow public access", then save. Every CranSki channel is private, and this stops anyone from opening public channels on your project.
+
+### Realtime usage and your plan
+
+Each rider sends up to 12 position updates a second while riding. Busy rooms send fewer each, so a whole room stays under `REALTIME_BUDGET` in `src/online/config.js` (60 a second). Supabase's Free plan allows about 100 Realtime messages a second for the whole project; Pro allows 500.
+
+Supabase **bills** every message each rider receives. One update seen by 9 other riders counts as 10 messages. A busy room uses millions of messages an hour. To keep an eye on it:
+
+- **Project Settings** → **Usage** → **Realtime messages** shows your use against your plan's monthly allowance.
+- If you upgrade, you can raise `REALTIME_BUDGET` (for example to 400 on Pro) for smoother riders in big rooms.
+
+### Test it
+
+1. Two devices (or two browsers), each signed in with a different account.
+2. On both: Basecamp → **Live rooms** → **RIDE** → the same park.
+3. Each should see the other rider with their gamertag above them, and a blue dot on the minimap. Hold **Tab** for the roster, or use **Pause** → **Riders in this room** on a tablet.
+
+No second account? Add `?localnet` to the game's address (for example `http://localhost:5173/?localnet`) and open it in two tabs side by side. The tabs link to each other directly without a server, so you can try rooms alone.

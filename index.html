@@ -15,6 +15,7 @@
       <!-- In-run HUD -->
       <div id="hud" class="hidden">
         <canvas id="minimap" width="240" height="96" aria-label="Park map"></canvas>
+        <div id="roombadge" class="hidden"></div>
         <div id="speedbox">
           <div id="speed"><span id="speed-num">0</span><small>km/h</small></div>
           <div id="runscore">SCORE <b id="score-num">0</b></div>
@@ -93,8 +94,8 @@
         </div>
         <div class="modes">
           <button class="mode on" data-mode="solo">Solo <span class="picked">PICKED</span></button>
-          <button class="mode" data-mode="multi" disabled title="Needs online play (later)">Multiplayer <small>later</small></button>
-          <div class="party muted">Parties, duels and ranked arrive with online play.</div>
+          <button class="mode" data-mode="multi" title="Live rooms: ride with up to 30 riders">Live rooms <span class="picked">PICKED</span></button>
+          <div class="party muted" id="mode-note">Ride alone, race your ghost, never timed out.</div>
         </div>
         <button id="ride" class="btn primary ride-big">RIDE <kbd>Enter</kbd></button>
         <nav class="footlinks">
@@ -136,12 +137,21 @@
           <button class="btn" data-act="reset">Reset position</button>
           <button class="btn" data-act="restart">Restart run</button>
           <button class="btn" data-act="map">Change park</button>
+          <button class="btn hidden" data-act="roster" id="pause-roster">Riders in this room</button>
           <button class="btn" data-act="settings">Settings</button>
           <button class="btn" data-act="help">How to play</button>
           <button class="btn" data-act="basecamp">Back to Basecamp</button>
           <div class="pause-music"><span>♪ <b id="pm-name"></b></span><button class="btn sm" data-act="mplay" id="pm-play">Pause</button><button class="btn sm" data-act="mskip">Skip</button></div>
           <div id="pause-help" class="hidden"></div>
           <p class="muted">Esc steps back.</p>
+        </div>
+      </section>
+
+      <!-- Live room roster (hold Tab, or Riders in the pause menu) -->
+      <section id="roster" class="hidden" aria-label="Riders in this room">
+        <div class="panel">
+          <div class="modal-head"><h2 id="roster-title">RIDERS</h2><span class="muted" id="roster-hint">Hold Tab</span></div>
+          <table class="rlist" id="roster-list"></table>
         </div>
       </section>
 

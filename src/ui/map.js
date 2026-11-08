@@ -88,10 +88,11 @@ export class ParkMap {
     $('map-length').textContent = p.length;
     $('map-features').textContent = p.features;
     $('map-lift').textContent = p.lift;
-    $('map-riders').textContent = 'Just you (solo)';
+    const riding = this.riderCount ? this.riderCount(p.id) : null;
+    $('map-riders').textContent = riding === null ? 'Just you (solo)' : riding === 0 ? 'No one yet: start a room' : `${riding} riding now`;
     const best = profile.best(p.id);
     $('map-best').textContent = best ? best.toLocaleString('en-US') : '—';
-    $('map-board').textContent = p.leaderboard ? 'Yes (online, later)' : 'No (ghosts only)';
+    $('map-board').textContent = p.leaderboard ? 'Yes' : 'No (ghosts only)';
     const here = PARKS.find((q) => q.id === this.here);
     if (here) {
       this.hereTag.setAttribute('transform', `translate(${here.map.x} ${here.map.y})`);
