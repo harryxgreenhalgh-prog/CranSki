@@ -34,5 +34,5 @@ jobs:
       - name: Deploy submit-run, delete-account and chat
         run: |
           for fn in submit-run delete-account chat; do
-            supabase functions deploy "$fn" --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
+            supabase functions deploy "$fn" --project-ref "$PROJECT_REF" --no-verify-jwt --use-api --yes
           done
