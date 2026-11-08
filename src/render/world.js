@@ -5,6 +5,7 @@ import { smoothstep } from '../sim/terrain.js';
 import { Sky } from './sky.js';
 import { buildLift } from './lift.js';
 import { SkiTracks } from './tracks.js';
+import { pineGeometries, treeMaterial } from './trees.js';
 import { textTexture } from './textTexture.js';
 
 export { textTexture };
@@ -36,6 +37,66 @@ function corduroyTexture() {
   tex.anisotropy = 4;
   _cordTex = tex;
   return tex;
+}
+
+// Fine wind-blown texture for the snow surface, as a normal map.
+let _snowNormal = null;
+function snowNormal() {
+  if (_snowNormal) return _snowNormal;
+  const N = 256;
+  const h = new Float32Array(N * N);
+  const rnd = mulberry32(19);
+  const grid = (cells) => {
+    const g = new Float32Array((cells + 1) * (cells + 1)).map(() => rnd());
+    for (let c = 0; c <= cells; c++) g[cells * (cells + 1) + c] = g[c];
+    for (let r = 0; r <= cells; r++) g[r * (cells + 1) + cells] = g[r * (cells + 1)];
+    return { g, cells };
+  };
+  const octaves = [grid(8), grid(16), grid(32), grid(64)];
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      let v = 0;
+      let a = 1;
+      for (const { g, cells } of octaves) {
+        const fx = (x / N) * cells;
+        const fy = (y / N) * cells;
+        const ix = Math.floor(fx);
+        const iy = Math.floor(fy);
+        const tx = fx - ix;
+        const ty = fy - iy;
+        const W1 = cells + 1;
+        const s = (i, j) => g[(iy + j) * W1 + ix + i];
+        const sx = tx * tx * (3 - 2 * tx);
+        const sy = ty * ty * (3 - 2 * ty);
+        v += a * ((s(0, 0) * (1 - sx) + s(1, 0) * sx) * (1 - sy) + (s(0, 1) * (1 - sx) + s(1, 1) * sx) * sy);
+        a *= 0.5;
+      }
+      h[y * N + x] = v;
+    }
+  }
+  const c = document.createElement('canvas');
+  c.width = c.height = N;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(N, N);
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const dx = h[y * N + ((x + 1) % N)] - h[y * N + ((x + N - 1) % N)];
+      const dy = h[((y + 1) % N) * N + x] - h[((y + N - 1) % N) * N + x];
+      const nx = -dx * 2.2;
+      const ny = -dy * 2.2;
+      const l = Math.hypot(nx, ny, 1);
+      const i = (y * N + x) * 4;
+      img.data[i] = (nx / l * 0.5 + 0.5) * 255;
+      img.data[i + 1] = (ny / l * 0.5 + 0.5) * 255;
+      img.data[i + 2] = (1 / l * 0.5 + 0.5) * 255;
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  _snowNormal = t;
+  return t;
 }
 
 function crossExtent(terrain) {
@@ -94,7 +155,9 @@ function buildTerrain(terrain, group, quality) {
   const rows = terrainRows(terrain, perf ? 2 : quality === 'ultra' ? 1 : 1.25);
   const cols = terrainCols(terrain, perf);
   const W = cols.length;
-  const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, map: corduroyTexture() });
+  const mat = perf
+    ? new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, map: corduroyTexture() })
+    : new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, map: corduroyTexture(), normalMap: snowNormal(), normalScale: new THREE.Vector2(0.55, 0.55), roughness: 0.86, metalness: 0, envMapIntensity: 0.45 });
   const c = new THREE.Color();
   const n = { x: 0, y: 1, z: 0 };
   const isPipe = terrain.cross.type === 'pipe';
@@ -227,20 +290,14 @@ function buildPaint(terrain, group) {
 
 function buildTrees(terrain, group, quality) {
   const trees = terrain.trees;
-  const trunkGeo = new THREE.CylinderGeometry(0.25, 0.35, 2.4, 6);
-  trunkGeo.translate(0, 1.2, 0);
-  const leafGeo = new THREE.ConeGeometry(2.6, 7.5, 7);
-  leafGeo.translate(0, 6, 0);
-  const leafGeo2 = new THREE.ConeGeometry(1.9, 5, 7);
-  leafGeo2.translate(0, 9.2, 0);
-  const mats = [new THREE.MeshLambertMaterial({ color: 0x5a3b26 }), new THREE.MeshLambertMaterial({ color: 0x1f5a3a }), new THREE.MeshLambertMaterial({ color: 0x2c7048 })];
-  const geos = [trunkGeo, leafGeo, leafGeo2];
-  // One instanced batch per 200 m so far forest can be culled.
+  const geos = pineGeometries();
+  const mat = treeMaterial();
+  // One instanced batch per 200 m (and per variant) so far forest can be culled.
   const byChunk = new Map();
   for (const t of trees) {
     const key = Math.floor(t.s / 200);
-    if (!byChunk.has(key)) byChunk.set(key, []);
-    byChunk.get(key).push(t);
+    if (!byChunk.has(key)) byChunk.set(key, { snowy: [], dark: [] });
+    byChunk.get(key)[(t.rot * 1000) % 3 < 2 ? 'snowy' : 'dark'].push(t);
   }
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
@@ -248,14 +305,16 @@ function buildTrees(terrain, group, quality) {
   const p = new THREE.Vector3();
   const yAxis = new THREE.Vector3(0, 1, 0);
   const chunks = [];
-  for (const [key, list] of byChunk) {
+  for (const [key, lists] of byChunk) {
     const g = new THREE.Group();
-    for (let k = 0; k < 3; k++) {
-      const im = new THREE.InstancedMesh(geos[k], mats[k], list.length);
+    for (const variant of ['snowy', 'dark']) {
+      const list = lists[variant];
+      if (!list.length) continue;
+      const im = new THREE.InstancedMesh(geos[variant], mat, list.length);
       list.forEach((t, i) => {
         p.set(t.x, terrain.height(t.x, -t.s) - 0.2, -t.s);
         q.setFromAxisAngle(yAxis, t.rot);
-        sc.set(t.scale, t.scale, t.scale);
+        sc.set(t.scale, t.scale * (0.9 + (t.rot % 0.4)), t.scale);
         m.compose(p, q, sc);
         im.setMatrixAt(i, m);
       });
@@ -349,12 +408,7 @@ function buildFarTerrain(terrain, group, quality) {
     const y = farH(u, s);
     spots.push([cs + u, y, -s, 0.8 + rnd() * 0.9, rnd() * 6.28]);
   }
-  const trunk = new THREE.CylinderGeometry(0.3, 0.4, 3, 5);
-  trunk.translate(0, 1.5, 0);
-  const crown = new THREE.ConeGeometry(2.8, 9, 6);
-  crown.translate(0, 7, 0);
-  const tm = new THREE.InstancedMesh(trunk, new THREE.MeshLambertMaterial({ color: 0x4a3222 }), spots.length);
-  const cm = new THREE.InstancedMesh(crown, new THREE.MeshLambertMaterial({ color: 0x1d4f35 }), spots.length);
+  const im = new THREE.InstancedMesh(pineGeometries().far, treeMaterial(), spots.length);
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const sc = new THREE.Vector3();
@@ -362,28 +416,49 @@ function buildFarTerrain(terrain, group, quality) {
   const yAxis = new THREE.Vector3(0, 1, 0);
   spots.forEach(([x, y, z, s, r], i) => {
     m.compose(p.set(x, y - 0.3, z), q.setFromAxisAngle(yAxis, r), sc.set(s, s, s));
-    tm.setMatrixAt(i, m);
-    cm.setMatrixAt(i, m);
+    im.setMatrixAt(i, m);
   });
-  tm.computeBoundingSphere();
-  cm.computeBoundingSphere();
-  group.add(tm, cm);
+  im.computeBoundingSphere();
+  group.add(im);
 }
 
+// Distant peaks: snow on the upper slopes, grey rock below.
 function buildMountains(terrain, group) {
   const rnd = mulberry32(99);
-  const mat = new THREE.MeshLambertMaterial({ color: 0xdfe9f5, flatShading: true });
-  const rock = new THREE.MeshLambertMaterial({ color: 0x7d8ea3, flatShading: true });
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
   const park = terrain.park;
   const base = terrain.profile(park.endS);
   const top = terrain.profile(0);
   const cz = -park.endS / 2;
   const R = Math.max(1300, park.endS * 0.75);
+  const snow = new THREE.Color(0xf1f5fb);
+  const rock = new THREE.Color(0x6f7f93);
+  const c = new THREE.Color();
   for (let i = 0; i < 30; i++) {
     const ang = (i / 30) * Math.PI * 2;
     const r = R + rnd() * 500;
     const h = (top - base) * 0.6 + 350 + rnd() * 500;
-    const m = new THREE.Mesh(new THREE.ConeGeometry(220 + rnd() * 260, h, 5 + Math.floor(rnd() * 3)), rnd() > 0.3 ? mat : rock);
+    const geo = new THREE.ConeGeometry(220 + rnd() * 260, h, 6 + Math.floor(rnd() * 4), 4).toNonIndexed();
+    // Jagged ridgelines: push the inner rings about a little.
+    const pos = geo.attributes.position;
+    for (let k = 0; k < pos.count; k++) {
+      const y = pos.getY(k);
+      if (y > -h / 2 + 1 && y < h / 2 - 1) {
+        const j = 1 + (Math.sin(k * 12.9898 + i) * 0.5) * 0.18;
+        pos.setX(k, pos.getX(k) * j);
+        pos.setZ(k, pos.getZ(k) * j);
+      }
+    }
+    geo.computeVertexNormals();
+    const col = new Float32Array(pos.count * 3);
+    const line = 0.25 + rnd() * 0.25;
+    for (let k = 0; k < pos.count; k += 3) {
+      const yc = (pos.getY(k) + pos.getY(k + 1) + pos.getY(k + 2)) / 3 / h + 0.5;
+      c.copy(yc > line ? snow : rock);
+      for (let j = 0; j < 3; j++) col.set([c.r, c.g, c.b], (k + j) * 3);
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    const m = new THREE.Mesh(geo, mat);
     m.position.set(Math.cos(ang) * r, base - 100 + h / 2, cz + Math.sin(ang) * r);
     m.rotation.y = rnd() * 3;
     group.add(m);
@@ -470,6 +545,7 @@ function buildGates(terrain, group) {
 function buildObstacles(terrain, group, sky) {
   const night = sky.mode === 'aurora';
   const roofMats = new Map();
+  const roofSnow = new THREE.MeshLambertMaterial({ color: 0xf4f7fb });
   for (const o of terrain.obstacles) {
     if (o.type === 'ball') {
       const m = new THREE.Mesh(new THREE.SphereGeometry(o.r, 28, 20), new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.25, metalness: 0.6 }));
@@ -481,12 +557,26 @@ function buildObstacles(terrain, group, sky) {
       body.position.set(o.x, o.y + o.h / 2 - 0.5, o.z);
       body.castShadow = true;
       group.add(body);
+      // A pitched roof under a thick layer of snow, with coloured eaves.
       if (!roofMats.has(o.roof)) roofMats.set(o.roof, new THREE.MeshLambertMaterial({ color: o.roof }));
-      const roof = new THREE.Mesh(new THREE.CylinderGeometry(0.01, o.w * 0.75, o.l + 1, 3, 1), roofMats.get(o.roof));
-      roof.rotation.x = Math.PI / 2;
-      roof.scale.set(1, 1, 0.55);
-      roof.position.set(o.x, o.y + o.h - 0.5 + o.w * 0.2, o.z);
+      const shape = new THREE.Shape();
+      const half = o.w / 2 + 0.5;
+      shape.moveTo(-half, 0);
+      shape.lineTo(half, 0);
+      shape.lineTo(0, o.w * 0.42);
+      shape.closePath();
+      const roofGeo = new THREE.ExtrudeGeometry(shape, { depth: o.l + 1, bevelEnabled: false });
+      roofGeo.translate(0, 0, -(o.l + 1) / 2);
+      const roof = new THREE.Mesh(roofGeo, roofSnow);
+      roof.position.set(o.x, o.y + o.h - 0.5, o.z);
+      roof.castShadow = true;
       group.add(roof);
+      const eave = new THREE.Mesh(new THREE.BoxGeometry(o.w + 1.1, 0.25, o.l + 1.1), roofMats.get(o.roof));
+      eave.position.set(o.x, o.y + o.h - 0.55, o.z);
+      group.add(eave);
+      const chimney = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.6, 0.7), new THREE.MeshLambertMaterial({ color: 0x6b5a4e }));
+      chimney.position.set(o.x + o.w * 0.18, o.y + o.h + o.w * 0.25, o.z - o.l * 0.25);
+      group.add(chimney);
       // Snow on the roof and lit windows.
       const win = new THREE.MeshBasicMaterial({ color: night ? 0xffd27a : 0x9fc4e8 });
       for (let k = 0; k < 2; k++) {
@@ -720,6 +810,7 @@ export function buildWorld(terrain, { quality = 'high', renderer = null } = {}) 
         const mats = Array.isArray(o.material) ? o.material : [o.material];
         for (const m of mats) {
           if (m.map && m.map !== _cordTex) m.map.dispose();
+          if (m.normalMap && m.normalMap !== _snowNormal) m.normalMap.dispose();
           m.dispose();
         }
       }

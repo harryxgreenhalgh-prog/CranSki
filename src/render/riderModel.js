@@ -41,12 +41,13 @@ export const HELMETS = {
 };
 
 function lambert(color) {
-  return new THREE.MeshLambertMaterial({ color });
+  // Soft fabric: rough, picks up a little of the sky.
+  return new THREE.MeshStandardMaterial({ color, roughness: 0.82, metalness: 0, envMapIntensity: 0.6 });
 }
 
 // A unit cylinder along +Y that we stretch between two points.
 function limb(radius, mat, radiusBottom = radius) {
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(radius, radiusBottom, 1, 8), mat);
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(radius, radiusBottom, 1, 14), mat);
   m.castShadow = true;
   return m;
 }
@@ -137,11 +138,13 @@ export class RiderModel {
     // Skis: body, top sheet, twin tips, binding and boot.
     this.skis = [0, 1].map(() => {
       const g = new THREE.Group();
-      mesh(new THREE.BoxGeometry(0.1, 0.03, 1.5), M.ski, g);
-      mesh(new THREE.BoxGeometry(0.06, 0.005, 1.3), M.skiTop, g).position.y = 0.018;
+      mesh(new THREE.BoxGeometry(0.095, 0.025, 1.62), M.ski, g);
+      mesh(new THREE.BoxGeometry(0.05, 0.005, 1.4), M.skiTop, g).position.y = 0.015;
       for (const end of [-1, 1]) {
-        const tip = mesh(new THREE.BoxGeometry(0.1, 0.03, 0.22), M.ski, g);
-        tip.position.set(0, 0.04, end * 0.84);
+        const tip = mesh(new THREE.CylinderGeometry(0.0475, 0.0475, 0.025, 12, 1, false, 0, Math.PI), M.ski, g);
+        tip.scale.set(1, 1, 2.6);
+        tip.rotation.y = end > 0 ? 0 : Math.PI;
+        tip.position.set(0, 0.05, end * 0.84);
         tip.rotation.x = end * -0.45;
       }
       mesh(new THREE.BoxGeometry(0.11, 0.04, 0.36), M.binding, g).position.set(0, 0.03, 0.02);
@@ -170,14 +173,17 @@ export class RiderModel {
     this.shin = [limb(0.11, M.pants, 0.1), limb(0.11, M.pants, 0.1)];
     this.upperArm = [limb(0.075, M.top), limb(0.075, M.top)];
     this.foreArm = [limb(0.07, M.forearm, 0.065), limb(0.07, M.forearm, 0.065)];
-    this.mitts = [0, 1].map(() => mesh(new THREE.SphereGeometry(0.075, 10, 8), M.mitt));
+    this.mitts = [0, 1].map(() => mesh(new THREE.SphereGeometry(0.078, 16, 12), M.mitt));
+    // Rounded caps at the knees and elbows so the limbs join smoothly.
+    this.knees = [0, 1].map(() => mesh(new THREE.SphereGeometry(0.108, 14, 10), M.pants));
+    this.elbows = [0, 1].map(() => mesh(new THREE.SphereGeometry(0.068, 12, 8), M.top));
     this.poles = [limb(0.014, M.pole), limb(0.014, M.pole)];
     for (const arr of [this.thigh, this.shin, this.upperArm, this.foreArm, this.poles]) for (const m of arr) this.body.add(m);
 
     // Torso pivots at the hips.
     this.hips = new THREE.Group();
     this.body.add(this.hips);
-    this.torso = mesh(new THREE.BoxGeometry(0.46, 0.62, 0.3), M.top, this.hips);
+    this.torso = mesh(new THREE.CapsuleGeometry(0.2, 0.3, 8, 18), M.top, this.hips);
     this.torso.position.y = 0.33;
     this.hood = mesh(new THREE.BoxGeometry(0.3, 0.1, 0.12), M.trim, this.hips);
     this.hood.position.set(0, 0.62, 0.14);
@@ -188,12 +194,14 @@ export class RiderModel {
     this.pocket.position.set(0, 0.16, -0.16);
     this.zip = mesh(new THREE.BoxGeometry(0.03, 0.5, 0.01), M.trim, this.hips);
     this.zip.position.set(0, 0.36, -0.155);
-    mesh(new THREE.BoxGeometry(0.42, 0.2, 0.28), M.pants, this.hips);
+    const pelvis = mesh(new THREE.CapsuleGeometry(0.13, 0.17, 6, 14), M.pants, this.hips);
+    pelvis.rotation.z = Math.PI / 2;
+    pelvis.scale.set(1, 1, 1.05);
 
     this.head = new THREE.Group();
     this.head.position.y = 0.76;
     this.hips.add(this.head);
-    this.face = mesh(new THREE.SphereGeometry(0.12, 12, 10), M.face, this.head);
+    this.face = mesh(new THREE.SphereGeometry(0.12, 20, 16), M.face, this.head);
     this.hairShort = mesh(new THREE.SphereGeometry(0.128, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.45), M.hair, this.head);
     this.hairShort.position.y = 0.01;
     this.hairStrands = new THREE.Group();
@@ -202,7 +210,7 @@ export class RiderModel {
     this.braid = mesh(new THREE.CylinderGeometry(0.035, 0.02, 0.3, 6), M.hair, this.head);
     this.braid.position.set(0, -0.15, 0.12);
     this.braid.rotation.x = 0.3;
-    this.helmet = mesh(new THREE.SphereGeometry(0.145, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.6), M.helmet, this.head);
+    this.helmet = mesh(new THREE.SphereGeometry(0.148, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.62), M.helmet, this.head);
     this.helmet.position.y = 0.02;
     this.beanie = new THREE.Group();
     mesh(new THREE.SphereGeometry(0.138, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), M.beanie, this.beanie).scale.set(1, 1.15, 1);
@@ -210,8 +218,10 @@ export class RiderModel {
     this.pom.position.y = 0.16;
     this.beanie.position.y = 0.015;
     this.head.add(this.beanie);
-    this.goggles = mesh(new THREE.BoxGeometry(0.24, 0.08, 0.06), M.lens, this.head);
-    this.goggles.position.set(0, 0.02, -0.12);
+    // Oversized wraparound goggles.
+    this.goggles = mesh(new THREE.CylinderGeometry(0.142, 0.142, 0.085, 24, 1, true, Math.PI - 1.15, 2.3), M.lens, this.head);
+    this.goggles.material.side = THREE.DoubleSide;
+    this.goggles.position.set(0, 0.025, 0);
     this.strap = mesh(new THREE.CylinderGeometry(0.142, 0.142, 0.035, 20, 1, true), M.strap, this.head);
     this.strap.position.y = 0.02;
     this.strapTex = textTexture('CRANSKI  CRANSKI  CRANSKI', { w: 512, h: 32, bg: '#ffffff', fg: '#0b3d91', font: 'italic 900 26px Impact, sans-serif' });
@@ -270,7 +280,7 @@ export class RiderModel {
 
     // Body type: a slightly narrower build for Woman.
     const w = L.body === 'woman';
-    this.torso.scale.set(w ? 0.88 : 1, w ? 0.96 : 1, w ? 0.92 : 1);
+    this.torso.scale.set(1.12 * (w ? 0.88 : 1), 0.9 * (w ? 0.96 : 1), 0.74 * (w ? 0.92 : 1));
     this.shoulder = w ? 0.24 : 0.27;
 
     // Head items and hair.
@@ -409,6 +419,7 @@ export class RiderModel {
       ankle.y += board ? 0.22 : 0.18;
       solveJoint(v.hip[i], ankle, 0.46, 0.46, kneeHint, v.knee);
       placeLimb(this.thigh[i], v.hip[i], v.knee);
+      this.knees[i].position.copy(v.knee);
       placeLimb(this.shin[i], v.knee, ankle);
     }
 
@@ -437,6 +448,7 @@ export class RiderModel {
       hand.copy(v.sh).addScaledVector(dir, Math.max(reach, 0.15));
       solveJoint(v.sh, hand, 0.3, 0.3, elbowHint, v.elbow);
       placeLimb(this.upperArm[i], v.sh, v.elbow);
+      this.elbows[i].position.copy(v.elbow);
       placeLimb(this.foreArm[i], v.elbow, hand);
       this.mitts[i].position.copy(hand);
       // Poles trail back from the hands.

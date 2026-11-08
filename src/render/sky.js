@@ -9,7 +9,54 @@ const PALETTES = {
   night: { top: 0x050a1c, mid: 0x0d1838, low: 0x1c2a52, fog: 0x101a36, sun: 0x8fa8ff, sunI: 0.35, hemiSky: 0x5a6fa8, hemiGround: 0x1a2038, hemiI: 0.55, night: 1 },
 };
 
-const _c = new THREE.Color();
+// Sky dome shader: colour gradient, a sun with glow, and drifting clouds.
+const SKY_VERT = `
+varying vec3 vDir;
+void main() {
+  vDir = normalize(position);
+  vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  gl_Position = p.xyww;
+}`;
+const SKY_FRAG = `
+uniform vec3 top;
+uniform vec3 mid;
+uniform vec3 low;
+uniform vec3 sunCol;
+uniform vec3 sunDir;
+uniform float time;
+uniform float clouds;
+uniform float night;
+varying vec3 vDir;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+float fbm(vec2 p) {
+  float v = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 5; i++) { v += a * noise(p); p *= 2.03; a *= 0.5; }
+  return v;
+}
+void main() {
+  vec3 d = normalize(vDir);
+  float y = d.y;
+  vec3 col = y > 0.12 ? mix(mid, top, clamp((y - 0.12) / 0.6, 0.0, 1.0)) : mix(low, mid, clamp((y + 0.1) / 0.22, 0.0, 1.0));
+  float sd = max(dot(d, normalize(sunDir)), 0.0);
+  float day = 1.0 - night;
+  col += sunCol * (pow(sd, 900.0) * 6.0 + pow(sd, 18.0) * 0.35 + pow(sd, 3.0) * 0.12) * day;
+  if (y > 0.0) {
+    vec2 uv = d.xz / (y + 0.12) * 0.55 + vec2(time * 0.006, time * 0.002);
+    float c = smoothstep(0.48, 0.82, fbm(uv * 1.3)) * clouds * smoothstep(0.0, 0.18, y);
+    float lit = 0.75 + 0.25 * fbm(uv * 2.6 + 3.0);
+    vec3 cc = mix(vec3(1.0), sunCol, 0.3) * lit * (0.25 + 0.75 * day) + vec3(0.04, 0.05, 0.09) * night;
+    col = mix(col, cc, c * 0.9);
+  }
+  gl_FragColor = vec4(col, 1.0);
+  #include <colorspace_fragment>
+}`;
 
 function mixPalette(a, b, t) {
   const out = {};
@@ -26,12 +73,20 @@ export class Sky {
     this.mode = mode;
     this.hemi = hemi;
     this.sun = sun;
-    const geo = new THREE.SphereGeometry(3000, 32, 16);
-    this.ys = [];
-    const p = geo.attributes.position;
-    for (let i = 0; i < p.count; i++) this.ys.push(p.getY(i) / 3000);
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(p.count * 3), 3));
-    this.dome = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, depthWrite: false, fog: false }));
+    const geo = new THREE.SphereGeometry(3000, 48, 24);
+    this.uniforms = {
+      top: { value: new THREE.Color() },
+      mid: { value: new THREE.Color() },
+      low: { value: new THREE.Color() },
+      sunCol: { value: new THREE.Color() },
+      sunDir: { value: new THREE.Vector3(-0.4, 0.55, 0.3) },
+      time: { value: 0 },
+      clouds: { value: mode === 'sunrise' ? 0.55 : 0.7 },
+      night: { value: 0 },
+    };
+    const mat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: SKY_VERT, fragmentShader: SKY_FRAG, side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false, toneMapped: false });
+    this.dome = new THREE.Mesh(geo, mat);
+    this.dome.frustumCulled = false;
     this.dome.renderOrder = -2;
     scene.add(this.dome);
     this.fog = new THREE.Fog(0xcfe6ff, 250, 2200);
@@ -85,23 +140,21 @@ export class Sky {
   }
 
   apply(pal) {
-    const col = this.dome.geometry.attributes.color;
-    const top = new THREE.Color(pal.top);
-    const mid = new THREE.Color(pal.mid);
-    const low = new THREE.Color(pal.low);
-    for (let i = 0; i < this.ys.length; i++) {
-      const y = this.ys[i];
-      if (y > 0.12) _c.copy(mid).lerp(top, Math.min(1, (y - 0.12) / 0.6));
-      else _c.copy(low).lerp(mid, Math.max(0, (y + 0.1) / 0.22));
-      col.setXYZ(i, _c.r, _c.g, _c.b);
-    }
-    col.needsUpdate = true;
+    const U = this.uniforms;
+    U.top.value.setHex(pal.top);
+    U.mid.value.setHex(pal.mid);
+    U.low.value.setHex(pal.low);
+    U.sunCol.value.setHex(pal.sun);
+    U.night.value = pal.night;
+    U.sunDir.value.set(-40, 80, 30).normalize(); // matches the sun light's direction
     this.fog.color.setHex(pal.fog);
     this.sun.color.setHex(pal.sun);
-    this.sun.intensity = pal.sunI;
+    // Stronger sun, softer bluish fill: sunlit snow pops and shaded slopes go blue.
+    this.sun.intensity = pal.sunI * 1.4;
     this.hemi.color.setHex(pal.hemiSky);
     this.hemi.groundColor.setHex(pal.hemiGround);
-    this.hemi.intensity = pal.hemiI;
+    this.hemi.groundColor.lerp(new THREE.Color(0x5f7fb8), 0.35);
+    this.hemi.intensity = pal.hemiI * 0.72;
     this.night = pal.night;
     if (this.stars) this.stars.material.opacity = Math.max(0, pal.night - 0.3) * 1.2;
   }
@@ -109,6 +162,7 @@ export class Sky {
   // time: seconds since the park loaded; progress: 0..1 down the run.
   update(time, progress, cameraPos) {
     this.dome.position.copy(cameraPos);
+    this.uniforms.time.value = time;
     if (this.stars) this.stars.position.copy(cameraPos);
     if (this.mode === 'daynight') {
       // One full cycle every 8 minutes: day, dusk, night, dawn.

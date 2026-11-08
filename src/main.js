@@ -55,6 +55,9 @@ function boot() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  // Filmic tone mapping: bright snow keeps its detail instead of clipping to white.
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
 
   // First visit on a phone or weaker machine: start in Performance, with an Undo.
   if (load('settings', null) === null && looksLowEnd()) {
