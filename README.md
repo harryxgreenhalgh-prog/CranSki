@@ -71,5 +71,10 @@ The simulation runs on a fixed 120 Hz step with no randomness, so a replay is ju
 - [Three.js](https://threejs.org) (MIT licence)
 - [Vite](https://vite.dev) (MIT licence), build tool
 - Music: nine original tracks composed for CranSki and played by an in-browser synthesiser. Sound effects are synthesised in the browser too.
+- 3D models used under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (resized for the web; see `public/models/CREDITS.md`):
+  - [“Snowy Wooden Hut”](https://sketchfab.com/3d-models/snowy-wooden-hut-857c02ab61834df8a8d125ccce6fec2a) by [gecko0307](https://sketchfab.com/gecko0307)
+  - [“Finish Line”](https://sketchfab.com/3d-models/finish-line-70aecb6bac234266bdebd22322396caa) by [Kemal Çolak](https://sketchfab.com/kemalcolak)
+  - [“Snowy Mountain - Terrain”](https://sketchfab.com/3d-models/snowy-mountain-terrain-9fa3c56fd32746bcb0e06cd2c4229ca0) by [artfromheath](https://sketchfab.com/artfromheath)
+- The rider, trees, lifts and arches are built by `tools/blender/build_assets.py`.
 
-All code, shapes, illustrations, sounds and music in this repository were made for CranSki.
+Apart from the CC BY models above, all code, models, illustrations, sounds and music in this repository were made for CranSki.

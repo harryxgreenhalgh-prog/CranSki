@@ -64,6 +64,47 @@ export async function loadAssets(onProgress = () => {}) {
   return ASSETS;
 }
 
+// Whole scenes (textured Sketchfab models), loaded on demand and cached.
+const scenes = new Map();
+export function loadScene(name) {
+  if (!scenes.has(name)) {
+    const base = import.meta.env?.BASE_URL ?? './';
+    scenes.set(
+      name,
+      new GLTFLoader().loadAsync(`${base}models/${name}.glb`).then((g) => {
+        g.scene.traverse((o) => {
+          if (o.isMesh) {
+            o.castShadow = true;
+            o.receiveShadow = true;
+          }
+        });
+        return g.scene;
+      })
+    );
+  }
+  return scenes.get(name);
+}
+
+const ready = new Map();
+export async function preloadScenes(names) {
+  await Promise.all(names.map(async (n) => ready.set(n, await loadScene(n))));
+}
+
+// A copy of a loaded scene (sharing geometry and textures), marked so a park's
+// clean-up never disposes the shared data. Null if it isn't loaded.
+export function sceneCopy(name) {
+  const s = ready.get(name);
+  if (!s) return null;
+  const c = s.clone(true);
+  c.traverse((o) => (o.userData.shared = true));
+  return c;
+}
+
+// Size and ground offset of a model, for placing it.
+export function modelBounds(obj) {
+  return new THREE.Box3().setFromObject(obj);
+}
+
 // A geometry normalised to unit length along y and centred, for parts that get
 // stretched between two joints (limbs, poles).
 export function unitAlongY(geometry) {

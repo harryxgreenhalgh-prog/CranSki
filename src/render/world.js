@@ -6,7 +6,7 @@ import { Sky } from './sky.js';
 import { buildLift } from './lift.js';
 import { SkiTracks } from './tracks.js';
 import { pineSet } from './trees.js';
-import { ASSETS, partMaterials } from './assets.js';
+import { ASSETS, partMaterials, sceneCopy, modelBounds } from './assets.js';
 import { textTexture } from './textTexture.js';
 
 export { textTexture };
@@ -423,6 +423,40 @@ function buildFarTerrain(terrain, group, quality) {
   group.add(im);
 }
 
+function buildMountainRange(terrain, group) {
+  const tile = sceneCopy('mountain');
+  if (!tile) return false;
+  const park = terrain.park;
+  const b = modelBounds(tile);
+  const size = Math.max(b.max.x - b.min.x, b.max.z - b.min.z);
+  const S = 4600 / size; // each tile ~4.6 km across
+  const base = terrain.profile(park.endS) - 260;
+  const cz = -park.endS / 2;
+  const R = 3300;
+  const tiles = [
+    [0, -1, 0.0],
+    [1, 0, 1.3],
+    [-1, 0, 2.6],
+    [0, 1, 3.9],
+    [0.75, -0.75, 0.7],
+    [-0.75, -0.75, 5.1],
+  ];
+  tiles.forEach(([dx, dz, rot], i) => {
+    const m = i === 0 ? tile : sceneCopy('mountain');
+    m.scale.setScalar(S);
+    m.rotation.y = rot;
+    m.position.set(dx * R, base - b.min.y * S, cz + dz * R);
+    m.traverse((o) => {
+      if (o.isMesh) {
+        o.castShadow = false;
+        o.receiveShadow = false;
+      }
+    });
+    group.add(m);
+  });
+  return true;
+}
+
 // Distant peaks: snow on the upper slopes, grey rock below.
 function buildMountains(terrain, group) {
   const rnd = mulberry32(99);
@@ -535,10 +569,23 @@ function buildGates(terrain, group) {
     post(group, c0 + 5, y0, -s0, 5.4, 0xffffff, 0.18);
     banner(group, `CRANSKI · ${park.name}`, c0, y0 + 5.2, -s0, 10.4, 1.3, undefined, rot0);
   }
-  const hut = new THREE.Mesh(new THREE.BoxGeometry(4, 3, 3), new THREE.MeshLambertMaterial({ color: 0xd0473a }));
-  hut.position.set(c0 - 9, terrain.height(c0 - 9, -s0 + 8) + 1.5, -s0 + 8);
-  hut.castShadow = true;
-  group.add(hut);
+  // Start hut: the snowy log cabin beside the gate.
+  const cabin = sceneCopy('hut');
+  if (cabin) {
+    const b = modelBounds(cabin);
+    const k = 0.75;
+    cabin.scale.setScalar(k);
+    const hx = c0 - 12;
+    const hz = -s0 + 9;
+    cabin.position.set(hx, terrain.height(hx, hz) - b.min.y * k - 0.2, hz);
+    cabin.rotation.y = rot0 + Math.PI / 2;
+    group.add(cabin);
+  } else {
+    const hut = new THREE.Mesh(new THREE.BoxGeometry(4, 3, 3), new THREE.MeshLambertMaterial({ color: 0xd0473a }));
+    hut.position.set(c0 - 9, terrain.height(c0 - 9, -s0 + 8) + 1.5, -s0 + 8);
+    hut.castShadow = true;
+    group.add(hut);
+  }
 
   // Finish line: blue line, tall side markers, netting and a banner.
   const sf = park.finishS;
@@ -558,7 +605,16 @@ function buildGates(terrain, group) {
     m.position.set(xn, terrain.height(xn, zn) + 1.5, zn);
     group.add(m);
   }
-  if (archPart) {
+  const finishModel = sceneCopy('finish');
+  if (finishModel) {
+    // The finish line model, scaled to the width of the run.
+    const b = modelBounds(finishModel);
+    const k = Math.max(1.2, Math.min(2.4, (hw * 2 * 0.8) / (b.max.x - b.min.x)));
+    finishModel.scale.setScalar(k);
+    finishModel.position.set(cf, yf - b.min.y * k - 0.1, -sf);
+    finishModel.rotation.y = rotF;
+    group.add(finishModel);
+  } else if (archPart) {
     arch(cf, yf, -sf, (hw * 2) / 10, 1.35, rotF);
     banner(group, 'FINISH', cf, yf + 6.4, -sf, Math.min(hw * 1.2, 16), 1.8, undefined, rotF);
   } else banner(group, 'FINISH', cf, yf + 8, -sf, hw * 2 - 1, 2.4, undefined, rotF);
@@ -765,7 +821,8 @@ export function buildWorld(terrain, { quality = 'high', renderer = null } = {}) 
   const park = terrain.park;
   const sky = new Sky(scene, park.sky || 'day', { hemi, sun });
 
-  buildMountains(terrain, group);
+  // Skyline: the snowy mountain terrain model all round the park (or simple peaks).
+  if (!buildMountainRange(terrain, group)) buildMountains(terrain, group);
   buildFarTerrain(terrain, group, quality);
   buildTerrain(terrain, group, quality);
   buildPaint(terrain, group);
@@ -828,7 +885,7 @@ export function buildWorld(terrain, { quality = 'high', renderer = null } = {}) 
     if (envTex) envTex.dispose();
     const shared = new Set(Object.values(ASSETS.parts).map((p) => p.geometry));
     scene.traverse((o) => {
-      if (o.userData.sharedMaterial) return;
+      if (o.userData.sharedMaterial || o.userData.shared) return;
       if (o.geometry && !shared.has(o.geometry)) o.geometry.dispose();
       if (o.material) {
         const mats = Array.isArray(o.material) ? o.material : [o.material];
