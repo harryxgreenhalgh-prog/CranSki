@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="CranSki: a free browser freeski game. Drop into BIG AIR and chain spins, flips and grabs." />
+    <title>CranSki</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231e7bff'/%3E%3Cpath d='M12 46 L52 30' stroke='white' stroke-width='6' stroke-linecap='round'/%3E%3Ccircle cx='38' cy='18' r='7' fill='white'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game"></canvas>
+
+      <!-- In-run HUD -->
+      <div id="hud" class="hidden">
+        <canvas id="minimap" width="240" height="96" aria-label="Park map"></canvas>
+        <div id="speedbox">
+          <div id="speed"><span id="speed-num">0</span><small>km/h</small></div>
+          <div id="runscore">SCORE <b id="score-num">0</b></div>
+        </div>
+        <div id="live"></div>
+        <div id="trick">
+          <div id="trick-name"></div>
+          <div id="trick-points"></div>
+          <div id="trick-bonuses"></div>
+          <div id="trick-landing"></div>
+        </div>
+        <div id="line"></div>
+        <div id="ring" class="hidden">
+          <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" class="track" /><circle id="ring-fill" cx="50" cy="50" r="42" class="fill" /></svg>
+          <span>RESTART</span>
+        </div>
+        <div id="hint"></div>
+      </div>
+
+      <!-- Title / how to play -->
+      <section id="title" class="overlay">
+        <div class="panel">
+          <h1 class="logo">CRANSKI</h1>
+          <p class="tag">Solo · Phase 1 preview</p>
+          <div class="park-card">
+            <div>
+              <div class="park-name">BIG AIR</div>
+              <div class="park-meta">~0.8 km · one mega kicker · learn big spins</div>
+            </div>
+            <span class="picked">PICKED</span>
+          </div>
+          <button id="ride" class="btn primary">RIDE <kbd>Enter</kbd></button>
+          <div id="controls-help"></div>
+        </div>
+      </section>
+
+      <!-- Pause -->
+      <section id="pause" class="overlay hidden">
+        <div class="panel narrow">
+          <h2>PAUSED</h2>
+          <button class="btn primary" data-act="resume">Resume</button>
+          <button class="btn" data-act="restart">Restart run</button>
+          <button class="btn" data-act="help">How to play</button>
+          <div id="pause-help" class="hidden"></div>
+          <p class="muted">Esc or P to resume.</p>
+        </div>
+      </section>
+
+      <!-- Results -->
+      <section id="results" class="overlay hidden">
+        <div class="panel">
+          <h2>RUN COMPLETE</h2>
+          <div id="res-total" class="big-score">0</div>
+          <div id="res-best" class="muted"></div>
+          <table class="breakdown">
+            <tbody>
+              <tr><td>Tricks and airtime</td><td id="res-tricks">0</td></tr>
+              <tr><td>Grabs and variety</td><td id="res-grabs">0</td></tr>
+              <tr><td>Rails and clean landings</td><td id="res-land">0</td></tr>
+              <tr class="lost"><td>Lost to bails</td><td id="res-lost">0</td></tr>
+            </tbody>
+          </table>
+          <div class="stats">
+            <div><span>Top speed</span><b id="res-speed">0 km/h</b></div>
+            <div><span>Total airtime</span><b id="res-air">0.0 s</b></div>
+            <div><span>Best trick</span><b id="res-trick">—</b></div>
+          </div>
+          <div class="buttons">
+            <button class="btn primary" data-act="again">Ride again <kbd>Enter</kbd></button>
+            <button class="btn" disabled title="Coming in Phase 2">Watch replay</button>
+            <button class="btn" disabled title="Coming in Phase 2">Save replay</button>
+            <button class="btn" disabled title="Coming in Phase 2">Clip</button>
+            <button class="btn" disabled title="More parks arrive in Phase 2">Map</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="nogl" class="overlay hidden">
+        <div class="panel narrow">
+          <h2>WebGL 2 needed</h2>
+          <p>CranSki needs WebGL 2 with GPU acceleration. Try a current Chrome, Edge, Firefox or Safari, and check that hardware acceleration is turned on in your browser settings.</p>
+        </div>
+      </section>
+
+      <footer id="footer">
+        CranSki is an independent fan-made game inspired by Cork7. It is not affiliated with, endorsed by, or connected to Cork7 or its developers. Not affiliated with SSX, EA, X Games or Red Bull.
+        <span class="credits">Built with <a href="https://threejs.org" target="_blank" rel="noopener">Three.js</a> (MIT).</span>
+      </footer>
+    </div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
