@@ -14,7 +14,7 @@ const MODE_CODE = { ground: 0, air: 1, rail: 2, crash: 3 };
 export const MODE_NAME = ['ground', 'air', 'rail', 'crash'];
 
 // A compact per-frame record of everything needed to draw the rider.
-export const STRIDE = 22;
+export const STRIDE = 23;
 
 export function writeFrame(r, out, o) {
   out[o] = r.pos.x;
@@ -39,6 +39,7 @@ export function writeFrame(r, out, o) {
   out[o + 19] = r.sink;
   out[o + 20] = r.speed;
   out[o + 21] = r.air ? r.air.clearance : 0;
+  out[o + 22] = r.air && (r.air.openTimer > 0 || r.air.aligning) ? 1 : 0;
 }
 
 // A view of a frame that looks enough like a rider for the helpers below.
@@ -62,6 +63,7 @@ export function frameRider(f, o, out = {}) {
   out.sink = f[o + 19];
   out.speed = f[o + 20];
   out.clearance = f[o + 21];
+  out.open = f[o + 22] > 0.5;
   return out;
 }
 
@@ -94,6 +96,9 @@ export function placeRider(v, terrain, pos, q, outPos, outQ) {
 export function poseFor(v, { absorb = 0, riding = true } = {}) {
   const mode = v.mode;
   const omega = v.omega ? v.omega.length() : v.omegaLen || 0;
+  // After letting go of a grab: legs extend and arms open to square up for landing.
+  const open = mode === 'air' && (v.air ? v.air.openTimer > 0 || v.air.aligning : v.open) && !v.activeGrab;
+  if (open) return { crouch: 0.05, press: 0, wide: 0.3, tuck: 0, legsUp: 0, lean: 0, look: v.switchStance ? 1 : 0, armsOut: 0.9, grab: null, grabSide: 1 };
   return {
     crouch: mode === 'ground' ? Math.max(v.load, absorb > 0 ? 0.9 : 0) : mode === 'air' ? 0.25 : mode === 'rail' ? 0.35 : 0.6,
     press: mode === 'rail' && (v.rail ? v.rail.press : v.press) ? 1 : 0,

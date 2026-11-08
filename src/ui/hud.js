@@ -43,7 +43,8 @@ export const CONTROLS_HTML = `
   <ul class="tips">
     <li>BIG AIR: tuck the whole inrun for max speed; full speed lands near the orange 225 m board.</li>
     <li>Keep holding S with a cork spin for doubles and triples.</li>
-    <li><b>Release everything before touchdown</b> so the skis line up. Holding keys into the snow is a bail.</li>
+    <li><b>Grabs drive your spin:</b> hold a grab to spin faster and keep turning; let go and you slow right down, open up and square up for the landing.</li>
+    <li><b>Release everything before touchdown</b> so the skis line up. Holding keys or a grab into the snow is a bail.</li>
     <li>Controller: left stick carve/spin, A pop, RT tuck/frontflip, LT backflip, right stick roll, B rodeo/misty, LB/X/Y grabs.</li>
   </ul>
 `;

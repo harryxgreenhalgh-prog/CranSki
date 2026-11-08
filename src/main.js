@@ -938,22 +938,9 @@ function boot() {
     }
 
     absorb = Math.max(0, absorb - dt);
-    const a = r.air;
-    model.update(
-      {
-        crouch: r.mode === 'ground' ? Math.max(r.load, absorb > 0 ? 0.9 : 0) : r.mode === 'air' ? 0.25 : r.mode === 'rail' ? 0.35 : 0.6,
-        press: r.mode === 'rail' && r.rail.press ? 1 : 0,
-        wide: r.mode === 'rail' ? 1 : 0,
-        tuck: r.mode === 'ground' && r.tucking && state === 'riding' ? 1 : 0,
-        legsUp: r.mode === 'air' ? 0.35 : 0,
-        lean: r.mode === 'ground' ? r.lean : 0,
-        look: r.switchStance && r.mode !== 'crash' && state !== 'finish' ? 1 : 0,
-        armsOut: r.mode === 'air' && r.omega.length() > 120 ? 1 : r.mode === 'air' ? 0.4 : 0,
-        grab: r.activeGrab,
-        grabSide: a && a.spin < 0 ? 1 : -1,
-      },
-      dt
-    );
+    const pose = poseFor(r, { absorb, riding: state === 'riding' });
+    if (state === 'finish') pose.look = 0;
+    model.update(pose, dt);
 
     // Ghost: your best run on this park.
     if (ghost && state === 'riding' && !ghost.done) {

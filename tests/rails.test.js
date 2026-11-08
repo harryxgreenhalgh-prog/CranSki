@@ -74,7 +74,11 @@ test('swap and hop on a rail, then spin off the end', () => {
       if (st.railTime > 0.9 && st.railTime < 1.0) k.pop = true; // hop
       if (r.rail && r.rail.rail.length - r.rail.d < 1.0) k.steer = 1; // spin off
     }
-    if (r.mode === 'air' && r.air.fromRail && Math.abs(r.air.spin) < 60) k.steer = 1;
+    // Spin off the end until the quarter turn is done, then let go.
+    if (r.mode === 'air' && r.air.fromRail && !st.spun) {
+      if (Math.abs(r.air.spin) < 85) k.steer = 1;
+      else st.spun = true;
+    }
   });
   const rail = msgs.find((m) => m.type === 'rail');
   assert.match(rail.name, /SWAP/);
