@@ -28,6 +28,7 @@ import { startAudio } from './audio/engine.js';
 import { Sfx } from './audio/sfx.js';
 import { Music } from './audio/music.js';
 import { LoadingScreen } from './ui/loading.js';
+import { loadAssets, ASSETS, preloadScenes, sceneCopy, modelBounds } from './render/assets.js';
 import { placeRider, poseFor } from './render/pose.js';
 
 const $ = (id) => document.getElementById(id);
@@ -121,6 +122,8 @@ function boot() {
     const meta = parkMeta(id);
     const promise = (async () => {
       const mod = await meta.load(); // each park is its own chunk, fetched when picked
+      progress(0.35, 'Loading scenery…');
+      await preloadScenes(['mountain', 'finish', 'hut']).catch((e) => console.error('scenery models', e));
       progress(0.45, `Shaping ${meta.name}…`);
       await new Promise((r) => setTimeout(r, 0));
       const terrain = new Terrain(mod.park);
@@ -984,6 +987,17 @@ function boot() {
   // for a tap or key (needed to start sound) before showing Basecamp.
   state = 'boot';
   (async () => {
+    loadingScreen.set(0.15, 'Loading models…');
+    try {
+      await loadAssets((p) => loadingScreen.set(0.15 + p * 0.1, 'Loading models…'));
+      model.upgrade(ASSETS.parts);
+      ghostModel.upgrade(ASSETS.parts);
+      ghostModel.makeGhost();
+      await preloadScenes(['hut']);
+      basecampScene.setLodge(sceneCopy('hut'), modelBounds);
+    } catch (e) {
+      console.error('Models failed to load; using simple shapes', e);
+    }
     loadingScreen.set(0.25, 'Warming up shaders…');
     await new Promise((r) => setTimeout(r, 0));
     placeModel(basecampScene.scene);

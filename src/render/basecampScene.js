@@ -106,5 +106,20 @@ export function buildBasecamp() {
     flag.rotation.y = Math.sin(time * 1.3) * 0.2;
   }
 
-  return { scene, anchor, frameCamera, update };
+  // Swap the box lodge for the snowy log cabin model.
+  function setLodge(cabin, bounds) {
+    if (!cabin) return;
+    lodge.visible = false;
+    const b = bounds(cabin);
+    const k = 1.55;
+    cabin.scale.setScalar(k);
+    cabin.position.set(1.5, -b.min.y * k - 0.05, -13);
+    cabin.rotation.y = 0;
+    scene.add(cabin);
+    const sign2 = sign.clone();
+    sign2.position.set(1.5, (b.max.y - b.min.y) * k * 0.62, -13 + b.max.z * k + 0.3);
+    scene.add(sign2);
+  }
+
+  return { scene, anchor, frameCamera, update, setLodge };
 }

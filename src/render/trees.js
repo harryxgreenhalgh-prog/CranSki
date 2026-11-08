@@ -1,7 +1,8 @@
-// Pine trees in tiers, some dusted with snow. One merged geometry per variant
-// with vertex colours, so a whole forest is a handful of instanced draw calls.
+// Pine trees. The Blender-built pines (layered, snow on the branches) are used
+// when they've loaded; otherwise simple tiered cones built here.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { ASSETS, partMaterials } from './assets.js';
 
 function colored(geo, hex) {
   const g = geo.index ? geo.toNonIndexed() : geo;
@@ -34,7 +35,6 @@ function pine(variant, segs) {
     cone.translate(0, y0 + h / 2, 0);
     parts.push(colored(cone, greens[i]));
     if (variant === 'snowy') {
-      // A cap of snow on the top of each tier.
       const cap = new THREE.ConeGeometry(r * 0.74, h * 0.42, segs, 1);
       cap.rotateY(i * 0.7 + 0.3);
       cap.translate(0, y0 + h * 0.79, 0);
@@ -47,11 +47,24 @@ function pine(variant, segs) {
 }
 
 let cache = null;
-export function pineGeometries() {
-  if (!cache) cache = { snowy: pine('snowy', 8), dark: pine('dark', 8), far: pine('snowy', 6) };
-  return cache;
-}
+let mats = null;
 
-export function treeMaterial() {
-  return new THREE.MeshLambertMaterial({ vertexColors: true });
+// { snowy, dark, far }: each { geometry, material } ready for an InstancedMesh.
+export function pineSet() {
+  if (cache && cache.fromAssets === ASSETS.ready) return cache;
+  const P = ASSETS.parts;
+  if (ASSETS.ready && P.pineSnowy) {
+    mats ||= {
+      bark: new THREE.MeshLambertMaterial({ color: 0x4a3324 }),
+      needles: new THREE.MeshLambertMaterial({ color: 0x1d4c33 }),
+      needlesDark: new THREE.MeshLambertMaterial({ color: 0x123524 }),
+      snow: new THREE.MeshLambertMaterial({ color: 0xf0f4fa }),
+    };
+    const make = (name) => ({ geometry: P[name].geometry, material: partMaterials(P[name], mats, mats.needles) });
+    cache = { fromAssets: true, snowy: make('pineSnowy'), dark: make('pineGreen'), far: make('pineFar') };
+  } else {
+    const material = new THREE.MeshLambertMaterial({ vertexColors: true });
+    cache = { fromAssets: false, snowy: { geometry: pine('snowy', 8), material }, dark: { geometry: pine('dark', 8), material }, far: { geometry: pine('snowy', 6), material } };
+  }
+  return cache;
 }
