@@ -6,7 +6,7 @@ import { DT } from '../src/sim/constants.js';
 import { PARKS } from '../src/parks/index.js';
 
 // Lines the bot takes around features it can't clear without popping (s range -> u offset).
-const DETOURS = { forest: [[3140, 3290, 13]] };
+const DETOURS = { forest: [[835, 945, 13]] };
 
 // A simple bot that follows the course centre line, keeps its speed in check and never pops.
 function rideThrough(park, targetSpeed = 24) {

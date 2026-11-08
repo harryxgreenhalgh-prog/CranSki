@@ -32,13 +32,22 @@ export const AIR = {
   flipRate: 340, // deg/s front/back flips
   rollRate: 340, // deg/s side rolls
   offAxisRate: 430, // deg/s around a tilted (cork/bio/rodeo/misty/flat) axis
-  grabSpinBoost: 1.1, // holding a grab speeds up the spin a little
+  // Grabs drive the rotation: held tight, a grab speeds the spin up and keeps it
+  // going; let go and the rotation slows right down so you open up, extend your
+  // legs and square up with the snow.
+  grabSpinBoost: 1.3, // spin speed while holding a grab
+  grabSpinUp: 1.5, // ...and it gets there faster
+  grabHoldDecay: 0.35, // rotation barely fades while the grab is held (1/s)
+  openDamp: 11, // how hard rotation slows once you let go of a grab (1/s)
+  openTime: 0.4, // seconds of that slow-down after releasing a grab
+  openTargetScale: 0.3, // keys still held during the slow-down only drive this much rotation
+  alignMaxSpin: 200, // landing help starts once rotation is slower than this (deg/s)
   spinUpRate: 9, // how fast rotation reaches the target rate when a key is held (1/s)
   spinDownRate: 7, // how fast rotation dies after keys are released (1/s)
   comboWindow: 0.25, // spin + flip within this time after take-off makes an off-axis trick
   lateTilt: 0.3, // a spin (or flip) added after the window only tilts the rotation
-  alignRate: 260, // deg/s the body lines up for landing once inputs are released
-  alignTime: 0.55, // start lining up this long before predicted touchdown
+  alignRate: 320, // deg/s the body lines up for landing once you've opened up
+  alignTime: 0.7, // start lining up this long before predicted touchdown
   // Axis tilt from vertical for each off-axis family (deg); holding the flip key adds tilt.
   tilt: { cork: 30, bio: 30, rodeo: 46, misty: 46, flat: 42 },
   tiltMin: 18,

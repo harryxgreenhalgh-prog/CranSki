@@ -742,7 +742,13 @@ export class Rider {
     }
 
     // Target angular velocity for this step.
-    const boost = air.activeGrab ? AIR.grabSpinBoost : 1;
+    // Grab held tight: faster, sustained rotation. Released: open up and slow down.
+    const grabbing = !!air.activeGrab;
+    if (air.wasGrabbing && !grabbing) air.openTimer = AIR.openTime;
+    air.wasGrabbing = grabbing;
+    if (air.openTimer > 0) air.openTimer -= DT;
+    const opening = air.openTimer > 0;
+    const boost = grabbing ? AIR.grabSpinBoost : 1;
     const target = _a.set(0, 0, 0);
     const fam = air.family;
     if (fam && OFF_AXIS.has(fam)) {
@@ -765,17 +771,29 @@ export class Rider {
       target.set(0, spinIn * AIR.spinRate * AIR.lateTilt * boost, rollIn * AIR.rollRate);
     }
 
-    const kUp = 1 - Math.exp(-AIR.spinUpRate * DT);
-    const kDown = 1 - Math.exp(-AIR.spinDownRate * DT);
-    this.omega.x += (target.x - this.omega.x) * (target.x !== 0 ? kUp : kDown);
-    this.omega.y += (target.y - this.omega.y) * (target.y !== 0 ? kUp : kDown);
-    this.omega.z += (target.z - this.omega.z) * (target.z !== 0 ? kUp : kDown);
+    if (opening) target.multiplyScalar(AIR.openTargetScale);
+    const kUp = 1 - Math.exp(-AIR.spinUpRate * (grabbing ? AIR.grabSpinUp : 1) * DT);
+    let kDown = 1 - Math.exp(-AIR.spinDownRate * DT);
+    if (grabbing) kDown = 1 - Math.exp(-AIR.grabHoldDecay * DT); // tucked tight: keep turning
+    else if (opening || !anyRot) kDown = 1 - Math.exp(-AIR.openDamp * DT); // opened up: slow right down
+    // While opening up, every axis slows (even with a key still held).
+    const kx = target.x !== 0 && !opening ? kUp : kDown;
+    const ky = target.y !== 0 && !opening ? kUp : kDown;
+    const kz = target.z !== 0 && !opening ? kUp : kDown;
+    // Holding a grab with no keys keeps the current rotation instead of fading it.
+    if (grabbing && target.x === 0 && target.y === 0 && target.z === 0) {
+      this.omega.multiplyScalar(1 - kDown);
+    } else {
+      this.omega.x += (target.x - this.omega.x) * kx;
+      this.omega.y += (target.y - this.omega.y) * ky;
+      this.omega.z += (target.z - this.omega.z) * kz;
+    }
 
     this._rotateBody(this.omega.x * DT, this.omega.y * DT, this.omega.z * DT);
 
     // Landing help: once everything is released, line the skis up for touchdown.
     air.aligning = false;
-    if (!anyRot && this.omega.length() < 150) {
+    if (!anyRot && !grabbing && this.omega.length() < AIR.alignMaxSpin) {
       const tau = AIR.alignTime;
       const px = this.pos.x + this.vel.x * tau;
       const pz = this.pos.z + this.vel.z * tau;

@@ -3,7 +3,7 @@
 
 // Bump this whenever the simulation changes in a way that alters runs:
 // replays and ghosts from an older version can't be re-ridden.
-export const SIM_VERSION = 7;
+export const SIM_VERSION = 8;
 
 export function encodeInput(i) {
   let v = 0;

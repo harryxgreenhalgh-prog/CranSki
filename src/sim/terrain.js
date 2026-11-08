@@ -8,6 +8,7 @@
 // height = profile(s) + crossSection(u, s) + features(u, s)
 
 import { mulberry32 } from './rng.js';
+import { liftLayout } from './liftline.js';
 
 const DEG = Math.PI / 180;
 const PSTEP = 0.05; // profile sample step (m)
@@ -235,6 +236,7 @@ export class Terrain {
 
     this.lipHeight = park.profileKicker ? this.profile(park.profileKicker.lipS) : 0;
     this._buildRails(railDefs);
+    this.lift = liftLayout(this);
     this._buildTrees();
     this._buildObstacles();
   }
@@ -247,7 +249,9 @@ export class Terrain {
   }
 
   profile(s) {
-    const f = Math.min(Math.max(s, 0), (this.n - 1) * PSTEP) / PSTEP;
+    // Above the start the mountain keeps rising, so the start gate sits on a slope.
+    if (s < 0) return this.h[0] - s * 0.45;
+    const f = Math.min(s, (this.n - 1) * PSTEP) / PSTEP;
     const i = Math.min(Math.floor(f), this.n - 2);
     const t = f - i;
     return this.h[i] * (1 - t) + this.h[i + 1] * t;
@@ -551,6 +555,7 @@ export class Terrain {
         const scale = 0.7 + rnd() * 0.8;
         const rot = rnd() * 6.283;
         if (!allowed(u, ss, this)) continue;
+        if (this.lift && this.lift.inCorridor(this.center(ss) + u, ss)) continue; // cleared lift line
         trees.push({ x: this.center(ss) + u, s: ss, u, scale, rot });
       }
     }

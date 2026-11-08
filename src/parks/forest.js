@@ -1,6 +1,7 @@
-// FOREST LINE: a rail park through the pines. Stepped start, doubles, a stair
-// handrail and a giant black ball up top; a knoll hit, side-by-side gaps, twin
-// jumps, blue pipes and a 38 m gap onto a rainbow rail on a tall block below.
+// FOREST LINE: a rail park through the pines. Stepped start, rails off gentle
+// ramps, a snake rail into doubles, a stair handrail and a giant black ball up
+// top; a knoll hit, side-by-side gaps, twin jumps, blue pipes and a 38 m gap onto
+// a rainbow rail on a tall block below. Everything comes thick and fast.
 import { jump, bump, block, stairs, hold, forestTrees, rail } from './helpers.js';
 
 const slopePoints = [
@@ -18,19 +19,19 @@ const slopePoints = [
   [52.5, -35],
   [53, -3],
   [70, -3],
-  [100, -12],
-  ...hold(110, 980, -12),
-  [995, -26], // stair set with handrail
-  ...hold(1000, 1040, -26),
-  [1055, -12],
-  ...hold(1065, 2850, -12),
-  [2880, -7], // blue pipes
-  ...hold(2890, 2990, -7),
-  [3020, -13],
-  ...hold(3040, 3680, -13),
-  [3730, -3],
-  [3760, 0],
-  [3850, 0],
+  [90, -11],
+  ...hold(95, 295, -12),
+  [303, -26], // stair set with handrail
+  ...hold(306, 344, -26),
+  [354, -12],
+  ...hold(360, 645, -12),
+  [652, -7], // blue pipes
+  ...hold(656, 692, -7),
+  [702, -13],
+  ...hold(708, 1100, -13),
+  [1140, -3],
+  [1165, 0],
+  [1220, 0],
 ];
 
 export const park = {
@@ -41,39 +42,37 @@ export const park = {
   slopePoints,
   center: [
     [0, 0],
-    [200, 0],
-    [700, 16],
-    [1300, -12],
-    [1900, 18],
-    [2600, -14],
-    [3300, 10],
-    [3850, 0],
+    [150, 0],
+    [400, 12],
+    [700, -10],
+    [1000, 12],
+    [1220, 0],
   ],
   cross: { type: 'banks', hw: 22, bankK: 0.07, bankMax: 24 },
   features: [
-    // Doubles: two jumps in sequence.
-    jump(500, -6, 's'),
-    jump(540, -6, 's'),
-    jump(1300, 6, 'm'),
-    jump(1350, 6, 'm'),
-    stairs(1000, -9, 40, 10),
-    // Bottom: a big hit off a knoll.
-    bump(1920, 0, 20, 30, 6),
-    jump(1900, 0, 'l'),
+    // Doubles: two jumps in sequence after the snake rail.
+    jump(190, -6, 's'),
+    jump(228, -6, 's'),
+    jump(362, 6, 'm'),
+    jump(402, 6, 'm'),
+    stairs(306, -9, 38, 10),
+    // A big hit off a knoll.
+    bump(535, 0, 20, 30, 6),
+    jump(515, 0, 'l'),
     // Two side-by-side gaps.
-    jump(2150, -9, 'l', { width: 10 }),
-    jump(2150, 9, 'l', { width: 10 }),
+    jump(582, -9, 'l', { width: 10 }),
+    jump(582, 9, 'l', { width: 10 }),
     // Three twin jumps.
-    jump(2450, -8, 'm', { width: 8 }),
-    jump(2450, 8, 'm', { width: 8 }),
-    jump(2560, -8, 'm', { width: 8 }),
-    jump(2560, 8, 'm', { width: 8 }),
-    jump(2670, -8, 'm', { width: 8 }),
-    jump(2670, 8, 'm', { width: 8 }),
+    jump(705, -8, 'm', { width: 8 }),
+    jump(705, 8, 'm', { width: 8 }),
+    jump(752, -8, 'm', { width: 8 }),
+    jump(752, 8, 'm', { width: 8 }),
+    jump(799, -8, 'm', { width: 8 }),
+    jump(799, 8, 'm', { width: 8 }),
     // 38 m gap onto a tall snow block with the rainbow rail.
-    jump(3180, 0, 'l', { gap: 0, lip: 32 }),
-    block(3233, 0, 22, 6.5, 7, 7), // undershoot rides up the ramped front instead of hitting a wall
-    jump(3450, 0, 'm'),
+    jump(850, 0, 'l', { gap: 0, lip: 32 }),
+    block(903, 0, 26, 6.5, 7, 7), // undershoot rides up the ramped front instead of hitting a wall
+    jump(1040, 0, 'm'),
   ],
   rails: [
     // 1. Stepped start: a low rail down each step.
@@ -81,29 +80,29 @@ export const park = {
     rail(26, 7, 11, 'rail', { lip: false, h: 0.45, endH: 0.45 }),
     rail(44, -7, 11, 'rail', { lip: false, h: 0.45, endH: 0.45 }),
     // 2. Rails off gentle ramps.
-    rail(300, -8, 16, 'rail', { lipAngle: 15 }),
-    rail(302, 0, 14, 'box', { lipAngle: 14 }),
-    rail(300, 8, 16, 'rail', { lipAngle: 15 }),
+    rail(100, -8, 26, 'rail', { lipAngle: 15 }),
+    rail(102, 0, 20, 'box', { lipAngle: 14 }),
+    rail(100, 8, 26, 'rail', { lipAngle: 15 }),
     // 3. Snake rail into the doubles.
-    rail(440, -6, 28, 'snake'),
+    rail(146, -6, 34, 'snake'),
     // 4. Stair handrail.
-    rail(1001, -3.4, 38, 'follow', { h: 0.9 }),
-    // 5.
-    rail(1600, -7, 18, 'kink'),
-    rail(1602, 7, 14, 'box', { lipAngle: 16 }),
+    rail(307, -3.4, 36, 'follow', { h: 0.9 }),
+    // 5. Kink and a long box.
+    rail(455, -7, 30, 'kink'),
+    rail(457, 7, 38, 'box', { lipAngle: 16 }),
     // 6. Three blue pipes.
-    rail(2905, -9, 22, 'pipe'),
-    rail(2905, 0, 22, 'pipe'),
-    rail(2905, 9, 22, 'pipe'),
-    // 7. Rainbow rail on the tall snow block after the 38 m gap.
-    rail(3236, 0, 16, 'rainbow', { lip: false, h: 0.45, arc: 1.2 }),
-    // 8.
-    rail(3550, -6, 18, 'rail'),
-    rail(3552, 6, 14, 'box', { lipAngle: 16 }),
+    rail(658, -9, 30, 'pipe'),
+    rail(658, 0, 30, 'pipe'),
+    rail(658, 9, 30, 'pipe'),
+    // 7. Rainbow rail on the block after the 38 m gap.
+    rail(906, 0, 20, 'rainbow', { lip: false, h: 0.45, arc: 1.3 }),
+    // 8. A long rail and a box before the last jump.
+    rail(985, -6, 40, 'rail'),
+    rail(987, 6, 30, 'box', { lipAngle: 16 }),
   ],
-  obstacles: [{ type: 'ball', s: 780, u: 9, r: 3.2, ring: true }],
+  obstacles: [{ type: 'ball', s: 272, u: 9, r: 3.2, ring: true }],
   trees: forestTrees(22, { perRow: 3, minU: 25, spacing: 3 }),
   startS: 6,
-  finishS: 3740,
-  endS: 3820,
+  finishS: 1150,
+  endS: 1200,
 };
