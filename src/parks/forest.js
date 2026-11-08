@@ -1,7 +1,7 @@
 // FOREST LINE: a rail park through the pines. Stepped start, doubles, a stair
 // handrail and a giant black ball up top; a knoll hit, side-by-side gaps, twin
 // jumps, blue pipes and a 38 m gap onto a rainbow rail on a tall block below.
-import { jump, bump, block, stairs, hold, forestTrees } from './helpers.js';
+import { jump, bump, block, stairs, hold, forestTrees, rail } from './helpers.js';
 
 const slopePoints = [
   [0, -2],
@@ -74,6 +74,32 @@ export const park = {
     jump(3180, 0, 'l', { gap: 0, lip: 32 }),
     block(3233, 0, 22, 6.5, 7, 7), // undershoot rides up the ramped front instead of hitting a wall
     jump(3450, 0, 'm'),
+  ],
+  rails: [
+    // 1. Stepped start: a low rail down each step.
+    rail(8, -7, 11, 'rail', { lip: false, h: 0.45, endH: 0.45 }),
+    rail(26, 7, 11, 'rail', { lip: false, h: 0.45, endH: 0.45 }),
+    rail(44, -7, 11, 'rail', { lip: false, h: 0.45, endH: 0.45 }),
+    // 2. Rails off gentle ramps.
+    rail(300, -8, 16, 'rail', { lipAngle: 15 }),
+    rail(302, 0, 14, 'box', { lipAngle: 14 }),
+    rail(300, 8, 16, 'rail', { lipAngle: 15 }),
+    // 3. Snake rail into the doubles.
+    rail(440, -6, 28, 'snake'),
+    // 4. Stair handrail.
+    rail(1001, -3.4, 38, 'follow', { h: 0.9 }),
+    // 5.
+    rail(1600, -7, 18, 'kink'),
+    rail(1602, 7, 14, 'box', { lipAngle: 16 }),
+    // 6. Three blue pipes.
+    rail(2905, -9, 22, 'pipe'),
+    rail(2905, 0, 22, 'pipe'),
+    rail(2905, 9, 22, 'pipe'),
+    // 7. Rainbow rail on the tall snow block after the 38 m gap.
+    rail(3236, 0, 16, 'rainbow', { lip: false, h: 0.45, arc: 1.2 }),
+    // 8.
+    rail(3550, -6, 18, 'rail'),
+    rail(3552, 6, 14, 'box', { lipAngle: 16 }),
   ],
   obstacles: [{ type: 'ball', s: 780, u: 9, r: 3.2, ring: true }],
   trees: forestTrees(22, { perRow: 3, minU: 25, spacing: 3 }),

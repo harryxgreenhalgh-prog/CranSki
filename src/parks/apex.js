@@ -1,6 +1,6 @@
 // APEX: pro slopestyle line in permanent sunrise daylight. Four big named kickers,
 // two rail zones and a long stair set that rides like a slope.
-import { jump, stairs, hold, forestTrees } from './helpers.js';
+import { jump, stairs, hold, forestTrees, rail } from './helpers.js';
 
 export const park = {
   id: 'apex',
@@ -36,6 +36,13 @@ export const park = {
     jump(1250, 0, 'xl', { name: 'LAST LIGHT', face: 22, gap: 30 }),
     jump(570, 18, 's'),
     stairs(1100, -12, 60, 12),
+  ],
+  rails: [
+    rail(415, -8, 18, 'rail'),
+    rail(417, 8, 14, 'box', { lipAngle: 16 }),
+    rail(805, 0, 20, 'kink'),
+    rail(807, 14, 12, 'box', { lipAngle: 16 }),
+    rail(1101, -5.4, 58, 'follow', { h: 0.9 }), // stair handrail
   ],
   trees: forestTrees(28, { perRow: 2 }),
   startS: 8,

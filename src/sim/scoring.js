@@ -19,7 +19,24 @@ export const SCORE = {
   cleanFlat: 450,
   cleanLineShare: 0.15,
   sidewaysKeepMin: 0.5,
+  railPerSecond: 750,
+  railTrick: 450, // per swap or hop
+  butter: { hold: 150, 180: 300, 360: 600 },
+  buttersPerRun: 4,
 };
+
+export function railPoints(time, swaps, hops) {
+  return Math.round(SCORE.railPerSecond * time + SCORE.railTrick * (swaps + hops));
+}
+
+// Held press (0.25 s+) = 150, a 180 = 300, a 360 = 600.
+export function butterPoints(time, turned) {
+  const t = Math.abs(turned);
+  if (t >= 330) return SCORE.butter[360];
+  if (t >= 150) return SCORE.butter[180];
+  if (time >= 0.25) return SCORE.butter.hold;
+  return 0;
+}
 
 export function grabMultiplier(grabCount, longestGrab) {
   if (grabCount <= 0) return 1;
@@ -89,6 +106,7 @@ export class Line {
     this.trickPts = 0;
     this.grabPts = 0;
     this.landingPts = 0;
+    this.railPts = 0;
     this.features = 0;
   }
 
@@ -97,11 +115,21 @@ export class Line {
   }
 
   get value() {
-    return Math.round((this.trickPts + this.grabPts) * this.multiplier + this.landingPts);
+    return Math.round((this.trickPts + this.grabPts + this.railPts) * this.multiplier + this.landingPts);
   }
 
   get empty() {
-    return this.features === 0;
+    return this.features === 0 && this.trickPts === 0;
+  }
+
+  addRail(points) {
+    this.railPts += points;
+    this.features += 1;
+  }
+
+  // Butters add points but don't count as a jump or rail for the line multiplier.
+  addButter(points) {
+    this.trickPts += points;
   }
 
   addTrick(scored, keep = 1) {
@@ -127,6 +155,7 @@ export class RunScore {
     this.lostToCrashes = 0;
     this.history = []; // trick keys, for the repeat rule
     this.bestTrick = null; // { name, points }
+    this.butters = 0;
   }
 
   bank(line) {
@@ -134,7 +163,7 @@ export class RunScore {
     const m = line.multiplier;
     const a = Math.round(line.trickPts * m);
     const b = Math.round(line.grabPts * m);
-    const c = Math.round(line.landingPts);
+    const c = Math.round(line.landingPts + line.railPts * m);
     this.tricksAndAir += a;
     this.grabsAndVariety += b;
     this.landings += c;

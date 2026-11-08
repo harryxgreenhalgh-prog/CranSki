@@ -133,7 +133,7 @@ export class RiderModel {
     this.head.add(strap);
 
     // Pose state (smoothed each frame).
-    this.pose = { crouch: 0, tuck: 0, grab: 0, legsUp: 0, lean: 0, look: 0, armsOut: 0 };
+    this.pose = { crouch: 0, tuck: 0, grab: 0, legsUp: 0, lean: 0, look: 0, armsOut: 0, press: 0, wide: 0 };
     this.grabName = null;
     this.grabSide = 1;
 
@@ -158,6 +158,8 @@ export class RiderModel {
     p.lean += (target.lean - p.lean) * k;
     p.look += (target.look - p.look) * (1 - Math.exp(-dt * 6));
     p.armsOut += (target.armsOut - p.armsOut) * k;
+    p.press += ((target.press || 0) - p.press) * k;
+    p.wide += ((target.wide || 0) - p.wide) * k;
     const grabOn = target.grab ? 1 : 0;
     p.grab += (grabOn - p.grab) * (1 - Math.exp(-dt * 18));
     if (target.grab) {
@@ -178,10 +180,10 @@ export class RiderModel {
     const lift = Math.max(p.legsUp, g) * 0.42;
     for (let i = 0; i < 2; i++) {
       const sx = i === 0 ? -1 : 1; // 0 = left, 1 = right
-      let fx = sx * 0.14;
+      let fx = sx * (0.14 + 0.1 * p.wide);
       let fy = lift;
       let fz = 0;
-      let yaw = 0;
+      let yaw = sx * 0.3 * p.press; // press: skis cross into an X
       if (g > 0.01) {
         if (name === 'mute' || name === 'tail') {
           yaw = sx * 0.28 * g; // skis cross into an X
@@ -202,7 +204,7 @@ export class RiderModel {
     // Hips drop with crouch and tuck; torso pitches forward.
     const hipY = 0.95 - 0.38 * Math.max(p.crouch, p.tuck * 0.9) + lift * 0.55 - 0.1 * g;
     this.hips.position.set(0, hipY, 0.06 + 0.1 * p.tuck);
-    const pitch = -(0.25 + 0.5 * p.tuck + 0.3 * p.crouch + 0.25 * g);
+    const pitch = -(0.25 + 0.5 * p.tuck + 0.3 * p.crouch + 0.25 * g + 0.55 * p.press);
     this.hips.rotation.set(pitch, p.look * 0.35, -p.lean * 0.15);
     this.head.rotation.set(-pitch * 0.6, p.look * 1.6, 0);
     this.hips.updateMatrix();

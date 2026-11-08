@@ -241,6 +241,7 @@ function boot() {
   const n = { x: 0, y: 1, z: 0 };
   const leanQ = new THREE.Quaternion();
   const zAxis = new THREE.Vector3(0, 0, 1);
+  const xAxis = new THREE.Vector3(1, 0, 0);
   const liftPos = new THREE.Vector3();
   const liftDir = new THREE.Vector3();
   const tmp = new THREE.Vector3();
@@ -367,6 +368,8 @@ function boot() {
     } else if (r.mode === 'ground') {
       L.terrain.normal(renderPos.x, renderPos.z, n);
       pivot.set(renderPos.x + n.x * COM_HEIGHT, renderPos.y + n.y * COM_HEIGHT, renderPos.z + n.z * COM_HEIGHT);
+    } else if (r.mode === 'rail') {
+      pivot.set(renderPos.x, renderPos.y + COM_HEIGHT, renderPos.z);
     } else {
       pivot.set(renderPos.x, renderPos.y + COM_HEIGHT, renderPos.z);
     }
@@ -375,13 +378,22 @@ function boot() {
     if (r.mode === 'ground') {
       leanQ.setFromAxisAngle(zAxis, -model.pose.lean * 0.45);
       model.root.quaternion.multiply(leanQ);
+      if (r.butter) {
+        // Tip onto the nose or tail of the skis.
+        const k = Math.min(1, r.butter.time / 0.15);
+        const ang = (r.butter.kind === 'nose' ? -1 : 1) * (r.butter.deep ? 36 : 24) * (Math.PI / 180) * k;
+        model.root.quaternion.multiply(leanQ.setFromAxisAngle(xAxis, ang));
+        model.root.position.y += 0.25 * k;
+      }
     }
 
     absorb = Math.max(0, absorb - dt);
     const a = r.air;
     model.update(
       {
-        crouch: r.mode === 'ground' ? Math.max(r.load, absorb > 0 ? 0.9 : 0) : r.mode === 'air' ? 0.25 : 0.6,
+        crouch: r.mode === 'ground' ? Math.max(r.load, absorb > 0 ? 0.9 : 0) : r.mode === 'air' ? 0.25 : r.mode === 'rail' ? 0.35 : 0.6,
+        press: r.mode === 'rail' && r.rail.press ? 1 : 0,
+        wide: r.mode === 'rail' ? 1 : 0,
         tuck: r.mode === 'ground' && r.tucking ? 1 : 0,
         legsUp: r.mode === 'air' ? 0.35 : 0,
         lean: r.mode === 'ground' ? r.lean : 0,

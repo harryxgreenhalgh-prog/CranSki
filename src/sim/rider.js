@@ -2,7 +2,7 @@
 // Same inputs in, same run out, so replays and server re-rides can come later.
 
 import { Vector3, Quaternion, Matrix4 } from 'three';
-import { DT, PHYS, AIR, LAND, CRASH } from './constants.js';
+import { DT, PHYS, AIR, LAND, CRASH, RAIL, BUTTER } from './constants.js';
 import { OFF_AXIS } from './tricks.js';
 
 const DEG = Math.PI / 180;
@@ -19,6 +19,9 @@ const _m = new Matrix4();
 const _q = new Quaternion();
 const _q2 = new Quaternion();
 const _prev = new Vector3();
+const _p = new Vector3();
+const _d = new Vector3();
+const UPV = new Vector3(0, 1, 0);
 
 function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v;
@@ -49,6 +52,7 @@ export const EMPTY_INPUT = Object.freeze({
   up: false, // up arrow (rodeo / misty modifier)
   pop: false, // Space held
   grab: [false, false, false],
+  butter: false, // B held (with S = tail butter)
 });
 
 export class Rider {
@@ -78,6 +82,13 @@ export class Rider {
     this.pendingPopTimer = 0;
     this.prevPop = false;
     this.prevGrab = [false, false, false];
+    this.prevSteer = 0;
+    this.prevButter = false;
+    this.rail = null; // on a rail: { rail, d, dir, speed, stance, ... }
+    this.railCooldown = 0;
+    this.lastRail = -1;
+    this.butter = null; // pressing a butter: { kind, time, turned, carry, deep, fromLanding }
+    this.butterCooldown = 0;
     this.lean = 0; // visual carve lean, -1..1
     this.tucking = false;
     this.braking = false;
@@ -204,11 +215,16 @@ export class Rider {
 
   step(input) {
     this.time += DT;
+    if (this.railCooldown > 0) this.railCooldown -= DT;
+    if (this.butterCooldown > 0) this.butterCooldown -= DT;
     if (this.mode === 'ground') this._stepGround(input);
     else if (this.mode === 'air') this._stepAir(input);
+    else if (this.mode === 'rail') this._stepRail(input);
     else this._stepCrash(input);
-    this._collide();
+    if (this.mode !== 'rail') this._collide();
     this.prevPop = input.pop;
+    this.prevSteer = input.steer;
+    this.prevButter = !!input.butter;
     for (let i = 0; i < 3; i++) this.prevGrab[i] = input.grab[i];
   }
 
@@ -225,22 +241,38 @@ export class Rider {
       this.windup = clamp(this.windup - input.steer * PHYS.windupRate * DT, -1, 1);
     }
 
-    this.tucking = input.tuck && !input.pop;
-    this.braking = input.brake;
+    // Butters: B arms a nose press, B + S a tail press.
+    if (!this.butter && input.butter && !this.prevButter && this.butterCooldown <= 0 && !input.pop) {
+      this.butter = { kind: input.brake ? 'tail' : 'nose', time: 0, turned: 0, carry: 0, deep: false, fromLanding: false };
+    }
+    const B = this.butter;
+    this.tucking = input.tuck && !input.pop && !B;
+    this.braking = input.brake && !B;
 
     // Steering: rotate the skis, and carry most of the velocity round with them.
     const speedT = clamp(speed / 45, 0, 1);
     let turnRate = PHYS.turnRateSlow + (PHYS.turnRateFast - PHYS.turnRateSlow) * speedT;
     if (this.braking) turnRate = PHYS.turnRateSlide;
     if (input.pop) turnRate *= 0.5;
-    let dYaw = -input.steer * turnRate * DT;
+    let dYaw = B ? 0 : -input.steer * turnRate * DT;
     if (this.straighten > 0) {
       this.straighten -= DT;
     }
+    let butterYaw = 0;
+    if (B) {
+      B.time += DT;
+      // A/D turns the press (up to a half turn); a butter landing carries its spin.
+      B.carry *= Math.exp(-2.2 * DT);
+      let rate = -input.steer * BUTTER.turnRate + B.carry;
+      const limit = B.fromLanding ? 400 : BUTTER.maxTurn;
+      if (Math.abs(B.turned + rate * DT) > limit) rate = 0;
+      butterYaw = rate * DT;
+      B.turned += butterYaw;
+    }
     if (!projectOnPlane(this.skiDir, n, _f)) projectOnPlane(this.vel, n, _f);
     this.skiDir.copy(_f);
-    if (dYaw !== 0) {
-      _q.setFromAxisAngle(n, dYaw);
+    if (dYaw !== 0 || butterYaw !== 0) {
+      _q.setFromAxisAngle(n, dYaw + butterYaw * DEG);
       this.skiDir.applyQuaternion(_q);
     }
     this.lean += (input.steer * (0.3 + 0.7 * speedT) - this.lean) * Math.min(1, DT * 8);
@@ -266,7 +298,7 @@ export class Rider {
 
     // Grip: scrub sideways slip. Powerslides slip more (and that slip is lost speed).
     const lat = this.vel.dot(_r);
-    const grip = this.braking ? PHYS.gripSlide : PHYS.gripCarve;
+    const grip = this.braking || B ? PHYS.gripSlide : PHYS.gripCarve;
     this.vel.addScaledVector(_r, -lat * (1 - Math.exp(-grip * DT)));
 
     // Snap the skis toward the travel line after a sideways landing.
@@ -282,7 +314,7 @@ export class Rider {
     if (sp > 1e-4) {
       const drag = (this.tucking ? PHYS.dragTuck : PHYS.dragStand) * sp * sp;
       const fric = PHYS.snowFriction * PHYS.gravity * Math.max(0, -gn / PHYS.gravity);
-      let decel = drag + fric + (this.braking ? PHYS.brakeDecel : 0);
+      let decel = drag + fric + (this.braking ? PHYS.brakeDecel : 0) + (B ? BUTTER.drag : 0);
       decel = Math.min(decel * DT, sp);
       this.vel.multiplyScalar((sp - decel) / sp);
     }
@@ -303,6 +335,16 @@ export class Rider {
     // Switch detection.
     const vf = this.vel.dot(_f);
     if (this.vel.length() > 1.0) this.switchStance = vf < 0;
+
+    // End of a butter: release early to rebound; it lasts at most 1.5 s.
+    let rebound = 0;
+    if (B && (!input.butter || B.time >= BUTTER.maxTime)) {
+      if (!input.butter && B.time < BUTTER.maxTime && B.time > 0.2) rebound = BUTTER.rebound;
+      this.events.push({ type: 'butter', kind: B.kind, time: B.time, turned: B.turned, deep: B.deep, fromLanding: B.fromLanding });
+      this.butter = null;
+      this.butterCooldown = BUTTER.cooldown;
+      this.straighten = 0.4;
+    }
 
     // Release pop.
     let popImpulse = 0;
@@ -327,6 +369,7 @@ export class Rider {
 
     // Move.
     const prevPos = _prev.copy(this.pos);
+    if (rebound > 0) popImpulse = rebound;
     const popped = popImpulse > 0;
     if (popped) this.vel.addScaledVector(n, popImpulse);
     this.pos.addScaledVector(this.vel, DT);
@@ -349,10 +392,200 @@ export class Rider {
         this.vel.addScaledVector(n, this.pendingPop);
       }
       this._takeoff(prevPos, n);
+      return;
+    }
+    // Ride onto a box or rail from the snow.
+    this._tryRail();
+
+    // A lined-up rail lip guides you onto the bar.
+    const lip = t.railLipAt(this.pos.x, this.pos.z);
+    if (lip && this.mode === 'ground') this._lipAssist(lip.rail);
+  }
+
+  _lipAssist(rail) {
+    const t = this.terrain;
+    t.railPoint(rail, 0, _p, _d);
+    _d.y = 0;
+    _d.normalize();
+    const hv = _b.set(this.vel.x, 0, this.vel.z);
+    const sp = hv.length();
+    if (sp < 2) return;
+    hv.multiplyScalar(1 / sp);
+    const ang = Math.acos(clamp(hv.dot(_d), -1, 1)) / DEG;
+    if (ang > RAIL.lipAssistAngle) return; // aim away and you pass by
+    // Sideways offset from the rail line, removed smoothly.
+    const ox = this.pos.x - _p.x;
+    const oz = this.pos.z - _p.z;
+    const along = ox * _d.x + oz * _d.z;
+    const lx = ox - _d.x * along;
+    const lz = oz - _d.z * along;
+    const k = Math.min(1, RAIL.lipAssist * DT);
+    this.pos.x -= lx * k;
+    this.pos.z -= lz * k;
+    // Turn travel toward the rail direction too.
+    const vy = this.vel.y;
+    _b.copy(_d).multiplyScalar(sp);
+    this.vel.x += (_b.x - this.vel.x) * k;
+    this.vel.z += (_b.z - this.vel.z) * k;
+    this.vel.y = vy;
+  }
+
+  // Catch a rail from the air (or from the snow for low boxes).
+  _tryRail() {
+    const t = this.terrain;
+    const list = t.railsNear(-this.pos.z);
+    if (!list) return false;
+    const inAir = this.mode === 'air';
+    for (const rail of list) {
+      if (rail.index === this.lastRail && this.railCooldown > 0) continue;
+      const near = t.railNearest(rail, this.pos.x, this.pos.z);
+      if (near.dist > (inAir ? RAIL.captureAir : RAIL.captureGround)) continue;
+      const dy = this.pos.y - near.y;
+      if (inAir) {
+        if (dy < -0.45 || dy > 1.2 || this.vel.y > 2.5) continue;
+        _a.set(0, 1, 0).applyQuaternion(this.q);
+        if (_a.y < 0.6) continue;
+      } else if (dy < -0.6 || dy > 0.5) continue;
+      if (near.d >= rail.length - 0.3) continue;
+      t.railPoint(rail, near.d, _p, _d);
+      const along = this.vel.dot(_d);
+      if (Math.abs(along) < 2) continue;
+      if (this.butter) continue; // no butters on rails or boxes
+      this._enterRail(rail, near.d, Math.sign(along), Math.abs(along));
+      return true;
+    }
+    return false;
+  }
+
+  _enterRail(rail, d, dir, speed) {
+    // Stance: body yaw relative to the rail, snapped to quarter turns.
+    const t = this.terrain;
+    t.railPoint(rail, d, _p, _d);
+    _d.multiplyScalar(dir);
+    const fb = _f.set(0, 0, -1).applyQuaternion(this.q);
+    fb.y = 0;
+    _d.y = 0;
+    let stance = 0;
+    if (fb.lengthSq() > 1e-4 && _d.lengthSq() > 1e-4) {
+      fb.normalize();
+      _d.normalize();
+      const cross = _d.z * fb.x - _d.x * fb.z; // + when the body is turned left of travel
+      stance = Math.round((Math.atan2(cross, _d.dot(fb)) / DEG) / 90) * 90;
+    }
+    if (stance <= -180) stance += 360;
+    if (stance > 180) stance -= 360;
+    const fromAir = this.mode === 'air' ? this.air : null;
+    this.rail = { rail, d, dir, speed, stance, stanceVis: stance, swaps: 0, hops: 0, time: 0, hopY: 0, hopV: 0, popTime: 0, press: false, pressTime: 0, fromAir };
+    this.mode = 'rail';
+    this.air = null;
+    this.butter = null;
+    this.omega.set(0, 0, 0);
+    this.load = 0;
+    this.windup = 0;
+    this.events.push({ type: 'railOn', kind: rail.kind, stance });
+    this._railOrientation();
+  }
+
+  _railOrientation() {
+    const R = this.rail;
+    this.terrain.railPoint(R.rail, R.d, _p, _d);
+    _d.multiplyScalar(R.dir);
+    _d.y = 0;
+    if (_d.lengthSq() < 1e-6) _d.set(0, 0, -1);
+    _d.normalize();
+    _q.setFromAxisAngle(UPV, R.stanceVis * DEG);
+    _d.applyQuaternion(_q);
+    basisQuat(_d, UPV, this.q);
+    this.skiDir.copy(_d);
+  }
+
+  // ---------------------------------------------------------------- on a rail
+  _stepRail(input) {
+    const t = this.terrain;
+    const R = this.rail;
+    R.time += DT;
+    t.railPoint(R.rail, R.d, _p, _d);
+    // Rails keep your speed; downhill rails add speed.
+    R.speed += (-PHYS.gravity * _d.y * R.dir - RAIL.friction) * DT;
+    if (R.speed < 0.8) {
+      this._exitRail(input, 0);
+      return;
+    }
+    R.d += R.dir * R.speed * DT;
+
+    // A/D locks a quarter-turn swap (two per rail).
+    if (input.steer !== 0 && this.prevSteer === 0 && R.swaps < RAIL.maxSwaps && R.hopY === 0) {
+      R.stance += input.steer < 0 ? 90 : -90;
+      if (R.stance > 180) R.stance -= 360;
+      if (R.stance <= -180) R.stance += 360;
+      R.swaps++;
+      this.events.push({ type: 'railTrick', what: 'SWAP' });
+    }
+    let dv = R.stance - R.stanceVis;
+    dv = ((dv + 540) % 360) - 180;
+    R.stanceVis += dv * Math.min(1, DT / RAIL.swapTime);
+
+    // Space: tap to hop, hold to press. A hop near the end pops you off.
+    if (input.pop) {
+      R.popTime += DT;
+      R.press = R.popTime >= RAIL.pressTime && R.hopY === 0;
+      if (R.press) R.pressTime += DT;
+    } else if (this.prevPop) {
+      if (R.popTime < RAIL.pressTime && R.hopY === 0) {
+        const remaining = R.dir > 0 ? R.rail.length - R.d : R.d;
+        if (remaining < RAIL.endZone) {
+          this._exitRail(input, RAIL.endPop);
+          return;
+        }
+        R.hopV = RAIL.hopSpeed;
+        R.hops++;
+        this.events.push({ type: 'railTrick', what: 'HOP' });
+      }
+      R.popTime = 0;
+      R.press = false;
+    }
+    if (R.hopV !== 0 || R.hopY > 0) {
+      R.hopY += R.hopV * DT;
+      R.hopV -= PHYS.gravity * DT;
+      if (R.hopY <= 0) {
+        R.hopY = 0;
+        R.hopV = 0;
+      }
+    }
+
+    if (R.d >= R.rail.length || R.d <= 0) {
+      R.d = Math.max(0, Math.min(R.rail.length, R.d));
+      this._exitRail(input, 0);
+      return;
+    }
+    t.railPoint(R.rail, R.d, _p, _d);
+    this.pos.set(_p.x, _p.y + R.hopY, _p.z);
+    this.vel.copy(_d).multiplyScalar(R.dir * R.speed);
+    this.vel.y += R.hopV;
+    this._railOrientation();
+  }
+
+  _exitRail(input, pop) {
+    const R = this.rail;
+    this.events.push({ type: 'railOff', kind: R.rail.kind, time: R.time, swaps: R.swaps, hops: R.hops, press: R.pressTime, stance: R.stance });
+    this.lastRail = R.rail.index;
+    this.railCooldown = 0.5;
+    this.vel.y += RAIL.exitPop + pop;
+    this.rail = null;
+    this.switchStance = Math.abs(R.stance) > 90;
+    this._takeoff(this.pos, UPV, { fromRail: true, stance: R.stance });
+    // Spin carries off the end; W/S held off a kick-up starts a flip.
+    const air = this.air;
+    if (input.steer) {
+      air.family = 'spin';
+      this.omega.y = -input.steer * AIR.spinRate;
+    } else if (input.tuck || input.brake) {
+      air.family = 'flip';
+      this.omega.x = ((input.brake ? 1 : 0) - (input.tuck ? 1 : 0)) * AIR.flipRate * 0.7;
     }
   }
 
-  _takeoff(prevPos, n) {
+  _takeoff(prevPos, n, opts = {}) {
     const t = this.terrain;
     // Uphill hops score nothing: is the snow rising along the direction of travel?
     _b.copy(this.vel);
@@ -363,6 +596,7 @@ export class Rider {
       const rise = -(n.x * _b.x + n.z * _b.z) / n.y;
       uphill = rise > 0.05 && rise < 1.2 && !t.onKickerFace(prevPos.x, prevPos.z);
     }
+    if (opts.fromRail) uphill = false;
     const windSpin = Math.sign(this.windup);
     this.air = {
       time: 0,
@@ -385,6 +619,8 @@ export class Rider {
       windupTimer: Math.abs(this.windup) * PHYS.windupThrowTime,
       windupSign: windSpin,
       aligning: false,
+      fromRail: !!opts.fromRail,
+      railStance: opts.stance || 0,
     };
     this.omega.set(0, 0, 0);
     // A thrown wind-up starts the spin straight away.
@@ -394,7 +630,8 @@ export class Rider {
     this.pendingPop = 0;
     this.pendingPopTimer = 0;
     this.mode = 'air';
-    this.events.push({ type: 'takeoff', uphill });
+    this.butter = null;
+    this.events.push({ type: 'takeoff', uphill, fromRail: !!opts.fromRail });
   }
 
   // ---------------------------------------------------------------- in the air
@@ -433,7 +670,12 @@ export class Rider {
 
     // Rotation inputs, in body-axis signs: +y spin left, +x backflip, +z roll left.
     let spinIn = -input.steer;
-    const flipIn = (input.brake ? 1 : 0) - (input.tuck ? 1 : 0);
+    let flipIn = (input.brake ? 1 : 0) - (input.tuck ? 1 : 0);
+    if (input.butter) {
+      // Holding B for a butter landing: W/S tip the skis forward/back instead of flipping.
+      air.deepPitch = clamp((air.deepPitch || 0) + flipIn * 70 * DT, -55, 55);
+      flipIn = 0;
+    }
     const rollIn = -input.roll;
     if (air.windupTimer > 0) {
       air.windupTimer -= DT;
@@ -507,9 +749,12 @@ export class Rider {
       const py = this.pos.y + this.vel.y * tau - 0.5 * PHYS.gravity * tau * tau;
       if (py < t.height(px, pz) + 0.3 || this.pos.y - gy < 1.2) {
         air.aligning = true;
-        this._alignForLanding(px, pz);
+        this._alignForLanding(px, pz, input.butter ? air.deepPitch || 0 : 0);
       }
     }
+
+    // Catch a rail on the way down.
+    if (this._tryRail()) return;
 
     // Touchdown?
     if (this.pos.y <= gy) {
@@ -530,7 +775,7 @@ export class Rider {
     this.air.roll += dz;
   }
 
-  _alignForLanding(px, pz) {
+  _alignForLanding(px, pz, pitch = 0) {
     const n = this.terrain.normal(px, pz, _n);
     // Travel direction along the landing slope.
     if (!projectOnPlane(this.vel, n, _g)) return;
@@ -547,6 +792,7 @@ export class Rider {
       else target = _r; // too far round: just level out, keep the yaw
     }
     basisQuat(target.clone(), n, _q2);
+    if (pitch) _q2.multiply(_q.setFromAxisAngle(_a.set(1, 0, 0), pitch * DEG));
     // Body-frame delta from current to target, limited by the align rate.
     const maxStep = AIR.alignRate * DEG * DT;
     _q.copy(this.q).invert().multiply(_q2); // delta in body frame
@@ -585,11 +831,23 @@ export class Rider {
     const rotHeld =
       (input.steer !== 0 || input.tuck || input.brake || input.roll !== 0) && this.omega.length() > LAND.maxSpinHeld;
     const grabHeld = input.grab[0] || input.grab[1] || input.grab[2];
+    const butterLand = !!input.butter && scoredAir;
+    const impact = -this.vel.dot(n);
 
     let quality;
     let keep = 1;
     let reason = '';
-    if (tiltErr > LAND.maxTilt) {
+    if (butterLand && impact > BUTTER.faceplantImpact) {
+      quality = 'crash';
+      reason = 'faceplant';
+    } else if (butterLand && pitchErr > BUTTER.deepMax) {
+      quality = 'crash';
+      reason = 'too deep';
+    } else if (butterLand && !grabHeld && tiltErr <= LAND.maxTilt) {
+      // Landing into a butter keeps the spin going; sideways is fine.
+      quality = folded <= LAND.sidewaysYaw ? 'clean' : 'saved';
+      keep = quality === 'clean' ? 1 : 0.5;
+    } else if (tiltErr > LAND.maxTilt) {
       quality = 'crash';
       reason = bodyUp.dot(n) < 0 ? 'head first' : 'over-rotated';
     } else if (scoredAir && (rotHeld || grabHeld)) {
@@ -609,7 +867,9 @@ export class Rider {
       quality,
       keep,
       reason,
-      stomped: quality === 'clean' && pitchErr > LAND.stompedPitch,
+      stomped: quality === 'clean' && pitchErr > LAND.stompedPitch && !butterLand,
+      butter: butterLand && quality !== 'crash',
+      deep: butterLand && pitchErr >= BUTTER.deepMin,
       switchLand,
       yawErr: folded,
       tiltErr,
@@ -637,6 +897,18 @@ export class Rider {
       this.mode = 'ground';
       this.groundTime = 0;
       this.straighten = quality === 'clean' ? 0.25 : 0.7;
+      if (butterLand) {
+        // Into a butter: nose if the tips were down, tail if they were up.
+        this.butter = {
+          kind: fbRaw.dot(n) < 0 ? 'nose' : 'tail',
+          time: 0,
+          turned: 0,
+          carry: this.omega.y,
+          deep: pitchErr >= BUTTER.deepMin,
+          fromLanding: true,
+        };
+        this.straighten = 0;
+      }
       this.omega.set(0, 0, 0);
       this._groundOrientation();
     }

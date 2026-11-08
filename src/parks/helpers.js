@@ -38,6 +38,11 @@ export function stairs(s, u, len, width = 10) {
   return { type: 'stairs', s, u, len, width };
 }
 
+// A rail (or box, pipe, kink, snake, rainbow, handrail) with optional blue-painted lip.
+export function rail(s, u, len, kind = 'rail', extra = {}) {
+  return { s, u, len, kind, lip: true, ...extra };
+}
+
 // Profile helper: a run of slope points that holds `angle` from s0 to s1.
 export function hold(s0, s1, angle) {
   return [

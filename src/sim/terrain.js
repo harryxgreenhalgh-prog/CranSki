@@ -201,8 +201,18 @@ export class Terrain {
       c.hw = c.lipU + c.deck;
     }
 
+    // Rails bring their own blue-painted lips (small kickers) as features.
+    const railDefs = park.rails || [];
+    const lipDefs = [];
+    railDefs.forEach((r, i) => {
+      if (!r.lip) return;
+      const gap = r.lipGap ?? 1.2;
+      const face = r.lipFace ?? 4.5;
+      lipDefs.push({ type: 'jump', s: r.s - gap - face, u: r.u ?? 0, face, lip: r.lipAngle ?? 20, gap: 0, width: 3.2, side: 1.5, back: 35, railLip: i });
+    });
+
     // Features in lookup buckets along s.
-    this.features = (park.features || []).map(resolveFeature);
+    this.features = [...(park.features || []), ...lipDefs].map(resolveFeature);
     this.buckets = [];
     for (const f of this.features) {
       if (f.visualOnly) continue;
@@ -224,6 +234,7 @@ export class Terrain {
     }
 
     this.lipHeight = park.profileKicker ? this.profile(park.profileKicker.lipS) : 0;
+    this._buildRails(railDefs);
     this._buildTrees();
     this._buildObstacles();
   }
@@ -405,6 +416,121 @@ export class Terrain {
       }
     }
     return lines;
+  }
+
+  // Rails become polylines of world points along their top.
+  _buildRails(defs) {
+    this.rails = [];
+    this.railBuckets = [];
+    defs.forEach((d, i) => {
+      const kind = d.kind || 'rail';
+      const u0 = d.u ?? 0;
+      const len = d.len;
+      const lipF = this.features.find((f) => f.railLip === i);
+      const startH = d.h ?? (lipF ? lipF.lipH + 0.35 : 0.35);
+      const endH = d.endH ?? (kind === 'box' && !lipF ? 0.35 : Math.min(startH, 1.1));
+      const n = kind === 'rainbow' || kind === 'snake' ? 24 : kind === 'kink' ? 4 : kind === 'follow' ? Math.max(4, Math.ceil(len / 2)) : 2;
+      const pts = [];
+      for (let k = 0; k < n; k++) {
+        const t = k / (n - 1);
+        const s = d.s + t * len;
+        let u = u0;
+        if (kind === 'snake') u += 1.6 * Math.sin(t * Math.PI * 2);
+        const x = this.center(s) + u;
+        let y;
+        if (kind === 'kink') {
+          // flat - down - flat, following the snow at the kinks
+          y = this.height(x, -s) + startH + (endH - startH) * t;
+        } else if (kind === 'follow') {
+          y = this.height(x, -s) + startH;
+        } else {
+          y = null; // straight between the end heights, filled in below
+        }
+        if (kind === 'rainbow') y = this.height(x, -s) + startH + (d.arc ?? 1.4) * Math.sin(Math.PI * t);
+        pts.push({ x, y, z: -s, s });
+      }
+      if (pts[0].y === null) {
+        const a = pts[0];
+        const b = pts[pts.length - 1];
+        const ya = this.height(a.x, a.z) + startH;
+        const yb = this.height(b.x, b.z) + endH;
+        pts.forEach((p, k) => (p.y = ya + ((yb - ya) * k) / (pts.length - 1)));
+      }
+      // Cumulative length.
+      const cum = [0];
+      for (let k = 1; k < pts.length; k++) {
+        const a = pts[k - 1];
+        const b = pts[k];
+        cum.push(cum[k - 1] + Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z));
+      }
+      const rail = { index: i, kind, pts, cum, length: cum[cum.length - 1], radius: kind === 'pipe' ? 0.35 : kind === 'box' ? 0.2 : 0.05, lip: lipF || null, def: d };
+      this.rails.push(rail);
+      for (let b = Math.floor((d.s - 2) / BUCKET); b <= Math.floor((d.s + len + 2) / BUCKET); b++) {
+        if (b >= 0) (this.railBuckets[b] ||= []).push(rail);
+      }
+    });
+  }
+
+  railsNear(s) {
+    const b = Math.floor(s / BUCKET);
+    return b >= 0 ? this.railBuckets[b] || null : null;
+  }
+
+  // Point and unit direction on a rail at distance d along it.
+  railPoint(rail, d, outPos, outDir) {
+    d = Math.max(0, Math.min(rail.length, d));
+    let k = 1;
+    while (k < rail.cum.length - 1 && rail.cum[k] < d) k++;
+    const a = rail.pts[k - 1];
+    const b = rail.pts[k];
+    const seg = rail.cum[k] - rail.cum[k - 1] || 1;
+    const t = (d - rail.cum[k - 1]) / seg;
+    outPos.x = a.x + (b.x - a.x) * t;
+    outPos.y = a.y + (b.y - a.y) * t;
+    outPos.z = a.z + (b.z - a.z) * t;
+    if (outDir) {
+      outDir.x = (b.x - a.x) / seg;
+      outDir.y = (b.y - a.y) / seg;
+      outDir.z = (b.z - a.z) / seg;
+    }
+    return outPos;
+  }
+
+  // Closest point on a rail to (x, z) in plan view: { d, dist, y }.
+  railNearest(rail, x, z) {
+    let best = null;
+    for (let k = 1; k < rail.pts.length; k++) {
+      const a = rail.pts[k - 1];
+      const b = rail.pts[k];
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const l2 = dx * dx + dz * dz || 1;
+      let t = ((x - a.x) * dx + (z - a.z) * dz) / l2;
+      t = Math.max(0, Math.min(1, t));
+      const px = a.x + dx * t;
+      const pz = a.z + dz * t;
+      const dist = Math.hypot(x - px, z - pz);
+      if (!best || dist < best.dist) {
+        best = { d: rail.cum[k - 1] + (rail.cum[k] - rail.cum[k - 1]) * t, dist, y: a.y + (b.y - a.y) * t, t, k };
+      }
+    }
+    return best;
+  }
+
+  // The rail whose lip face you're on, if any.
+  railLipAt(x, z) {
+    const s = -z;
+    const b = Math.floor(s / BUCKET);
+    const list = b >= 0 ? this.buckets[b] : null;
+    if (!list) return null;
+    const u = x - this.center(s);
+    for (const f of list) {
+      if (f.railLip === undefined) continue;
+      const along = (u - f.u) * f.sin + (s - f.s) * f.cos;
+      const across = (u - f.u) * f.cos - (s - f.s) * f.sin;
+      if (along > -4 && along < f.lipAlong + 0.2 && Math.abs(across) < 3) return { rail: this.rails[f.railLip], across };
+    }
+    return null;
   }
 
   _buildTrees() {

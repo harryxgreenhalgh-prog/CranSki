@@ -1,6 +1,13 @@
 // THE YARD: open-session all-rounder, ~4 km, 15 jumps and 5 rail zones,
 // with a day-night cycle and warm floodlights at night.
-import { jump, hold, forestTrees } from './helpers.js';
+import { jump, hold, forestTrees, rail } from './helpers.js';
+
+// Five rail zones, each led by a pop-on rail: a low kicker throws you over a gap onto a raised bar.
+const railZone = (s) => [
+  rail(s, -10, 14, 'rail', { lipFace: 6, lipAngle: 26, lipGap: 2.5, h: 1.7 }),
+  rail(s + 2, 0, 12, 'box', { lipFace: 3.5, lipAngle: 16, lipGap: 0.6 }),
+  rail(s, 10, 16, 'kink'),
+];
 
 const slopePoints = [
   [0, -2],
@@ -63,6 +70,7 @@ export const park = {
     jump(3440, 20, 'm'),
     jump(3440, -20, 's'),
   ],
+  rails: [...railZone(660), ...railZone(1265), ...railZone(1870), ...railZone(2515), ...railZone(3165)],
   trees: forestTrees(30, { perRow: 2, spacing: 4.2 }),
   startS: 8,
   finishS: 3880,

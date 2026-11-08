@@ -455,6 +455,74 @@ function buildNamedSigns(terrain, group) {
   }
 }
 
+function buildRails(terrain, group) {
+  const steel = new THREE.MeshStandardMaterial({ color: 0xc9d0d8, metalness: 0.8, roughness: 0.3 });
+  const legMat = new THREE.MeshLambertMaterial({ color: 0x3a3f46 });
+  const blueMat = new THREE.MeshLambertMaterial({ color: BLUE });
+  const boxMat = new THREE.MeshLambertMaterial({ color: 0x2b3440 });
+  const rainbowMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+  for (const rail of terrain.rails) {
+    const r = rail.radius;
+    const pts = rail.pts.map((p) => new THREE.Vector3(p.x, p.y - r, p.z));
+    if (rail.kind === 'box') {
+      for (let k = 1; k < pts.length; k++) {
+        const a = pts[k - 1];
+        const b = pts[k];
+        const len = a.distanceTo(b);
+        const box = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.36, len), boxMat);
+        box.position.copy(a).add(b).multiplyScalar(0.5);
+        box.lookAt(b);
+        box.castShadow = true;
+        group.add(box);
+        const top = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.04, len), blueMat);
+        top.position.copy(box.position);
+        top.position.y += 0.19;
+        top.quaternion.copy(box.quaternion);
+        group.add(top);
+      }
+    } else {
+      let curve;
+      if (rail.kind === 'rainbow' || rail.kind === 'snake') curve = new THREE.CatmullRomCurve3(pts);
+      else {
+        curve = new THREE.CurvePath();
+        for (let k = 1; k < pts.length; k++) curve.add(new THREE.LineCurve3(pts[k - 1], pts[k]));
+      }
+      const seg = Math.max(8, Math.ceil(rail.length * 2));
+      const geo = new THREE.TubeGeometry(curve, seg, Math.max(r, 0.05), rail.kind === 'pipe' ? 16 : 8, false);
+      let mat = steel;
+      if (rail.kind === 'pipe') mat = blueMat;
+      if (rail.kind === 'rainbow') {
+        // Stripes of colour along the arc.
+        const cols = [0xff4d4d, 0xffa53d, 0xffe14d, 0x52d273, 0x4da6ff, 0x9b6bff].map((c) => new THREE.Color(c));
+        const pos = geo.attributes.position;
+        const colors = new Float32Array(pos.count * 3);
+        const ring = 9;
+        for (let i = 0; i < pos.count; i++) {
+          const c = cols[Math.floor(i / ring / 4) % cols.length];
+          colors.set([c.r, c.g, c.b], i * 3);
+        }
+        geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        mat = rainbowMat;
+      }
+      const tube = new THREE.Mesh(geo, mat);
+      tube.castShadow = true;
+      group.add(tube);
+    }
+    // Supports down to the snow.
+    const step = rail.kind === 'pipe' ? 5 : 2.5;
+    const _p = { x: 0, y: 0, z: 0 };
+    for (let d = 0.6; d < rail.length; d += step) {
+      terrain.railPoint(rail, d, _p);
+      const g = terrain.height(_p.x, _p.z);
+      const h = _p.y - r - g;
+      if (h < 0.15) continue;
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, h, 6), legMat);
+      leg.position.set(_p.x, g + h / 2, _p.z);
+      group.add(leg);
+    }
+  }
+}
+
 function buildFloodlights(terrain, group) {
   const poles = [];
   const lampMat = new THREE.MeshBasicMaterial({ color: 0x555555 });
@@ -506,6 +574,7 @@ export function buildWorld(terrain, { quality = 'high' } = {}) {
   buildStairs(terrain, group);
   buildBoards(terrain, group);
   buildNamedSigns(terrain, group);
+  buildRails(terrain, group);
   const lampMat = park.floodlights ? buildFloodlights(terrain, group) : null;
   const lift = buildLift(terrain, scene);
 

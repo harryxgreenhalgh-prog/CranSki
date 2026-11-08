@@ -1,7 +1,7 @@
 // BELLEVUE: a 3 km street through an alpine village. Kickers and hips between
 // houses, rails on snow decks, gaps onto rails. The sky runs from sunrise to
 // northern lights as you ride down.
-import { jump, deck, hold } from './helpers.js';
+import { jump, deck, hold, rail } from './helpers.js';
 import { mulberry32 } from '../sim/rng.js';
 
 const HW = 13;
@@ -61,6 +61,16 @@ export const park = {
     jump(2350, 0, 'm'),
     deck(2480, 3, 30, 1.2, 8),
     jump(2650, 3, 'l', { dir: -14 }),
+  ],
+  rails: [
+    // Rails on snow decks.
+    rail(563, 0, 24, 'box', { lip: false, h: 0.4, endH: 0.4 }),
+    rail(1323, 0, 28, 'rail', { lip: false, h: 0.45, endH: 0.45 }),
+    rail(1923, -4, 22, 'rail', { lip: false, h: 0.45, endH: 0.45 }),
+    rail(2483, 3, 24, 'box', { lip: false, h: 0.4, endH: 0.4 }),
+    // Gaps onto rails.
+    rail(1040, 6, 16, 'rail', { lipGap: 3.5, lipAngle: 24, lipFace: 5.5, h: 1.6 }),
+    rail(2220, -5, 18, 'rail', { lipGap: 3.5, lipAngle: 24, lipFace: 5.5, h: 1.6 }),
   ],
   obstacles: houses,
   trees: { spacing: 6, perRow: 1, minU: HW + CURB + WALK + 6, maxU: HW + 60, seed: 5 },

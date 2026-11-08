@@ -12,6 +12,7 @@ export const CONTROLS_HTML = `
       <tr><td>W</td><td>Tuck for speed (poles on flats)</td></tr>
       <tr><td>S</td><td>Brake / powerslide</td></tr>
       <tr><td>Space</td><td>Hold to load, release to pop. A/D while loading winds up a spin</td></tr>
+      <tr><td>B / B+S</td><td>Nose / tail butter (A/D turns it)</td></tr>
       <tr><td>Hold R</td><td>Restart from the top</td></tr>
       <tr><td>F</td><td>Skip the lift</td></tr>
       <tr><td>Esc / P</td><td>Pause</td></tr>
@@ -26,6 +27,17 @@ export const CONTROLS_HTML = `
       <tr><td>↑ + spin + S/W</td><td>Rodeo / misty</td></tr>
       <tr><td>Spin + S / W</td><td>Cork / bio (within 0.25 s of the lip)</td></tr>
       <tr><td>Shift / Q / E</td><td>Mute / Tail / Japan grab</td></tr>
+      <tr><td>Hold B to land</td><td>Butter landing (tip W/S first for a deep butter)</td></tr>
+    </table>
+  </div>
+  <div>
+    <h3>ON A RAIL</h3>
+    <table>
+      <tr><td>Line up</td><td>The lip guides you onto the bar</td></tr>
+      <tr><td>A / D</td><td>Quarter-turn swap (two per rail)</td></tr>
+      <tr><td>Tap Space</td><td>Hop (near the end: pop off)</td></tr>
+      <tr><td>Hold Space</td><td>Press</td></tr>
+      <tr><td>A/D or W/S at the end</td><td>Spin or flip off</td></tr>
     </table>
   </div>
   <ul class="tips">
@@ -187,7 +199,16 @@ export class Hud {
         return;
       }
       const sw = m.switchLand ? ' · SWITCH' : '';
-      this._showTrick(m.name, `+${fmt(m.points)}`, m.bonuses, quality + sw, m.quality, 2.8);
+      const bt = m.butter ? (m.deep ? ' · DEEP BUTTER LANDING' : ' · BUTTER LANDING') : '';
+      this._showTrick(m.name, `+${fmt(m.points)}`, m.bonuses, quality + sw + bt, m.quality, 2.8);
+    } else if (m.type === 'rail') {
+      e.trick.classList.remove('crash');
+      this._showTrick(m.name, `+${fmt(m.points)}`, [{ label: 'on the bar', value: `${m.time.toFixed(1)} s` }], '', 'clean', 2.4);
+    } else if (m.type === 'railTrick') {
+      this.hint(`${m.what} +${m.points}`, 0.9);
+    } else if (m.type === 'butter') {
+      e.trick.classList.remove('crash');
+      this._showTrick(m.name, `+${fmt(m.points)}`, [], '', 'clean', 2);
     } else if (m.type === 'crash') {
       e.trick.classList.add('crash');
       this._showTrick('BAIL LOST', m.lost > 0 ? `−${fmt(m.lost)}` : '', [], m.reason ? m.reason.toUpperCase() : '', 'crash', 2.6);

@@ -4,7 +4,7 @@
 import { DT, LAND } from './constants.js';
 import { Rider } from './rider.js';
 import { describeTrick } from './tricks.js';
-import { scoreTrick, Line, RunScore } from './scoring.js';
+import { scoreTrick, Line, RunScore, railPoints, butterPoints, SCORE } from './scoring.js';
 
 export class Run {
   constructor(terrain) {
@@ -42,7 +42,7 @@ export class Run {
       if (this.bankTimer <= 0) this._bank();
     }
 
-    if (-r.pos.z >= this.terrain.park.finishS && r.mode !== 'air') {
+    if (-r.pos.z >= this.terrain.park.finishS && r.mode !== 'air' && r.mode !== 'rail') {
       if (r.mode === 'ground') this._bank();
       this.finished = true;
       this.messages.push({ type: 'finish' });
@@ -60,6 +60,40 @@ export class Run {
   _onEvent(ev) {
     if (ev.type === 'takeoff') {
       // Taking off again before the line banked keeps it going.
+      return;
+    }
+    if (ev.type === 'railOn') {
+      this.bankTimer = 0;
+      return;
+    }
+    if (ev.type === 'railTrick') {
+      this.messages.push({ type: 'railTrick', what: ev.what, points: SCORE.railTrick });
+      return;
+    }
+    if (ev.type === 'railOff') {
+      const points = railPoints(ev.time, ev.swaps, ev.hops);
+      const KIND = { rail: 'RAIL', box: 'BOX', pipe: 'PIPE', rainbow: 'RAINBOW', kink: 'KINK', snake: 'SNAKE', follow: 'HANDRAIL' };
+      let name = `${KIND[ev.kind] || 'RAIL'} SLIDE`;
+      if (ev.press > 0.3) name += ' PRESS';
+      if (ev.swaps) name += ` · ${ev.swaps} SWAP${ev.swaps > 1 ? 'S' : ''}`;
+      if (ev.hops) name += ` · ${ev.hops} HOP${ev.hops > 1 ? 'S' : ''}`;
+      this.line.addRail(points);
+      this.score.remember(`rail|${ev.kind}|${ev.swaps}|${ev.hops}`, name, points);
+      this.messages.push({ type: 'rail', name, points, time: ev.time, lineValue: this.line.value, lineMult: this.line.multiplier });
+      return;
+    }
+    if (ev.type === 'butter') {
+      if (this.score.butters >= SCORE.buttersPerRun) return; // only the first 4 per run
+      const pts = butterPoints(ev.time, ev.turned);
+      if (pts <= 0) return;
+      this.score.butters++;
+      const t = Math.abs(ev.turned);
+      let name = t >= 330 ? 'BUTTER 360' : t >= 150 ? 'BUTTER 180' : ev.kind === 'nose' ? 'NOSE BUTTER' : 'TAIL BUTTER';
+      if (ev.deep) name = 'DEEP ' + name;
+      this.line.addButter(pts);
+      this.score.remember(`butter|${name}`, name, pts);
+      this.messages.push({ type: 'butter', name, points: pts, lineValue: this.line.value });
+      if (this.rider.mode === 'ground') this.bankTimer = LAND.bankDelay;
       return;
     }
     if (ev.type !== 'land') return;
@@ -88,6 +122,7 @@ export class Run {
       flip: a.flip,
       roll: a.roll,
       switchStance: a.switchStance,
+      fromRail: a.fromRail,
       grabs,
     });
 
@@ -114,6 +149,8 @@ export class Run {
       lineValue: this.line.value,
       lineMult: this.line.multiplier,
       switchLand: L.switchLand,
+      butter: L.butter,
+      deep: L.deep,
     });
     if (!this.line.empty) this.bankTimer = LAND.bankDelay;
   }
