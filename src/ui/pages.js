@@ -1,6 +1,8 @@
 // Text pages shown in the modal: About, How to play, Privacy, Credits, Updates,
 // and the tabs that need online play.
 import { CONTROLS_HTML } from './hud.js';
+import { TRACKS } from '../audio/music.js';
+import { SCENES } from './loading.js';
 
 export const DISCLAIMER =
   'CranSki is an independent fan-made game inspired by Cork7. It is not affiliated with, endorsed by, or connected to Cork7 or its developers. Not affiliated with SSX, EA, X Games or Red Bull.';
@@ -14,6 +16,11 @@ export const UPDATES = [
       'Butters: nose, tail, butter landings and deep butters.',
       'Deep powder on SHIRAKUMO and speed-keeping wall landings in ASPEN PIPE.',
       'Basecamp, the park map, a full pause menu and the finish line moment.',
+      'Settings: rebind keys and controller buttons, graphics levels, camera, sound and a stats overlay.',
+      'Touch controls for phones and tablets, with a layout editor.',
+      'Replays with seven cameras, a best-run ghost per park, and clips you can export.',
+      'The Locker: colours, helmets, beanies, tops, skis or snowboard, poles and your grab picks.',
+      'Loading scenes, synthesised sound effects and nine original synthwave tracks with a music player.',
     ],
   },
   {
@@ -47,8 +54,13 @@ export const PAGES = {
       <h3>LIBRARIES</h3>
       <p><a href="https://threejs.org" target="_blank" rel="noopener">Three.js</a>, MIT licence, for 3D rendering.<br>
       <a href="https://vite.dev" target="_blank" rel="noopener">Vite</a>, MIT licence, for building the site.</p>
+      <h3>MUSIC</h3>
+      <p>Original soundtrack composed for CranSki and played live by an in-browser synthesiser (no recordings, no samples). Artist: CranSki.</p>
+      <ol>${TRACKS.map((t) => `<li>${t.name}</li>`).join('')}</ol>
+      <h3>SOUND EFFECTS</h3>
+      <p>Snow, wind, rail grind, landings, the lift and the ringing ball are all synthesised in the browser for CranSki.</p>
       <h3>ART</h3>
-      <p>Every model, texture and illustration in CranSki is built from simple shapes in code, made for this game.</p>
+      <p>Every model, texture and illustration in CranSki is built from simple shapes in code, made for this game. Loading scenes: ${SCENES.map((s) => s.name).join(', ')}.</p>
       <h3>DISCLAIMER</h3>
       <p>${DISCLAIMER}</p>`,
   },

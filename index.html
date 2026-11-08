@@ -36,6 +36,28 @@
 
       <div id="liftbar" class="hidden"><span id="lift-name">GONDOLA</span><span class="muted">Riding up · <kbd>F</kbd> skip</span></div>
 
+      <!-- Loading screen (visible before the game's code arrives) -->
+      <section id="loading">
+        <div id="ld-art"></div>
+        <div class="ld-panel">
+          <div class="logo">CRANSKI</div>
+          <div id="ld-scene" class="muted"></div>
+          <div class="ld-bar"><span id="ld-fill"></span></div>
+          <div id="ld-status">Loading…</div>
+          <div id="ld-track" class="muted"></div>
+          <button id="ld-go" class="btn primary hidden">Tap or press any key</button>
+          <button id="ld-reload" class="btn hidden">Reload game</button>
+        </div>
+      </section>
+
+      <!-- Music player -->
+      <div id="musicpop" class="hidden">
+        <div class="mp-label">NOW PLAYING</div>
+        <div class="mp-name" id="mp-name"></div>
+        <div class="muted mp-artist">Original soundtrack · CranSki</div>
+        <div class="mp-row"><button class="btn sm" id="mp-play">Play</button><button class="btn sm" id="mp-skip">Skip ⏭</button><button class="btn sm" id="mp-vol">Volume</button></div>
+      </div>
+
       <!-- Basecamp lobby -->
       <section id="basecamp" class="layer hidden">
         <header class="topbar">
@@ -116,6 +138,7 @@
           <button class="btn" data-act="settings">Settings</button>
           <button class="btn" data-act="help">How to play</button>
           <button class="btn" data-act="basecamp">Back to Basecamp</button>
+          <div class="pause-music"><span>♪ <b id="pm-name"></b></span><button class="btn sm" data-act="mplay" id="pm-play">Pause</button><button class="btn sm" data-act="mskip">Skip</button></div>
           <div id="pause-help" class="hidden"></div>
           <p class="muted">Esc steps back.</p>
         </div>

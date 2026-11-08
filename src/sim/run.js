@@ -74,6 +74,10 @@ export class Run {
       // Taking off again before the line banked keeps it going.
       return;
     }
+    if (ev.type === 'ring' || ev.type === 'bump') {
+      this.messages.push({ type: ev.type, speed: ev.speed, what: ev.what });
+      return;
+    }
     if (ev.type === 'railOn') {
       this.bankTimer = 0;
       return;

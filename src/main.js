@@ -24,6 +24,10 @@ import { Ghost } from './replay/player.js';
 import { ReplayView } from './ui/replayUI.js';
 import { Locker } from './ui/locker.js';
 import { DEFAULT_LOOK } from './render/riderModel.js';
+import { startAudio } from './audio/engine.js';
+import { Sfx } from './audio/sfx.js';
+import { Music } from './audio/music.js';
+import { LoadingScreen } from './ui/loading.js';
 import { placeRider, poseFor } from './render/pose.js';
 
 const $ = (id) => document.getElementById(id);
@@ -41,6 +45,7 @@ function boot() {
   $('pause-help').innerHTML = CONTROLS_HTML;
   if (!hasWebGL2()) {
     $('nogl').classList.remove('hidden');
+    $('loading').classList.add('hidden');
     return;
   }
 
@@ -85,6 +90,11 @@ function boot() {
   let ghost = null;
   let lastReplay = null;
   const input = new Input(window);
+  const music = new Music();
+  const sfx = new Sfx();
+  const loadingScreen = new LoadingScreen();
+  loadingScreen.show(music.track.name);
+  loadingScreen.set(0.1, 'Building Basecamp…');
   const basecampScene = buildBasecamp();
 
   function resize() {
@@ -102,19 +112,25 @@ function boot() {
   let loaded = null; // { id, meta, terrain, run, world, chase, spray, hud, time }
   let loading = null;
 
-  async function loadPark(id) {
+  async function loadPark(id, progress = () => {}) {
     if (loaded && loaded.id === id) return loaded;
     if (loading && loading.id === id) return loading.promise;
     const meta = parkMeta(id);
     const promise = (async () => {
       const mod = await meta.load(); // each park is its own chunk, fetched when picked
+      progress(0.45, `Shaping ${meta.name}…`);
+      await new Promise((r) => setTimeout(r, 0));
       const terrain = new Terrain(mod.park);
+      progress(0.6, 'Planting the forest…');
+      await new Promise((r) => setTimeout(r, 0));
       const world = buildWorld(terrain, { quality: settings.graphics, renderer });
       if (loaded) loaded.world.dispose();
       const run = new Run(terrain);
       const chase = new ChaseCam(camera, terrain);
       const spray = new Spray(world.scene);
       const hud = new Hud(terrain);
+      progress(0.85, 'Warming up shaders…');
+      await new Promise((r) => setTimeout(r, 0));
       renderer.compile(world.scene, camera); // warm shaders so the first run never hitches
       loaded = { id, meta, terrain, run, world, chase, spray, hud, time: 0, quality: settings.graphics };
       return loaded;
@@ -178,7 +194,10 @@ function boot() {
     },
     onPage: (p) => openPage(p),
     onGear: () => openSettings(),
-    onMusic: () => openSoon('Music player'),
+    onMusic: () => {
+      $('musicpop').classList.toggle('hidden');
+      $('music-btn').classList.toggle('on', !$('musicpop').classList.contains('hidden'));
+    },
   });
 
   const parkMap = new ParkMap({
@@ -277,6 +296,29 @@ function boot() {
     settingsUI.open(tab);
   }
   const stats = new StatsOverlay(renderer);
+
+  // ------------------------------------------------------------ music
+  function musicUI() {
+    $('mp-name').textContent = music.track.name;
+    $('pm-name').textContent = music.track.name;
+    $('mp-play').textContent = music.playing ? 'Pause' : 'Play';
+    $('pm-play').textContent = music.playing ? 'Pause' : 'Play';
+  }
+  music.onChange(() => {
+    musicUI();
+    if (state === 'riding' && loaded) loaded.hud.hint(`♪ ${music.track.name}`, 2.5);
+  });
+  musicUI();
+  $('mp-play').addEventListener('click', () => music.toggle());
+  $('mp-skip').addEventListener('click', () => music.skip());
+  $('mp-vol').addEventListener('click', () => {
+    $('musicpop').classList.add('hidden');
+    openSettings('sound');
+  });
+  // A soft click on every menu button.
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('button')) sfx.ui();
+  });
 
   // ------------------------------------------------------------ locker
   let lockerYaw = 0;
@@ -398,19 +440,25 @@ function boot() {
 
   async function goRide() {
     blurMenus();
+    $('musicpop').classList.add('hidden');
+    $('music-btn').classList.remove('on');
     basecamp.hide();
     showOverlay(null);
     state = 'loading';
-    $('liftbar').classList.remove('hidden');
-    $('lift-name').textContent = 'LOADING';
+    const fresh = !loaded || loaded.id !== parkId;
+    if (fresh) {
+      loadingScreen.show(music.track.name);
+      loadingScreen.set(0.2, `Loading ${parkMeta(parkId).name}…`);
+    }
     try {
-      await loadPark(parkId);
+      await loadPark(parkId, (p, s) => loadingScreen.set(p, s));
     } catch (e) {
       console.error(e);
-      $('lift-name').textContent = 'COULD NOT LOAD PARK';
-      setTimeout(toBasecamp, 1500);
+      loadingScreen.set(0.2, 'Could not load the park. Check your connection.');
+      $('ld-reload').classList.remove('hidden');
       return;
     }
+    loadingScreen.hide();
     startLift();
   }
 
@@ -541,6 +589,8 @@ function boot() {
     if (act === 'settings') openSettings();
     if (act === 'help') $('pause-help').classList.toggle('hidden');
     if (act === 'basecamp') toBasecamp();
+    if (act === 'mplay') music.toggle();
+    if (act === 'mskip') music.skip();
   });
   $('results').addEventListener('click', async (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
@@ -603,6 +653,7 @@ function boot() {
   const IDLE = { crouch: 0.05, tuck: 0, legsUp: 0, lean: 0, look: 0, armsOut: 0, grab: null, grabSide: 1 };
 
   let lastDraw = 0;
+  let lastVy = 0;
   let slowFrames = 0;
   let fastFrames = 0;
   function frame(now) {
@@ -615,6 +666,18 @@ function boot() {
     time += dt;
     input.pollFrame();
     stats.update(dt);
+    {
+      const R = loaded?.run?.rider;
+      const live = (state === 'riding' || state === 'finish') && R;
+      sfx.update(
+        live
+          ? { mode: R.mode, speed: R.speed, powder: R.powder, braking: R.braking, butter: !!R.butter, active: true }
+          : state === 'replay' && replayView.isOpen
+            ? { mode: replayView.v.mode, speed: replayView.v.speed, active: true }
+            : { mode: 'none', speed: 0, active: false, lift: state === 'lift' },
+        dt
+      );
+    }
     const wantTouch = state === 'riding' && isTouchDevice() && !touchEditor.isOpen;
     if (wantTouch !== touch.enabled) {
       touch.show(wantTouch);
@@ -647,6 +710,11 @@ function boot() {
       else if (state === 'finish' && finish.t > 0.8) showResultsScreen();
       else if (state === 'lift') lift.t = lift.duration;
     } else if (state === 'lift' && input.wasPressed('skipLift')) lift.t = lift.duration;
+
+    if (state === 'boot') {
+      input.endFrame();
+      return;
+    }
 
     // -------------------------------------------- Basecamp and map: the lobby scene
     const inLobby = state === 'basecamp' || state === 'map' || state === 'locker' || (state === 'loading' && !loaded);
@@ -740,6 +808,7 @@ function boot() {
       while (acc >= DT && steps < 12) {
         prevPos.copy(r.pos);
         prevQ.copy(r.q);
+        lastVy = r.vel.y;
         if (state === 'riding') {
           recorder.push(inp);
           run.step(inp);
@@ -750,6 +819,11 @@ function boot() {
         steps++;
         if (r.mode !== prevMode) {
           if (r.mode === 'air' || prevMode === 'air') touch.haptic(); // tick on every pop and landing
+          if (r.mode === 'air') sfx.pop();
+          else if (prevMode === 'air' && r.mode === 'crash') sfx.crash();
+          else if (prevMode === 'air' && r.mode === 'ground') sfx.land(Math.abs(lastVy));
+          else if (r.mode === 'rail') sfx.tick();
+          else if (r.mode === 'crash') sfx.crash();
           if (r.mode === 'air') L.spray.burst(r.pos, r.vel, settings.graphics === 'ultra' ? 70 : 40, 3);
           if (prevMode === 'air') {
             L.spray.burst(r.pos, r.vel, r.mode === 'crash' ? 120 : 80, r.mode === 'crash' ? 6 : 4);
@@ -763,7 +837,12 @@ function boot() {
 
       for (const m of run.messages) {
         if (m.type === 'finish') startFinish();
-        else L.hud.message(m);
+        else if (m.type === 'ring') sfx.ring(m.speed);
+        else if (m.type === 'bump') sfx.thud(0.25, 140, 0.12);
+        else {
+          if (m.type === 'railTrick') sfx.tick();
+          L.hud.message(m);
+        }
       }
       run.messages.length = 0;
       if (state === 'riding') L.hud.update(run, dt);
@@ -867,7 +946,25 @@ function boot() {
     input.endFrame();
   }
 
-  toBasecamp();
+  // Boot: build Basecamp, warm its shaders, preload your last park, then wait
+  // for a tap or key (needed to start sound) before showing Basecamp.
+  state = 'boot';
+  (async () => {
+    loadingScreen.set(0.25, 'Warming up shaders…');
+    await new Promise((r) => setTimeout(r, 0));
+    placeModel(basecampScene.scene);
+    renderer.compile(basecampScene.scene, camera);
+    try {
+      await loadPark(parkId, (p, s) => loadingScreen.set(0.3 + p * 0.65, s));
+    } catch (e) {
+      console.error(e); // the park loads again when picked
+    }
+    loadingScreen.ready(() => {
+      startAudio();
+      music.play();
+      toBasecamp();
+    });
+  })();
   requestAnimationFrame((t) => {
     last = t;
     frame(t);
