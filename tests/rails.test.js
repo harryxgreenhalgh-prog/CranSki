@@ -5,6 +5,7 @@ import { Run } from '../src/sim/run.js';
 import { DT } from '../src/sim/constants.js';
 import { park as YARD } from '../src/parks/yard.js';
 import { park as BELLEVUE } from '../src/parks/bellevue.js';
+import { park as SHIRAKUMO } from '../src/parks/shirakumo.js';
 import { railPoints, butterPoints } from '../src/sim/scoring.js';
 
 // Start `back` metres above (s0, u0) heading down the course at `speed`, then let `ctl` drive.
@@ -54,7 +55,7 @@ test('butter scoring: 150 held, 300 for a 180, 600 for a 360', () => {
 });
 
 test('a lined-up lip puts you on the pop-on rail and the slide scores', () => {
-  const msgs = ride(YARD, 660, -10, 11, () => {});
+  const msgs = ride(YARD, 305, -10, 11, () => {});
   const rail = msgs.find((m) => m.type === 'rail');
   assert.ok(rail, 'got on the rail');
   assert.ok(rail.points >= 750, `points ${rail?.points}`);
@@ -62,12 +63,12 @@ test('a lined-up lip puts you on the pop-on rail and the slide scores', () => {
 });
 
 test('aim away from the lip and you pass by', () => {
-  const msgs = ride(YARD, 660, -4.5, 11, () => {});
+  const msgs = ride(YARD, 305, -4.5, 11, () => {});
   assert.equal(msgs.filter((m) => m.type === 'rail').length, 0);
 });
 
 test('swap and hop on a rail, then spin off the end', () => {
-  const msgs = ride(BELLEVUE, 1323, 0, 10, (r, k, st) => {
+  const msgs = ride(BELLEVUE, 443, 0, 10, (r, k, st) => {
     if (r.mode === 'rail') {
       if (Math.abs(st.railTime - 0.4) < DT / 2) k.steer = 1; // swap
       if (st.railTime > 0.9 && st.railTime < 1.0) k.pop = true; // hop
@@ -83,8 +84,8 @@ test('swap and hop on a rail, then spin off the end', () => {
 });
 
 test('a nose butter turned 180 scores BUTTER 180', () => {
-  const msgs = ride(YARD, 1080, 0, 10, (r, k, st, s) => {
-    if (r.mode === 'ground' && s > 1050 && s < 1062) {
+  const msgs = ride(SHIRAKUMO, 110, 0, 10, (r, k, st, s) => {
+    if (r.mode === 'ground' && s > 80 && s < 92) {
       k.butter = true;
       k.steer = -1;
     }
