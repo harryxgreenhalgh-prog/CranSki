@@ -48,6 +48,12 @@ export function notifyAccount() {
 
 export class OnlineError extends Error {}
 
+// PostgREST says a table or function doesn't exist: that part of the
+// database hasn't been set up yet (see SUPABASE_SETUP.md).
+export function notSetUp(error) {
+  return error?.code === 'PGRST202' || error?.code === 'PGRST205' || error?.code === '42P01' || error?.code === '42883';
+}
+
 function friendly(error) {
   const status = error?.status;
   const msg = String(error?.message || '');
@@ -79,7 +85,7 @@ export function startAccount() {
       await onSession(sb, data.session);
       if (linkError) {
         account.notice = /expired|invalid/i.test(linkError)
-          ? 'That sign-in link has expired or was already used. Send yourself a new one.'
+          ? 'That sign-in link has expired or was already used. Only the newest email works: send yourself a new one, and type its code here.'
           : `Sign-in failed: ${linkError}`;
       }
       if (fromLink && account.user) account.justSignedIn = true;
@@ -125,7 +131,8 @@ async function onSession(sb, session) {
   } else if (changed) emit();
 }
 
-// Email a one-time sign-in link. Opening it signs this browser in.
+// Email a one-time sign-in link and code. Opening the link, or typing the
+// code into the game, signs this browser in.
 export async function sendSignInLink(email) {
   const sb = await startAccount();
   const { error } = await sb.auth.signInWithOtp({
@@ -138,6 +145,22 @@ export async function sendSignInLink(email) {
 const signOutHooks = [];
 export function beforeSignOut(fn) {
   signOutHooks.push(fn);
+}
+
+// Sign in with the code from the email instead of its link: works on any
+// device, in any app, even when the email client has disabled the link.
+export async function verifySignInCode(email, code) {
+  const token = String(code || '').replace(/\D/g, '');
+  if (token.length < 6) throw new OnlineError('Type the whole code from the email.');
+  const sb = await startAccount();
+  const { error } = await sb.auth.verifyOtp({ email: String(email).trim(), token, type: 'email' });
+  if (error) {
+    if (error.status === 403 || /expired|invalid|token/i.test(error.message || ''))
+      throw new OnlineError('That code is wrong or has expired. Use the code from the newest email, or send a new one.');
+    throw friendly(error);
+  }
+  const { data } = await sb.auth.getSession();
+  await onSession(sb, data.session);
 }
 
 export async function signOut() {

@@ -233,6 +233,7 @@ function boot() {
     showOverlay(null);
     $('finishcard').classList.add('hidden');
     $('liftbar').classList.add('hidden');
+    $('ghosttag').classList.add('hidden');
     if (loaded) loaded.hud.show(false);
     placeModel(basecampScene.scene);
     model.root.position.set(0, COM_HEIGHT, 0);

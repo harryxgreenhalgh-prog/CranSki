@@ -1,7 +1,7 @@
 // Leaderboards: post a finished run (as its recorded inputs) to the
 // submit-run Edge Function, which re-rides it and saves the score only if it
 // matches; and read the boards.
-import { account } from './account.js';
+import { account, notSetUp } from './account.js';
 import { getClient } from './client.js';
 import { packRuns, SIM_VERSION } from '../replay/record.js';
 import { PARKS } from '../parks/index.js';
@@ -22,6 +22,7 @@ export const SUBMIT_ERRORS = {
   bad_inputs: "This run's recording couldn't be read.",
   no_leaderboard: 'This park has no leaderboard.',
   server_not_configured: "The leaderboard server isn't set up yet.",
+  server_error: 'The leaderboard server had a problem, so this run wasn\'t posted. Try again later.',
 };
 
 // { ok: true, total, best, improved, rank } or { ok: false, error, message, serverTotal }
@@ -58,7 +59,10 @@ export async function submitRun(record) {
 async function rpc(name, args) {
   const sb = await getClient();
   const { data, error } = await sb.rpc(name, args);
-  if (error) throw new Error("Couldn't load the leaderboard. Try again later.");
+  if (error) {
+    console.warn(name, error);
+    throw new Error(notSetUp(error) ? "Leaderboards aren't set up on the server yet." : "Couldn't load the leaderboard. Try again later.");
+  }
   return data || [];
 }
 

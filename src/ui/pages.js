@@ -68,7 +68,7 @@ export const PAGES = {
       <table class="ptable">
         <thead><tr><th>What</th><th>Who can see it</th></tr></thead>
         <tbody>
-          <tr><td>Your email address and sign-in history, used only to send your sign-in links. Supabase also keeps security logs of sign-ins, such as IP address and time.</td><td>Only you. Never shown to other riders.</td></tr>
+          <tr><td>Your email address and sign-in history, used only to send your sign-in emails. Supabase also keeps security logs of sign-ins, such as IP address and time.</td><td>Only you. Never shown to other riders.</td></tr>
           <tr><td>Your gamertag</td><td>Everyone (leaderboards, friend search)</td></tr>
           <tr><td>Your cloud save: settings (camera, sound, controls), personal bests and Locker choices</td><td>Only you</td></tr>
           <tr><td>Your friends and friend requests</td><td>You and that rider</td></tr>
