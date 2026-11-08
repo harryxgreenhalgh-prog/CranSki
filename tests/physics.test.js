@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Terrain } from '../src/sim/terrain.js';
+import { park as BIG_AIR } from '../src/parks/bigair.js';
 import { Run } from '../src/sim/run.js';
 import { DT } from '../src/sim/constants.js';
 
 // A scripted rider: tucks the inrun, pops at the lip, then runs `air(rider, keys)` each step.
 function ride(air = () => {}, { maxSeconds = 60 } = {}) {
-  const terrain = new Terrain();
+  const terrain = new Terrain(BIG_AIR);
   const run = new Run(terrain);
   const r = run.rider;
   const msgs = [];

@@ -63,3 +63,46 @@ export const CRASH = {
   restSpeed: 1.2, // get up once slower than this (m/s)
   getUpTime: 0.6,
 };
+
+export const POWDER = {
+  drag: 2.2, // flat extra deceleration in deep snow (m/s^2)
+  dragQuad: 0.003, // plus this times speed squared
+  sink: 0.38, // how far you sink in (m), less as you plane at speed
+  turnFactor: 0.8, // turns are a little lazier in deep snow
+  landingLoss: 0.08, // soft landings: less speed lost into the snow
+};
+
+export const PIPE = {
+  wallSlope: 0.7, // normal.y below this counts as a wall (steeper than ~45 degrees)
+  cleanKeep: 1.02, // clean wall landings keep (and pump) their speed
+  sidewaysKeep: 0.92,
+};
+
+export const RAIL = {
+  captureAir: 0.8, // horizontal distance (m) to catch a rail from the air
+  captureGround: 0.7, // ...or riding onto a box from the snow
+  friction: 0.25, // rails keep your speed (m/s^2 of drag)
+  hopSpeed: 3.4, // tap Space on the bar: a small hop back onto the rail
+  pressTime: 0.2, // hold Space this long for a press
+  maxSwaps: 2, // quarter-turn swaps per rail
+  exitPop: 1.2, // little lift as you leave the end
+  endPop: 4.2, // a hop near the end pops you off
+  endZone: 2.5, // metres from the end where a hop pops you off
+  lipAssist: 6, // how strongly a lined-up lip steers you onto the bar (1/s)
+  lipAssistAngle: 25, // degrees: lined up enough for the lip to help
+  swapTime: 0.14,
+};
+
+export const BUTTER = {
+  loadTime: 0.15,
+  maxTime: 1.5, // a press lasts up to 1.5 s
+  cooldown: 1.0,
+  turnRate: 260, // deg/s of press rotation with A/D
+  maxTurn: 180, // up to a half turn on snow (more from a butter landing)
+  drag: 2.6, // extra deceleration while pressing (m/s^2)
+  rebound: 2.4, // releasing early springs you up a little (m/s)
+  pitch: 24, // degrees the rider tips onto the ski end (visual)
+  deepMin: 18, // landing pitch for a deep butter
+  deepMax: 40, // too far and you fall
+  faceplantImpact: 15, // m/s into the snow: big jumps risk a faceplant on a butter landing
+};

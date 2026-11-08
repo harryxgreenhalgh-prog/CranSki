@@ -14,7 +14,9 @@ export const BINDINGS = {
     grab1: ['ShiftLeft', 'ShiftRight'], // Mute
     grab2: ['KeyQ'], // Tail
     grab3: ['KeyE'], // Japan
+    butter: ['KeyB'],
     restart: ['KeyR'],
+    skipLift: ['KeyF'],
     pause: ['Escape', 'KeyP'],
     confirm: ['Enter'],
   },
@@ -30,6 +32,8 @@ export const BINDINGS = {
     tuck: 7, // RT
     restart: 8, // View
     pause: 9, // Menu
+    butter: 10, // left stick click
+    skipLift: -1, // unassigned; pick one in Settings
   },
 };
 
@@ -44,6 +48,8 @@ export class Input {
     this.padPressed = new Set();
 
     target.addEventListener('keydown', (e) => {
+      // Typing in a text box (the rider name) never drives the game.
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (GAME_KEYS.has(e.code)) e.preventDefault();
       if (!e.repeat) this.pressed.add(e.code);
       this.down.add(e.code);
@@ -69,6 +75,10 @@ export class Input {
     const kb = BINDINGS.keyboard[action]?.some((c) => this.pressed.has(c));
     const pad = this.padPressed.has(action);
     return kb || pad;
+  }
+
+  pad() {
+    return this._pad();
   }
 
   _pad() {
@@ -104,6 +114,7 @@ export class Input {
     let up = this.key('up');
     let pop = this.key('pop');
     const grab = [this.key('grab1'), this.key('grab2'), this.key('grab3')];
+    let butter = this.key('butter');
 
     const pad = this._pad();
     if (pad) {
@@ -124,8 +135,9 @@ export class Input {
       grab[0] = grab[0] || btn(G.grab1);
       grab[1] = grab[1] || btn(G.grab2);
       grab[2] = grab[2] || btn(G.grab3);
+      butter = butter || btn(G.butter);
     }
-    return { steer, tuck, brake, roll, up, pop, grab };
+    return { steer, tuck, brake, roll, up, pop, grab, butter };
   }
 
   restartHeld() {

@@ -15,6 +15,8 @@ const FAMILY_NAME = {
 };
 
 const MULTI = ['', '', 'DOUBLE ', 'TRIPLE ', 'QUAD '];
+
+const GRAB_DISPLAY = { rocket: 'ROCKET AIR', truenose: 'TRUE NOSE' };
 function multiWord(n) {
   return n < MULTI.length ? MULTI[n] : `${n}X `;
 }
@@ -42,7 +44,7 @@ export function countFlips(deg) {
  * @returns {object|null} null when nothing scoreable happened
  */
 export function describeTrick(air) {
-  const { family, spin = 0, flip = 0, roll = 0, switchStance = false } = air;
+  const { family, spin = 0, flip = 0, roll = 0, switchStance = false, fromRail = false } = air;
   const grabs = (air.grabs || []).filter((g) => g.time >= GRAB_MIN_TIME);
 
   let spinDeg = 0;
@@ -94,6 +96,12 @@ export function describeTrick(air) {
     name = `${multiWord(sideflips)}SIDEFLIP${spinDeg ? ' ' + spinDeg : ''}`;
     turns = sideflips + spinDeg / 360;
     inversions = sideflips;
+  } else if (fromRail && Math.abs(spin) >= 70) {
+    // Off the end of a rail, spins count in quarter turns: 90 OUT, 270 OUT...
+    const out = Math.round(Math.abs(spin) / 90) * 90;
+    name = `${out} OUT`;
+    turns = out / 360;
+    spinDeg = out;
   } else if (spinDeg > 0) {
     name = `${spinDeg}`;
     turns = spinDeg / 360;
@@ -105,9 +113,14 @@ export function describeTrick(air) {
   for (const g of grabs) if (!grabNames.includes(g.name)) grabNames.push(g.name);
 
   const parts = [];
-  if (switchStance && name) parts.push('SWITCH');
+  if (air.board && name && spinDeg > 0) {
+    // Snowboard: direction too. Regular stance: spinning left is frontside.
+    const fs = spinDir > 0;
+    if (switchStance) parts.push(fs ? 'CAB' : 'SWITCH BS');
+    else parts.push(fs ? 'FS' : 'BS');
+  } else if (switchStance && name) parts.push('SWITCH');
   if (name) parts.push(name);
-  parts.push(...grabNames.map((g) => g.toUpperCase()));
+  parts.push(...grabNames.map((g) => GRAB_DISPLAY[g] || g.toUpperCase()));
 
   const longestGrab = grabs.reduce((m, g) => Math.max(m, g.time), 0);
 

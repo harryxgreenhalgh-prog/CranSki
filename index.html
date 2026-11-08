@@ -34,20 +34,96 @@
         <div id="hint"></div>
       </div>
 
-      <!-- Title / how to play -->
-      <section id="title" class="overlay">
-        <div class="panel">
-          <h1 class="logo">CRANSKI</h1>
-          <p class="tag">Solo · Phase 1 preview</p>
-          <div class="park-card">
-            <div>
-              <div class="park-name">BIG AIR</div>
-              <div class="park-meta">~0.8 km · one mega kicker · learn big spins</div>
-            </div>
-            <span class="picked">PICKED</span>
+      <div id="liftbar" class="hidden"><span id="lift-name">GONDOLA</span><span class="muted">Riding up · <kbd>F</kbd> skip</span></div>
+
+      <!-- Loading screen (visible before the game's code arrives) -->
+      <section id="loading">
+        <div id="ld-art"></div>
+        <div class="ld-panel">
+          <div class="logo">CRANSKI</div>
+          <div id="ld-scene" class="muted"></div>
+          <div class="ld-bar"><span id="ld-fill"></span></div>
+          <div id="ld-status">Loading…</div>
+          <div id="ld-track" class="muted"></div>
+          <button id="ld-go" class="btn primary hidden">Tap or press any key</button>
+          <button id="ld-reload" class="btn hidden">Reload game</button>
+        </div>
+      </section>
+
+      <!-- Music player -->
+      <div id="musicpop" class="hidden">
+        <div class="mp-label">NOW PLAYING</div>
+        <div class="mp-name" id="mp-name"></div>
+        <div class="muted mp-artist">Original soundtrack · CranSki</div>
+        <div class="mp-row"><button class="btn sm" id="mp-play">Play</button><button class="btn sm" id="mp-skip">Skip ⏭</button><button class="btn sm" id="mp-vol">Volume</button></div>
+      </div>
+
+      <!-- Basecamp lobby -->
+      <section id="basecamp" class="layer hidden">
+        <header class="topbar">
+          <nav class="tabs" aria-label="Basecamp">
+            <button data-tab="ride" class="on">Ride</button>
+            <button data-tab="locker">Locker</button>
+            <button data-tab="shop">Shop</button>
+            <button data-tab="pass">Pass</button>
+            <button data-tab="leaderboard">Leaderboard</button>
+            <button data-tab="replays">Replays</button>
+            <button data-tab="updates">Updates</button>
+          </nav>
+          <div class="topright">
+            <span class="brand">CRANSKI</span>
+            <span class="frost" title="FROST: earned by riding"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 2v20M3.3 7l17.4 10M3.3 17l17.4-10M9 4l3 2 3-2M9 20l3-2 3 2"/></svg><b id="frost">0</b><small>FROST</small></span>
+            <button class="pill" id="friends-btn" title="Friends arrive with online play">Friends</button>
+            <button class="icon" id="music-btn" title="Music player" aria-label="Music player"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M9 18.5a3 3 0 1 1-2-2.8V5l12-2v12.5a3 3 0 1 1-2-2.8V7.3L9 8.6z"/></svg></button>
+            <button class="icon" id="gear-btn" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-1.7-1L15 3.5h-4L10.7 6a7.4 7.4 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 1.7 1l.3 2.5h4l.3-2.5a7.4 7.4 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg></button>
           </div>
-          <button id="ride" class="btn primary">RIDE <kbd>Enter</kbd></button>
-          <div id="controls-help"></div>
+        </header>
+        <aside class="leftcol">
+          <div class="card news"><h4>LATEST UPDATE</h4><div id="news-body"></div></div>
+          <div class="card event"><h4>CHALLENGE</h4><div id="event-body"></div></div>
+          <div class="card season"><h4>SEASON PASS</h4><p class="muted">Seasons, tiers and rewards arrive with online play.</p><div class="tierbar"><span style="width: 0%"></span></div></div>
+          <div class="card podium"><h4>YOUR PODIUM</h4><ol id="podium"></ol></div>
+        </aside>
+        <div id="passcard" class="passcard">
+          <div class="pc-top"><span>LIFT PASS</span><span>ALL PARKS</span></div>
+          <input id="rider-name" maxlength="18" spellcheck="false" aria-label="Rider name" />
+          <div class="pc-meta"><span>SOLO</span><span id="pc-runs">0 runs</span></div>
+          <div class="pc-code"></div>
+        </div>
+        <div class="modes">
+          <button class="mode on" data-mode="solo">Solo <span class="picked">PICKED</span></button>
+          <button class="mode" data-mode="multi" disabled title="Needs online play (later)">Multiplayer <small>later</small></button>
+          <div class="party muted">Parties, duels and ranked arrive with online play.</div>
+        </div>
+        <button id="ride" class="btn primary ride-big">RIDE <kbd>Enter</kbd></button>
+        <nav class="footlinks">
+          <button data-page="about">About</button>·<button data-page="howto">How to play</button>·<button data-page="privacy">Privacy</button>·<button data-page="credits">Credits</button>·<button data-page="updates">Updates</button>
+        </nav>
+      </section>
+
+      <!-- Park map -->
+      <section id="map" class="overlay hidden">
+        <div class="mapwrap">
+          <div class="mapart">
+            <svg id="map-svg" viewBox="0 0 100 80" preserveAspectRatio="xMidYMid meet" aria-label="Park map"></svg>
+          </div>
+          <div class="mapside panel">
+            <h2 id="map-name">BIG AIR</h2>
+            <div id="map-purpose" class="muted"></div>
+            <table class="breakdown"><tbody>
+              <tr><td>Length</td><td id="map-length"></td></tr>
+              <tr><td>Features</td><td id="map-features"></td></tr>
+              <tr><td>Way up</td><td id="map-lift"></td></tr>
+              <tr><td>Riders here</td><td id="map-riders"></td></tr>
+              <tr><td>Your best</td><td id="map-best"></td></tr>
+              <tr><td>Leaderboard</td><td id="map-board"></td></tr>
+            </tbody></table>
+            <div class="buttons">
+              <button class="btn primary" id="map-ride">Ride <kbd>Enter</kbd></button>
+              <button class="btn" id="map-back">Back <kbd>Esc</kbd></button>
+            </div>
+            <p class="muted">Arrow keys pick a park.</p>
+          </div>
         </div>
       </section>
 
@@ -56,12 +132,26 @@
         <div class="panel narrow">
           <h2>PAUSED</h2>
           <button class="btn primary" data-act="resume">Resume</button>
+          <button class="btn" data-act="reset">Reset position</button>
           <button class="btn" data-act="restart">Restart run</button>
+          <button class="btn" data-act="map">Change park</button>
+          <button class="btn" data-act="settings">Settings</button>
           <button class="btn" data-act="help">How to play</button>
+          <button class="btn" data-act="basecamp">Back to Basecamp</button>
+          <div class="pause-music"><span>♪ <b id="pm-name"></b></span><button class="btn sm" data-act="mplay" id="pm-play">Pause</button><button class="btn sm" data-act="mskip">Skip</button></div>
           <div id="pause-help" class="hidden"></div>
-          <p class="muted">Esc or P to resume.</p>
+          <p class="muted">Esc steps back.</p>
         </div>
       </section>
+
+      <!-- Finish: rider faces the cameras beside the run summary -->
+      <div id="finishcard" class="hidden">
+        <div class="fc-park" id="fc-park"></div>
+        <div class="fc-total" id="fc-total">0</div>
+        <div class="fc-line" id="fc-best"></div>
+        <div class="fc-line" id="fc-speed"></div>
+        <div class="muted"><kbd>Enter</kbd> results</div>
+      </div>
 
       <!-- Results -->
       <section id="results" class="overlay hidden">
@@ -69,6 +159,7 @@
           <h2>RUN COMPLETE</h2>
           <div id="res-total" class="big-score">0</div>
           <div id="res-best" class="muted"></div>
+          <div id="res-frost" class="frostline"></div>
           <table class="breakdown">
             <tbody>
               <tr><td>Tricks and airtime</td><td id="res-tricks">0</td></tr>
@@ -83,12 +174,99 @@
             <div><span>Best trick</span><b id="res-trick">—</b></div>
           </div>
           <div class="buttons">
+            <button class="btn" data-act="replay">Watch replay</button>
+            <button class="btn" data-act="save">Save replay</button>
+            <button class="btn" data-act="clip">Clip</button>
             <button class="btn primary" data-act="again">Ride again <kbd>Enter</kbd></button>
-            <button class="btn" disabled title="Coming in Phase 2">Watch replay</button>
-            <button class="btn" disabled title="Coming in Phase 2">Save replay</button>
-            <button class="btn" disabled title="Coming in Phase 2">Clip</button>
-            <button class="btn" disabled title="More parks arrive in Phase 2">Map</button>
+            <button class="btn" data-act="map">Map</button>
           </div>
+        </div>
+      </section>
+
+      <!-- Locker -->
+      <section id="locker" class="hidden">
+        <div class="lk-left">
+          <h2>LOCKER</h2>
+          <nav id="locker-slots"></nav>
+          <p class="muted">Drag your rider to turn them round. Looks only: never speed or handling.</p>
+        </div>
+        <div class="lk-right panel">
+          <h3 id="locker-title"></h3>
+          <div id="locker-body"></div>
+          <div class="buttons">
+            <button class="btn primary" id="locker-save">Save look</button>
+            <button class="btn" id="locker-cancel">Back <kbd>Esc</kbd></button>
+            <span id="locker-msg" class="frostline"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Settings -->
+      <section id="settings" class="overlay hidden">
+        <div class="panel wide">
+          <div class="modal-head"><h2>SETTINGS</h2><button class="btn" id="settings-close">Close <kbd>Esc</kbd></button></div>
+          <nav class="stabs">
+            <button data-stab="controls">Controls</button><button data-stab="graphics">Graphics</button><button data-stab="camera">Camera</button><button data-stab="sound">Sound</button><button data-stab="stats">Stats</button>
+          </nav>
+          <div id="settings-body"></div>
+        </div>
+      </section>
+
+      <div id="stats" class="hidden"></div>
+
+      <!-- Touch controls (phones and tablets) and their layout editor -->
+      <div id="touch" class="hidden">
+        <div id="stick-base"><div id="stick-knob"></div></div>
+        <button id="touch-pause" aria-label="Pause">II</button>
+      </div>
+      <div id="touch-editor" class="hidden"></div>
+      <div id="toast" class="hidden"><span id="toast-text"></span><button class="btn sm" id="toast-btn">Undo</button></div>
+
+      <!-- Replay viewer -->
+      <div id="replaybar" class="hidden">
+        <div id="rp-title"></div>
+        <div class="rp-row">
+          <button class="btn sm" id="rp-play" aria-label="Play or pause">❚❚</button>
+          <input id="rp-time" type="range" min="0" max="1000" value="0" aria-label="Seek" />
+          <span id="rp-clock">0:00 / 0:00</span>
+        </div>
+        <div class="rp-row">
+          <button class="btn sm" id="rp-cam">Broadcast <kbd>C</kbd></button>
+          <button class="btn sm" id="rp-freeze">Freeze <kbd>F</kbd></button>
+          <button class="btn sm" id="rp-save">Save replay</button>
+          <button class="btn sm" id="rp-clip">Clip</button>
+          <button class="btn sm" id="rp-exit">Exit <kbd>Esc</kbd></button>
+        </div>
+        <div class="muted rp-help">Space play/pause · ←/→ seek · C camera · Free cam: W A S D, Q/E, drag to look, T to track</div>
+      </div>
+      <section id="clip" class="overlay hidden">
+        <div class="panel">
+          <div class="modal-head"><h2>CLIP</h2><button class="btn" id="clip-close">Close</button></div>
+          <p class="muted">Auto edit: cuts in before every jump and rail. Untick sections to trim, or keep the whole run.</p>
+          <label class="check"><input type="checkbox" id="clip-whole" /> Whole run</label>
+          <div id="clip-segs"></div>
+          <div class="cliprow">
+            <label>Format <select id="clip-format"><option value="wide">Wide 16:9</option><option value="vertical">Vertical 9:16</option></select></label>
+            <label>Camera <select id="clip-cam"><option>Broadcast</option><option selected>Cinematic</option><option>Follow</option><option>Action cam</option><option>Drone</option></select></label>
+            <label class="check"><input type="checkbox" id="clip-text" checked /> Trick text</label>
+          </div>
+          <p class="muted" id="clip-mime"></p>
+          <div class="buttons"><button class="btn primary" id="clip-export">Export clip</button></div>
+          <div id="clip-result"></div>
+        </div>
+      </section>
+      <div id="exporting" class="hidden">
+        <b>Rendering clip on this device…</b>
+        <progress id="clip-progress" max="1" value="0"></progress>
+        <button class="btn sm" id="clip-cancel">Cancel</button>
+      </div>
+      <div id="ghosttag" class="hidden"></div>
+
+      <!-- Pages and panels (About, How to play, Credits, coming-later tabs...) -->
+      <section id="modal" class="overlay hidden">
+        <div class="panel">
+          <div class="modal-head"><h2 id="modal-title"></h2><button class="btn" id="modal-close">Close <kbd>Esc</kbd></button></div>
+          <div id="modal-body"></div>
         </div>
       </section>
 
