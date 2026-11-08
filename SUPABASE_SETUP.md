@@ -58,3 +58,20 @@ Supabase's built-in email sender is only meant for testing. It sends a few email
 4. In **Table Editor** → `profiles`, you should see your gamertag.
 
 If the link opens a "requested path is invalid" or wrong-site page, the address isn't on the Redirect URLs list.
+
+---
+
+## 2. Cloud saves (step 2)
+
+1. **SQL Editor** → **New query**.
+2. Paste all of `supabase/migrations/20261108120100_saves.sql` and click **Run**.
+3. **Table Editor** should now list a `saves` table, marked as RLS enabled.
+
+That's all. When a signed-in rider changes a setting, sets a personal best or saves the Locker, the game merges it into their row in `saves` within a couple of seconds:
+
+- **Settings and Locker:** the most recent change wins.
+- **Personal bests:** the higher score for each park wins.
+
+Graphics level, the 30 fps cap and the touch layout stay on each device.
+
+Signed out, or offline, the game uses this browser's local saves exactly as before. Riders can only read their own row, and they can only change it through the merge function.

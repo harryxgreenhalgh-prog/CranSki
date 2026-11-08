@@ -41,6 +41,11 @@ function emit() {
   }
 }
 
+// Tell everything listening (Basecamp, the Account panel) to refresh.
+export function notifyAccount() {
+  emit();
+}
+
 export class OnlineError extends Error {}
 
 function friendly(error) {

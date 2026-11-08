@@ -31,7 +31,8 @@ import { LoadingScreen } from './ui/loading.js';
 import { loadAssets, ASSETS, preloadScenes, sceneCopy, modelBounds } from './render/assets.js';
 import { placeRider, poseFor } from './render/pose.js';
 import { account, resumeAccount, displayName } from './online/account.js';
-import { mountAccount } from './ui/accountUI.js';
+import { mountAccount, addAccountSection, esc } from './ui/accountUI.js';
+import { cloud, cloudStatusText } from './online/cloud.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -303,6 +304,12 @@ function boot() {
     basecamp.refreshAccount();
     maybeWelcome();
   });
+  // Cloud saves (Phase 3 step 2): show the status, and apply what arrives.
+  addAccountSection(() => `<h3>CLOUD SAVE</h3><p class="muted">${esc(cloudStatusText())}</p>`);
+  cloud.onApplied = (changed) => {
+    if (changed.look && state !== 'locker') model.applyLook(look());
+    if (basecamp.visible) basecamp.refresh();
+  };
   resumeAccount();
 
   let settingsReturn = null;

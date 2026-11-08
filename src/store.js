@@ -1,6 +1,13 @@
-// Local saves (this browser only). Nothing here leaves the device.
+// Local saves in this browser. When you're signed in, src/online/cloud.js
+// also copies settings, bests and Locker choices to your account.
 
 const PREFIX = 'cranski.';
+const saveListeners = new Set();
+
+// Called with (key, value) after every local save.
+export function onSave(fn) {
+  saveListeners.add(fn);
+}
 
 export function load(key, fallback) {
   try {
@@ -16,6 +23,15 @@ export function save(key, value) {
     localStorage.setItem(PREFIX + key, JSON.stringify(value));
   } catch {
     /* storage blocked or full: just don't persist */
+  }
+  for (const fn of saveListeners) fn(key, value);
+}
+
+export function remove(key) {
+  try {
+    localStorage.removeItem(PREFIX + key);
+  } catch {
+    /* nothing stored */
   }
 }
 
