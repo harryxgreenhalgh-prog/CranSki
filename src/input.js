@@ -33,6 +33,7 @@ export const BINDINGS = {
     restart: 8, // View
     pause: 9, // Menu
     butter: 10, // left stick click
+    skipLift: -1, // unassigned; pick one in Settings
   },
 };
 
@@ -74,6 +75,10 @@ export class Input {
     const kb = BINDINGS.keyboard[action]?.some((c) => this.pressed.has(c));
     const pad = this.padPressed.has(action);
     return kb || pad;
+  }
+
+  pad() {
+    return this._pad();
   }
 
   _pad() {

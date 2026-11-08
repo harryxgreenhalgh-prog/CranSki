@@ -14,7 +14,9 @@ import { Basecamp } from './ui/basecamp.js';
 import { ParkMap } from './ui/map.js';
 import { PAGES, pageHtml } from './ui/pages.js';
 import { parkMeta } from './parks/index.js';
-import { profile } from './store.js';
+import { profile, load } from './store.js';
+import { settings, saveSettings, looksLowEnd } from './settings.js';
+import { SettingsUI, StatsOverlay } from './ui/settings.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -40,6 +42,31 @@ function boot() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  // First visit on a phone or weaker machine: start in Performance, with an Undo.
+  if (load('settings', null) === null && looksLowEnd()) {
+    settings.graphics = 'performance';
+    saveSettings();
+    $('toast-text').textContent = 'Graphics set to Performance for this device.';
+    $('toast').classList.remove('hidden');
+    $('toast-btn').onclick = () => {
+      settings.graphics = 'high';
+      saveSettings();
+      applyQuality();
+      $('toast').classList.add('hidden');
+    };
+    setTimeout(() => $('toast').classList.add('hidden'), 9000);
+  }
+
+  let dynRes = 1; // Performance mode scales the resolution to hold the frame rate
+  function applyQuality() {
+    const q = settings.graphics;
+    renderer.shadowMap.enabled = q !== 'performance';
+    const dpr = window.devicePixelRatio || 1;
+    const base = q === 'ultra' ? Math.min(dpr, 2) : q === 'high' ? Math.min(dpr, 1.5) : Math.min(dpr, 1);
+    renderer.setPixelRatio(base * (q === 'performance' ? dynRes : 1));
+  }
+  applyQuality();
 
   const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 6000);
   const model = new RiderModel();
@@ -68,14 +95,14 @@ function boot() {
     const promise = (async () => {
       const mod = await meta.load(); // each park is its own chunk, fetched when picked
       const terrain = new Terrain(mod.park);
-      const world = buildWorld(terrain, { quality: 'high' });
+      const world = buildWorld(terrain, { quality: settings.graphics, renderer });
       if (loaded) loaded.world.dispose();
       const run = new Run(terrain);
       const chase = new ChaseCam(camera, terrain);
       const spray = new Spray(world.scene);
       const hud = new Hud(terrain);
       renderer.compile(world.scene, camera); // warm shaders so the first run never hitches
-      loaded = { id, meta, terrain, run, world, chase, spray, hud, time: 0 };
+      loaded = { id, meta, terrain, run, world, chase, spray, hud, time: 0, quality: settings.graphics };
       return loaded;
     })();
     loading = { id, promise };
@@ -84,6 +111,18 @@ function boot() {
     } finally {
       loading = null;
     }
+  }
+
+  // Graphics level changed: rebuild the park scene around the current run.
+  function rebuildWorld() {
+    if (!loaded || loaded.quality === settings.graphics) return;
+    const L = loaded;
+    const holder = model.root.parent === L.world.scene;
+    L.world.dispose();
+    L.world = buildWorld(L.terrain, { quality: settings.graphics, renderer });
+    L.spray = new Spray(L.world.scene);
+    L.quality = settings.graphics;
+    if (holder) L.world.scene.add(model.root);
   }
 
   // ------------------------------------------------------------ state
@@ -102,7 +141,7 @@ function boot() {
   const prevPos = new THREE.Vector3();
   const prevQ = new THREE.Quaternion();
 
-  const OVERLAYS = ['pause', 'results', 'map', 'modal'];
+  const OVERLAYS = ['pause', 'results', 'map', 'modal', 'settings'];
   function showOverlay(id) {
     for (const o of OVERLAYS) $(o).classList.toggle('hidden', o !== id);
   }
@@ -123,7 +162,7 @@ function boot() {
       else openPage('online');
     },
     onPage: (p) => openPage(p),
-    onGear: () => openSoon('Settings'),
+    onGear: () => openSettings(),
     onMusic: () => openSoon('Music player'),
   });
 
@@ -186,6 +225,25 @@ function boot() {
       });
     }
   }
+
+  let settingsReturn = null;
+  const settingsUI = new SettingsUI({
+    onClose: () => {
+      const r = settingsReturn || { state: 'basecamp', overlay: null };
+      settingsReturn = null;
+      applyQuality();
+      rebuildWorld();
+      showOverlay(r.overlay);
+      state = r.state;
+    },
+    onTouchEditor: () => openSoon('Touch layout editor'),
+  });
+  function openSettings(tab) {
+    settingsReturn = { state, overlay: OVERLAYS.find((o) => o !== 'settings' && !$(o).classList.contains('hidden')) || null };
+    showOverlay('settings');
+    settingsUI.open(tab);
+  }
+  const stats = new StatsOverlay(renderer);
 
   function openSoon(what) {
     openModal(what, `<p>${what} arrives in a later Phase 2 step.</p>`);
@@ -312,7 +370,7 @@ function boot() {
     }
     if (act === 'restart') startRun();
     if (act === 'map') openMap('paused');
-    if (act === 'settings') openSoon('Settings');
+    if (act === 'settings') openSettings();
     if (act === 'help') $('pause-help').classList.toggle('hidden');
     if (act === 'basecamp') toBasecamp();
   });
@@ -324,7 +382,8 @@ function boot() {
 
   // Esc steps back one menu level.
   function back() {
-    if (!$('modal').classList.contains('hidden')) closeModal();
+    if (settingsUI.isOpen) settingsUI.close();
+    else if (!$('modal').classList.contains('hidden')) closeModal();
     else if (state === 'map') closeMap();
     else if (state === 'paused') {
       if (!$('pause-help').classList.contains('hidden')) $('pause-help').classList.add('hidden');
@@ -356,15 +415,39 @@ function boot() {
   const coastInput = { ...EMPTY_INPUT, brake: true, grab: [false, false, false] };
   const IDLE = { crouch: 0.05, tuck: 0, legsUp: 0, lean: 0, look: 0, armsOut: 0, grab: null, grabSide: 1 };
 
+  let lastDraw = 0;
+  let slowFrames = 0;
+  let fastFrames = 0;
   function frame(now) {
     requestAnimationFrame(frame);
+    // 30 fps cap: skip this display frame if it's too soon.
+    if (settings.frameCap === 30 && now - lastDraw < 1000 / 30 - 2) return;
+    lastDraw = now;
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     time += dt;
     input.pollFrame();
+    stats.update(dt);
+    if (settingsUI.isOpen) settingsUI.tick(input.pad());
 
-    if (input.wasPressed('pause')) back();
-    else if (input.wasPressed('confirm') && $('modal').classList.contains('hidden')) {
+    // Performance mode: dynamic resolution to hold the frame rate.
+    if (settings.graphics === 'performance') {
+      const target = settings.frameCap === 30 ? 1 / 28 : 1 / 50;
+      if (dt > target * 1.15) slowFrames++;
+      else if (dt < target * 0.8) fastFrames++;
+      if (slowFrames > 20 && dynRes > 0.6) {
+        dynRes = Math.max(0.6, dynRes - 0.1);
+        applyQuality();
+        slowFrames = fastFrames = 0;
+      } else if (fastFrames > 120 && dynRes < 1) {
+        dynRes = Math.min(1, dynRes + 0.1);
+        applyQuality();
+        slowFrames = fastFrames = 0;
+      }
+    }
+
+    if (input.wasPressed('pause') && !settingsUI.capturing) back();
+    else if (input.wasPressed('confirm') && $('modal').classList.contains('hidden') && !settingsUI.isOpen) {
       if (state === 'basecamp') openMap('basecamp');
       else if (state === 'map') parkMap.onRide(parkMap.currentId);
       else if (state === 'results') startLift();
@@ -459,7 +542,7 @@ function boot() {
         acc -= DT;
         steps++;
         if (r.mode !== prevMode) {
-          if (r.mode === 'air') L.spray.burst(r.pos, r.vel, 40, 3);
+          if (r.mode === 'air') L.spray.burst(r.pos, r.vel, settings.graphics === 'ultra' ? 70 : 40, 3);
           if (prevMode === 'air') {
             L.spray.burst(r.pos, r.vel, r.mode === 'crash' ? 120 : 80, r.mode === 'crash' ? 6 : 4);
             absorb = 0.35;
@@ -557,10 +640,13 @@ function boot() {
       want.y = Math.max(pivot.y + 0.6, gy);
       camera.position.lerp(want, 1 - Math.exp(-dt * 2.2));
       camera.lookAt(pivot.x, pivot.y + 0.2, pivot.z);
+    } else if (settings.camera.firstPerson && r.mode !== 'crash') {
+      model.root.visible = false;
+      L.chase.firstPerson(pivot, model.root.quaternion, dt, r.speed);
     } else {
       L.chase.update(r, pivot, dt);
     }
-    L.world.update(L.time, pivot, camera);
+    L.world.update(L.time, pivot, camera, state === 'riding' ? r : null);
     renderer.render(L.world.scene, camera);
     input.endFrame();
   }

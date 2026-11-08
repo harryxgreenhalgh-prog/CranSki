@@ -160,6 +160,20 @@
         </div>
       </section>
 
+      <!-- Settings -->
+      <section id="settings" class="overlay hidden">
+        <div class="panel wide">
+          <div class="modal-head"><h2>SETTINGS</h2><button class="btn" id="settings-close">Close <kbd>Esc</kbd></button></div>
+          <nav class="stabs">
+            <button data-stab="controls">Controls</button><button data-stab="graphics">Graphics</button><button data-stab="camera">Camera</button><button data-stab="sound">Sound</button><button data-stab="stats">Stats</button>
+          </nav>
+          <div id="settings-body"></div>
+        </div>
+      </section>
+
+      <div id="stats" class="hidden"></div>
+      <div id="toast" class="hidden"><span id="toast-text"></span><button class="btn sm" id="toast-btn">Undo</button></div>
+
       <!-- Pages and panels (About, How to play, Credits, coming-later tabs...) -->
       <section id="modal" class="overlay hidden">
         <div class="panel">

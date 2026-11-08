@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { mulberry32 } from '../sim/rng.js';
 import { Sky } from './sky.js';
 import { buildLift } from './lift.js';
+import { SkiTracks } from './tracks.js';
 
 export const BLUE = 0x1e7bff;
 const CHUNK = 120; // terrain chunk length along s (m)
@@ -540,7 +541,7 @@ function buildFloodlights(terrain, group) {
   return lampMat;
 }
 
-export function buildWorld(terrain, { quality = 'high' } = {}) {
+export function buildWorld(terrain, { quality = 'high', renderer = null } = {}) {
   const scene = new THREE.Scene();
   const group = new THREE.Group();
   scene.add(group);
@@ -578,6 +579,22 @@ export function buildWorld(terrain, { quality = 'high' } = {}) {
   const lampMat = park.floodlights ? buildFloodlights(terrain, group) : null;
   const lift = buildLift(terrain, scene);
 
+  // Reflections (goggles, the ball, rails) from a blurred copy of the sky.
+  let envTex = null;
+  if (renderer && quality !== 'performance') {
+    const pm = new THREE.PMREMGenerator(renderer);
+    const envScene = new THREE.Scene();
+    envScene.add(sky.dome.clone());
+    const ground = new THREE.Mesh(new THREE.CircleGeometry(2000, 16), new THREE.MeshBasicMaterial({ color: 0xf2f6fb }));
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -50;
+    envScene.add(ground);
+    envTex = pm.fromScene(envScene, 0.04).texture;
+    scene.environment = envTex;
+    pm.dispose();
+  }
+  const tracks = quality === 'ultra' ? new SkiTracks(scene) : null;
+
   // Floodlit nights: a warm light that follows the rider.
   const flood = new THREE.PointLight(0xffc98a, 0, 90, 1.2);
   scene.add(flood);
@@ -586,7 +603,11 @@ export function buildWorld(terrain, { quality = 'high' } = {}) {
   const sunOffset = sun.position.clone();
   const _v = new THREE.Vector3();
 
-  function update(time, rider, camera) {
+  function update(time, rider, camera, simRider) {
+    if (tracks && simRider) {
+      tracks.add(time, simRider, terrain);
+      tracks.update(time, 1 / 60);
+    }
     const s = -rider.z;
     const progress = (s - park.startS) / (park.finishS - park.startS);
     sky.update(time, progress, camera.position);
@@ -604,6 +625,7 @@ export function buildWorld(terrain, { quality = 'high' } = {}) {
   }
 
   function dispose() {
+    if (envTex) envTex.dispose();
     scene.traverse((o) => {
       if (o.geometry) o.geometry.dispose();
       if (o.material) {
