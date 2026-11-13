@@ -1,6 +1,6 @@
 // Re-ride a recorded run from its inputs alone and score it.
 //
-// This is the leaderboard referee. The submit-run Edge Function runs exactly
+// This is the leaderboard (and FROST) referee. The submit-run Edge Function runs exactly
 // this code (bundled into supabase/functions/submit-run/sim.js by
 // `npm run build:sim`), so a run only counts if the server, starting from the
 // same inputs, gets the same score the player saw.
@@ -14,11 +14,15 @@ import { park as apex } from '../parks/apex.js';
 import { park as forest } from '../parks/forest.js';
 import { park as pipe } from '../parks/pipe.js';
 import { park as bellevue } from '../parks/bellevue.js';
+import { park as shirakumo } from '../parks/shirakumo.js';
 
 export { SIM_VERSION };
 
 // Parks with a leaderboard (SHIRAKUMO is ghosts-only).
 export const LEADERBOARD_PARKS = { bigair, yard, apex, forest, pipe, bellevue };
+// Every park can be re-ridden: runs anywhere earn FROST and Season Pass XP.
+export const RIDE_PARKS = { ...LEADERBOARD_PARKS, shirakumo };
+export const onLeaderboard = (id) => Object.hasOwn(LEADERBOARD_PARKS, id);
 
 export const GRABS = ['mute', 'tail', 'japan', 'safety', 'blunt', 'rocket', 'truenose', 'backscratcher'];
 export const MAX_STEPS = Math.round(15 * 60 / DT); // 15 minutes at 120 Hz
@@ -27,7 +31,7 @@ const MAX_AFTER_FINISH = 24; // a frame can record a few steps past the line
 
 const terrains = new Map();
 function terrainFor(id) {
-  if (!terrains.has(id)) terrains.set(id, new Terrain(LEADERBOARD_PARKS[id]));
+  if (!terrains.has(id)) terrains.set(id, new Terrain(RIDE_PARKS[id]));
   return terrains.get(id);
 }
 
@@ -35,7 +39,7 @@ function terrainFor(id) {
 export function checkSubmission(sub) {
   if (!sub || typeof sub !== 'object') return 'bad_request';
   if (sub.version !== SIM_VERSION) return 'old_version';
-  if (!Object.hasOwn(LEADERBOARD_PARKS, sub.park)) return 'no_leaderboard';
+  if (!Object.hasOwn(RIDE_PARKS, sub.park)) return 'no_leaderboard';
   if (!Number.isInteger(sub.steps) || sub.steps < 1 || sub.steps > MAX_STEPS) return 'bad_inputs';
   if (typeof sub.inputs !== 'string' || sub.inputs.length > 400000) return 'bad_inputs';
   if (!Array.isArray(sub.grabSlots) || sub.grabSlots.length !== 3 || !sub.grabSlots.every((g) => GRABS.includes(g))) return 'bad_inputs';

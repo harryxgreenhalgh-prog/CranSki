@@ -49,6 +49,12 @@ const db = {
     if (error) throw error;
     return data;
   },
+  // FROST (and Season Pass XP) for a re-ridden finished run.
+  async rewardRun(args: Record<string, unknown>) {
+    const { data, error } = await admin!.rpc('reward_run', args);
+    if (error) throw error;
+    return data;
+  },
 };
 
 Deno.serve(async (req: Request) => {

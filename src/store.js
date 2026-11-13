@@ -71,25 +71,7 @@ export const profile = {
   set look(v) {
     save('look', v);
   },
-  get frost() {
-    return load('frost', 0);
-  },
-  // FROST is earned only by riding: 10 per finished run plus 1 per 10,000 points,
-  // capped at 100 a day.
-  awardFrost(points) {
-    const today = new Date().toISOString().slice(0, 10);
-    const day = load('frostDay', { date: today, earned: 0 });
-    if (day.date !== today) {
-      day.date = today;
-      day.earned = 0;
-    }
-    const want = 10 + Math.floor(points / 10000);
-    const give = Math.max(0, Math.min(want, 100 - day.earned));
-    day.earned += give;
-    save('frostDay', day);
-    save('frost', load('frost', 0) + give);
-    return give;
-  },
+  // (FROST lives on the server only: see online/wallet.js.)
   // Recent finished runs (for the podium and stats).
   get runs() {
     return load('runs', []);

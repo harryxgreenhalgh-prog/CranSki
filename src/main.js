@@ -35,7 +35,8 @@ import { mountAccount, addAccountSection, esc } from './ui/accountUI.js';
 import { cloud, cloudStatusText } from './online/cloud.js';
 import { friends, onFriends, setLocation } from './online/friends.js';
 import { mountFriends } from './ui/friendsUI.js';
-import { canPost, submitRun, submitPacked } from './online/leaderboard.js';
+import { canPost, canSubmit, submitRun, submitPacked } from './online/leaderboard.js';
+import { wallet, frostText } from './online/wallet.js';
 import { mountBoard } from './ui/boardUI.js';
 import { LiveRoom } from './online/rooms.js';
 import { LOCAL } from './online/net.js';
@@ -790,6 +791,9 @@ function boot() {
     const each = duel.order.length / Math.max(1, duelRiders().length);
     toast(`Your run${each > 1 ? ` ${n}` : ''}: ${fmt(res.total)}${reason === 'cap' ? ' (out of pause time)' : ''}`, 4000);
     duel.finishRun(res.total, record);
+    // Friendly duels and party matches: a finished run still earns FROST.
+    if (!duel.ranked && reason === 'finish' && account.ready && canSubmit(record))
+      submitPacked(record, res.total).then((r) => r.ok && r.frost?.awarded > 0 && toast(frostText(r.frost), 3500));
   }
 
   // During my duel run: stream my pose; pausing or standing still uses up the 30 s.
@@ -1269,7 +1273,15 @@ function boot() {
       rq.matchId = null;
       updateQueueBar();
       const me = { ...identity(), look: look() };
-      const session = new ServerMatch({ view: v, me, submit: (rec, total, matchId) => submitPacked(rec, total, matchId) });
+      const session = new ServerMatch({
+        view: v,
+        me,
+        submit: async (rec, total, matchId) => {
+          const r = await submitPacked(rec, total, matchId);
+          if (r.ok && r.frost?.awarded > 0) setTimeout(() => toast(frostText(r.frost), 3500), 4200);
+          return r;
+        },
+      });
       await startDuel({ id: v.id, opp: session.opp, host: session.host, park: v.park, session });
     }
   }
@@ -1835,12 +1847,14 @@ function boot() {
   async function postRun(rec) {
     const el = $('res-board');
     const name = parkMeta(rec.park).name;
-    if (!canPost(rec)) {
+    const board = canPost(rec);
+    if (!canSubmit(rec)) {
       el.textContent = '';
+      $('res-frost').textContent = '';
       return;
     }
     if (!account.ready) {
-      el.innerHTML = `<button class="btn sm" data-post="signin">${account.signedIn ? 'Pick a gamertag' : 'Sign in'}</button> to post this run to the ${name} leaderboard`;
+      el.innerHTML = `<button class="btn sm" data-post="signin">${account.signedIn ? 'Pick a gamertag' : 'Sign in'}</button> to ${board ? `post this run to the ${name} leaderboard and ` : ''}earn FROST`;
       el.querySelector('[data-post]').addEventListener('click', () => openAccount());
       return;
     }
@@ -1849,11 +1863,16 @@ function boot() {
     el.textContent = 'Checking your run on the server…';
     const r = await submitRun(rec);
     rec.posting = false;
+    if (r.ok && r.frost && state !== 'results' && state !== 'finish') toast(frostText(r.frost), 4000);
     if (lastReplay !== rec) return;
     if (r.ok) {
       rec.posted = true;
-      el.innerHTML = `✓ Checked by the server · <b>#${r.rank}</b> on ${name}${r.improved ? ' · new leaderboard best' : ` · your board best is ${fmtN(r.best)}`}`;
+      $('res-frost').textContent = frostText(r.frost) || 'FROST: the server is not set up yet';
+      el.innerHTML = board
+        ? `✓ Checked by the server · <b>#${r.rank}</b> on ${name}${r.improved ? ' · new leaderboard best' : ` · your board best is ${fmtN(r.best)}`}`
+        : '✓ Checked by the server';
     } else {
+      $('res-frost').textContent = 'No FROST for this run';
       el.textContent = r.message + (r.error === 'mismatch' && r.serverTotal != null ? ` (Server got ${fmtN(r.serverTotal)}.)` : '');
       if (r.error === 'network' || r.error === 'server_error') {
         el.insertAdjacentHTML('beforeend', ' <button class="btn sm" data-post="retry">Try again</button>');
@@ -1863,7 +1882,9 @@ function boot() {
   }
   account.onChange(() => {
     if (state === 'results' && lastReplay && account.ready && !lastReplay.posted && !lastReplay.posting) postRun(lastReplay);
+    basecamp.refresh();
   });
+  wallet.onChange(() => basecamp.visible && basecamp.refresh());
 
   // Cloud saves (Phase 3 step 2): show the status, and apply what arrives.
   addAccountSection(() => `<h3>CLOUD SAVE</h3><p class="muted">${esc(cloudStatusText())}</p>`);
@@ -2218,10 +2239,9 @@ function boot() {
     const best = profile.best(L.id);
     const isNew = res.total > best;
     if (isNew) profile.setBest(L.id, res.total);
-    const frost = profile.awardFrost(res.total);
     profile.addRun({ park: L.id, total: res.total, date: Date.now(), best: res.bestTrick?.name || null });
     showResults(res, Math.max(best, res.total), isNew);
-    $('res-frost').textContent = frost > 0 ? `+${frost} FROST earned` : 'Daily FROST cap reached (100 a day)';
+    $('res-frost').textContent = account.ready ? 'Checking your run for FROST…' : 'Sign in to earn FROST';
     if (lastReplay) postRun(lastReplay);
     else $('res-board').textContent = '';
     $('finishcard').classList.add('hidden');

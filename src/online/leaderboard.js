@@ -5,11 +5,18 @@ import { account, notSetUp } from './account.js';
 import { getClient } from './client.js';
 import { packRuns, SIM_VERSION } from '../replay/record.js';
 import { PARKS } from '../parks/index.js';
+import { wallet } from './wallet.js';
 
 export const BOARD_PARKS = PARKS.filter((p) => p.leaderboard).map((p) => p.id);
 
+// Leaderboard parks.
 export function canPost(record) {
   return !!record && BOARD_PARKS.includes(record.park) && record.version === SIM_VERSION;
+}
+
+// Any park: every finished run the server re-rides earns FROST.
+export function canSubmit(record) {
+  return !!record && PARKS.some((p) => p.id === record.park) && record.version === SIM_VERSION;
 }
 
 export const SUBMIT_ERRORS = {
@@ -64,7 +71,10 @@ async function send(body) {
   try {
     const sb = await getClient();
     const { data, error } = await sb.functions.invoke('submit-run', { body });
-    if (!error) return { ok: true, ...data };
+    if (!error) {
+      if (data?.frost) wallet.set(data.frost);
+      return { ok: true, ...data };
+    }
     let info = {};
     try {
       info = await error.context?.json?.();

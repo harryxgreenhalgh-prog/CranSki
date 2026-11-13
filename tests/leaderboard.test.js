@@ -7,9 +7,10 @@ import { DT } from '../src/sim/constants.js';
 import { Recorder, SIM_VERSION, blankInput, packRuns, unpackRuns } from '../src/replay/record.js';
 import { rerun } from '../src/sim/verify.js';
 import * as bundled from '../supabase/functions/submit-run/sim.js';
-import { handle } from '../supabase/functions/submit-run/handler.js';
+import { handle, runKey } from '../supabase/functions/submit-run/handler.js';
 import { simSourceHash } from '../tools/sim-hash.mjs';
 import { park as BIG_AIR } from '../src/parks/bigair.js';
+import { park as SHIRAKUMO } from '../src/parks/shirakumo.js';
 
 // Ride BIG AIR the way the game records it: a cork 720 mute, a pause-menu
 // reset, and a few steps recorded past the finish line in the last frame.
@@ -97,7 +98,7 @@ test('runs whose result does not match are rejected', () => {
   assert.equal(rerun({ ...sub, inputs: packRuns(short), steps, marks: [] }).reason, 'not_finished');
   // Malformed submissions.
   assert.equal(rerun({ ...sub, steps: sub.steps + 1 }).reason, 'bad_inputs');
-  assert.equal(rerun({ ...sub, park: 'shirakumo' }).reason, 'no_leaderboard');
+  assert.equal(rerun({ ...sub, park: 'nowhere' }).reason, 'no_leaderboard');
   assert.equal(rerun({ ...sub, grabSlots: ['mute', 'tail', 'nope'] }).reason, 'bad_inputs');
   assert.equal(rerun({ ...sub, version: SIM_VERSION - 1 }).reason, 'old_version');
 });
@@ -182,4 +183,79 @@ test('submit-run: a ranked run is recorded with the server score, even if it end
   // The database refuses out-of-turn runs.
   db.recordMatchRun = async () => ({ error: 'not_your_turn' });
   assert.equal((await handle(post({ ...sub, match }), db)).status, 409);
+});
+
+// SHIRAKUMO has no leaderboard, but its runs earn FROST, so the server re-rides them too.
+function recordShirakumo() {
+  const run = new Run(new Terrain(SHIRAKUMO));
+  run.rider.grabSlots = ['mute', 'tail', 'japan'];
+  const rec = new Recorder();
+  const r = run.rider;
+  // Follow the groomed piste's zigzag: steer towards its centre line 25 m ahead.
+  const c = SHIRAKUMO.center;
+  const cx = (s) => {
+    for (let i = 1; i < c.length; i++) if (s <= c[i][0]) return c[i - 1][1] + ((s - c[i - 1][0]) / (c[i][0] - c[i - 1][0])) * (c[i][1] - c[i - 1][1]);
+    return 0;
+  };
+  let extra = 0;
+  for (let i = 0; i < 150 / DT && extra < 3; i++) {
+    const k = blankInput();
+    const s = -r.pos.z;
+    const dx = cx(s + 25) - r.pos.x;
+    const turn = r.vel.x * -25 - r.vel.z * dx;
+    k.steer = Math.abs(turn) < 4 ? 0 : Math.sign(turn); // digital, like the game
+    k.tuck = Math.abs(r.pos.x - cx(s)) < 8;
+    rec.push(k);
+    run.step(k);
+    run.messages.length = 0;
+    if (run.finished) extra++;
+  }
+  const data = rec.data();
+  const total = run.results().total;
+  return {
+    finished: run.finished,
+    sub: { park: 'shirakumo', version: SIM_VERSION, steps: data.steps, inputs: packRuns(data.runs), marks: data.marks, grabSlots: ['mute', 'tail', 'japan'], board: false, claimed: { total } },
+  };
+}
+
+test('SHIRAKUMO runs can be re-ridden (for FROST), the same way every time', () => {
+  const { finished, sub } = recordShirakumo();
+  assert.equal(finished, true);
+  const r = rerun(sub);
+  assert.equal(r.ok, true, r.reason);
+  assert.equal(r.results.total, sub.claimed.total);
+  assert.equal(bundled.rerun(sub).ok, true);
+});
+
+test('submit-run pays FROST once per finished run, and only posts board parks', async () => {
+  const { sub } = recordRun();
+  const rewards = [];
+  const db = {
+    ...fakeDb(),
+    async rewardRun(args) {
+      rewards.push(args);
+      return { frost: { awarded: 10, balance: 10, today: 10, cap: 100 } };
+    },
+  };
+  const body = await (await handle(post(sub), db)).json();
+  assert.deepEqual(body.frost, { awarded: 10, balance: 10, today: 10, cap: 100 });
+  assert.equal(rewards.length, 1);
+  assert.equal(rewards[0].p_total, body.total);
+  assert.equal(rewards[0].p_run_key, await runKey(sub));
+  // Same run, same key (the database refuses to pay it twice); a different run, a different key.
+  assert.equal(await runKey({ ...sub, claimed: { total: 1 } }), await runKey(sub));
+  assert.notEqual(await runKey({ ...sub, steps: sub.steps - 1 }), await runKey(sub));
+  // A run that doesn't match earns nothing.
+  rewards.length = 0;
+  const bad = await handle(post({ ...sub, claimed: { total: sub.claimed.total + 5 } }), db);
+  assert.equal(bad.status, 422);
+  assert.equal(rewards.length, 0);
+  // SHIRAKUMO: FROST (if it finished) but never the leaderboard.
+  const sh = recordShirakumo();
+  const before = db.calls.recordScore.length;
+  const res = await handle(post(sh.sub), db);
+  assert.equal(res.status, 200);
+  assert.equal(rewards.length, 1);
+  assert.equal(rewards[0].p_park, 'shirakumo');
+  assert.equal(db.calls.recordScore.length, before);
 });

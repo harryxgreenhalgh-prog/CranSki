@@ -2,6 +2,7 @@
 import { parkMeta } from '../parks/index.js';
 import { profile } from '../store.js';
 import { account } from '../online/account.js';
+import { wallet } from '../online/wallet.js';
 import { UPDATES } from './pages.js';
 
 const $ = (id) => document.getElementById(id);
@@ -93,7 +94,8 @@ export class Basecamp {
   }
 
   refresh() {
-    $('frost').textContent = fmt(profile.frost);
+    $('frost').textContent = wallet.frost === null ? '—' : fmt(wallet.frost);
+    $('frost').parentElement.title = account.ready ? `FROST: earned by riding · ${wallet.today}/${wallet.cap} today` : 'FROST: sign in, then earn it by riding';
     this.refreshAccount();
     const runs = profile.runs;
     $('pc-runs').textContent = `${runs.length} run${runs.length === 1 ? '' : 's'}`;

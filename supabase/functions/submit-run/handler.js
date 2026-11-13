@@ -1,15 +1,17 @@
-// submit-run: the leaderboard referee.
+// submit-run: the leaderboard and FROST referee.
 //
 // The game sends a finished run as its recorded inputs plus the score the
 // player saw. This re-rides the inputs through the same deterministic
 // simulation (sim.js, bundled from src/sim/verify.js) and:
 //   - rejects the run if the re-ride doesn't reach the finish line or its score
 //     doesn't match the claimed one;
-//   - otherwise saves the score it calculated itself (never the claimed one).
+//   - otherwise saves the score it calculated itself (never the claimed one) on
+//     the park's leaderboard, and pays the run's FROST (once per run, capped
+//     per day; the database decides how much).
 //
 // Plain JavaScript so the Node tests can run it too; index.ts wires it to
 // Supabase.
-import { rerun, SIM_VERSION } from './sim.js';
+import { rerun, onLeaderboard, SIM_VERSION } from './sim.js';
 
 export const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -18,6 +20,13 @@ export const CORS = {
 };
 
 const MAX_BODY = 600000;
+
+// Identifies a run by its inputs, so the same run is only ever paid once.
+export async function runKey(sub) {
+  const text = JSON.stringify([sub.park, sub.version, sub.steps, sub.inputs, sub.marks, sub.grabSlots, sub.board]);
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -79,7 +88,7 @@ export async function handle(req, db) {
   }
 
   // Save only what the server calculated (finished runs go on the board).
-  if (r.ok) {
+  if (r.ok && onLeaderboard(sub.park)) {
     const saved = await db.recordScore({
       p_user: uid,
       p_park: sub.park,
@@ -96,6 +105,16 @@ export async function handle(req, db) {
       p_board: sub.board,
     });
     Object.assign(out, { best: saved.best, improved: saved.improved, rank: saved.rank });
+  }
+
+  // FROST (and later Season Pass XP) for every finished run, on any park.
+  if (r.ok && db.rewardRun) {
+    try {
+      const reward = await db.rewardRun({ p_user: uid, p_park: sub.park, p_total: res.total, p_run_key: await runKey(sub) });
+      if (reward) Object.assign(out, reward);
+    } catch (e) {
+      console.error('reward_run failed', e);
+    }
   }
   return json(out);
 }

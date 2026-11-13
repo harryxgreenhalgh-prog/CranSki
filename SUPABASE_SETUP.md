@@ -467,3 +467,41 @@ You need three or four signed-in accounts that are friends, for example a comput
 2. As the leader: **Basecamp → Party match → PRIVATE MATCH → FREE-FOR-ALL**, pick APEX and **1 RUN EACH**, then press **START**.
 3. Everyone else presses **JOIN**. You all load APEX, take turns, and see the results table.
 4. As the leader: **Play again**, or go back to **Party match**, pick **CRANSKI CUP**, choose 2 or 3 maps, then press **START**. On each map, everyone drops in together and sees the others ride. The final table has a column for each map.
+
+## 14. FROST on the server (Phase 5, step 4)
+
+FROST is the only currency, and it's earned only by riding. There are no real-money purchases anywhere.
+
+1. **SQL Editor**: run `supabase/setup.sql` again, or `supabase/migrations/20261115120000_frost.sql`. It adds:
+   - `wallets`: each rider can read only their own row, and nobody can write to it from the game;
+   - a private ledger of every change;
+   - `reward_run`, which only the submit-run function can call;
+   - `my_wallet`, for the game to read the balance.
+2. **Redeploy submit-run**. It now pays FROST and re-rides SHIRAKUMO runs too, for FROST only (SHIRAKUMO still has no leaderboard). After merging to `main`, GitHub Actions deploys it automatically. To deploy it by hand:
+   1. Open **Actions → Deploy Supabase functions**.
+   2. Click **Run workflow**.
+
+How it works:
+
+- When you finish a run while signed in, the game sends its inputs to submit-run. That happens on any park, and in duels, party matches and the Cup too.
+- The server re-rides the run. If it reaches the finish line with the same score, the database pays 10 FROST + 1 per 10,000 points, up to 100 a day (the day resets at midnight UTC).
+- A run is paid only once: the server keeps a fingerprint of each paid run.
+- The results screen shows what the server paid, for example **+12 FROST earned · 34/100 today**, and the balance at the top of Basecamp updates.
+- The old FROST count kept in the browser is no longer used.
+
+### Check the lock (optional)
+
+In the **SQL Editor**, this should fail with "permission denied", because riders can't change balances:
+
+```sql
+set role authenticated;
+update public.wallets set frost = 99999;
+reset role;
+```
+
+### Test it
+
+1. Sign in, then ride any park to the finish.
+2. The results screen says **+N FROST earned · N/100 today**, and the Basecamp FROST count goes up.
+3. Ride enough runs to pass 100 for the day. The results screen then says **Daily FROST cap reached (100 a day)**.
+4. In Supabase, open **Table Editor → wallets**. You'll see your row. Riders can't edit it.
