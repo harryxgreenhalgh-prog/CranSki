@@ -14,6 +14,8 @@ export const UPDATES = [
       'Ranked 1v1 on APEX: FIND MATCH pairs you with a rider near your rating. You see who it is only when the match starts. Play 5 placement matches to get your tier: Bronze, Silver, Gold, Platinum or Diamond. Top 25 board in the Ranked panel.',
       "Leaving a ranked match loses it and starts a cooldown of 1, then 5, then 15 minutes. If your opponent never shows, you're never penalised and go straight back to the front of the queue.",
       'Ranked 2v2 on APEX: queue solo, or as a pair with someone in your party. One run each and the best team total wins. It has its own rating, and teammates must be within 500 rating of each other. Leaving counts as a loss plus a 5, 15, then 30 minute break.',
+      'Party matches for parties of 3 or 4: the leader picks a private 2v2 or free-for-all on any leaderboard park, with 1, 3 or 5 runs each, and best run or round wins. Riders take turns while the others watch.',
+      'The CRANSKI CUP: up to 5 maps, 2v2 or free-for-all, total score or round wins. On each map everyone drops in together in the party\'s private room.',
     ],
   },
   {
@@ -102,6 +104,7 @@ export const PAGES = {
           <tr><td>Duels: whose turn it is and each finished run's inputs and score, sent to your opponent</td><td>Your opponent, live. Never stored.</td></tr>
           <tr><td>Ranked: your rating, tier and win/loss record for 1v1 and 2v2</td><td>Everyone, once you're in the top 25</td></tr>
           <tr><td>Ranked matches: who played, the scores, the result, and any leave cooldown you're serving</td><td>The riders in that match. Deleted with your account.</td></tr>
+          <tr><td>Party matches and the CRANSKI CUP: who's in, whose turn it is, and each finished run's inputs and score</td><td>Your party, live. Never stored.</td></tr>
         </tbody>
       </table>
       <p>There are no ads, no analytics and no tracking cookies. Nothing is sold or shared, and CranSki never asks for payment details or passwords.</p>

@@ -47,7 +47,8 @@ export async function openLocalChannel(topic, { key, onBroadcast = {}, onPresenc
     announce(false);
     const now = performance.now();
     let gone = false;
-    for (const [id, v] of members) if (now - v.seen > 5000) gone = members.delete(id) || gone;
+    // Long expiry: background tabs' timers get throttled, and closing a channel says 'leave' anyway.
+    for (const [id, v] of members) if (now - v.seen > 90000) gone = members.delete(id) || gone;
     if (gone) sync();
   }, 1500);
   bus?.postMessage({ from: me, topic, type: 'hello' });

@@ -32,7 +32,7 @@ export class Basecamp {
     $('friends-btn').addEventListener('click', () => (onFriends ? onFriends() : onPage('online')));
     $('account-btn').addEventListener('click', onAccount);
     document.querySelectorAll('#basecamp .mode').forEach((b) =>
-      b.addEventListener('click', () => onMode?.(b.dataset.mode === 'multi' ? 'live' : b.dataset.mode === 'ranked' ? 'ranked' : 'solo'))
+      b.addEventListener('click', () => onMode?.({ multi: 'live', ranked: 'ranked', party: 'party' }[b.dataset.mode] || 'solo'))
     );
     const name = $('rider-name');
     // Signed in, the lift pass shows your gamertag; change it from Account.

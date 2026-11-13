@@ -435,3 +435,35 @@ You need four signed-in accounts (or four browser profiles).
 2. The other two press **FIND MATCH** solo.
 3. All four load APEX. The bar shows **RANKED 2V2**. Each rider gets one run, and the HUD shows **Your team X · Them Y**.
 4. The results card lists both teams with their totals and your rating change.
+
+## 13. Party matches and the CRANSKI CUP (Phase 5, step 3)
+
+1. **SQL Editor**: run `supabase/setup.sql` again, or `supabase/migrations/20261114120000_party_matches.sql` on its own. It lets a party's members use one more private channel, `pmatch:<party id>`. There are no new tables: results aren't stored and don't change ratings.
+2. Nothing to deploy.
+
+How it works:
+
+- **Basecamp → Party match**. Only the party leader sets it up, and the party needs 3 or 4 riders, all online.
+- **PRIVATE MATCH**:
+  - Free-for-all (3 or 4 riders) or 2v2 (exactly 4). Tap a name to swap teams.
+  - Any leaderboard park: APEX, BIG AIR, THE YARD, FOREST LINE, ASPEN PIPE or BELLEVUE.
+  - 1, 3 or 5 runs each.
+  - **Best run**: each rider's best counts, added up per team in 2v2. **Round wins**: each round of runs goes to the top rider or team; most rounds wins, with ties broken on total points.
+  - Riders take turns while everyone else watches, like a duel.
+- **CRANSKI CUP**:
+  - Up to 5 maps, free-for-all or 2v2.
+  - **Total score** (every run counts) or **round wins** (each map is a round).
+  - On each map, everyone waits at the gate, gets a 3-2-1 and drops in together in the party's private room, so you see each other ride. Each run has a 3-minute limit.
+- Everyone in the party gets a **JOIN / Skip** prompt. A free-for-all starts with whoever joins (at least 2 riders). A 2v2 needs all four.
+- The leader referees: GO, moving on to the next map, and skipping the turn of a rider who has dropped out. If the leader drops out, the next rider takes over.
+- Every rider re-rides everyone else's recorded inputs, so a typed-in score doesn't count.
+- At the end, the leader can press **Play again**.
+
+### Test it
+
+You need three or four signed-in accounts that are friends, for example a computer, an iPad and a second browser profile.
+
+1. Make a party: **Friends → Start a party → Invite**, then the others press **Join**.
+2. As the leader: **Basecamp → Party match → PRIVATE MATCH → FREE-FOR-ALL**, pick APEX and **1 RUN EACH**, then press **START**.
+3. Everyone else presses **JOIN**. You all load APEX, take turns, and see the results table.
+4. As the leader: **Play again**, or go back to **Party match**, pick **CRANSKI CUP**, choose 2 or 3 maps, then press **START**. On each map, everyone drops in together and sees the others ride. The final table has a column for each map.

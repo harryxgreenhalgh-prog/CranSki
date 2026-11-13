@@ -2491,3 +2491,34 @@ body.touching #roombadge {
 #queuebar.hidden {
   display: none;
 }
+
+/* Party match setup (Phase 5) */
+.pm-teams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 8px 0;
+}
+.pm-teams h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  opacity: 0.75;
+}
+.pm-teams .btn {
+  display: block;
+  width: 100%;
+  margin-bottom: 6px;
+  text-align: left;
+}
+.pm-maps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 8px 0;
+}
+.pm-maps label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}

@@ -105,6 +105,8 @@ export class Party {
         go: (m) => m?.u === this.info?.leader && m.u !== this.me.uid && this.h.onGo?.(m),
         removed: (m) => m?.target === this.me.uid && this._removed(),
         ranked: (m) => m?.partner === this.me.uid && this.has(m.u) && this.h.onRankedAsk?.(m),
+        pm: (m) => m?.u === this.info?.leader && m.u !== this.me.uid && this.h.onMatchInvite?.(m),
+        pmr: (m) => this.has(m?.u) && this.h.onMatchReply?.(m),
       },
       onPresence: (list) => {
         this.online = new Map(list.filter((p) => p.u).map((p) => [p.u, { where: p.where, park: p.park }]));
@@ -187,6 +189,17 @@ export class Party {
   go({ park, room, priv }) {
     if (!this.isLeader) return;
     this.ch?.send('go', { u: this.me.uid, tag: this.me.tag, park, room, priv: !!priv, party: this.info.id });
+  }
+
+  // Leader: invite the party to a private match or the CRANSKI CUP.
+  inviteMatch({ id, cfg, roster }) {
+    if (!this.isLeader) return;
+    this.ch?.send('pm', { u: this.me.uid, tag: this.me.tag, id, cfg, roster });
+  }
+
+  // Answer the leader's invite (JOIN goes over the match channel; this is for SKIP).
+  replyMatch(id, answer) {
+    this.ch?.send('pmr', { u: this.me.uid, id, answer });
   }
 
   // Ask a party member to queue for ranked 2v2 with me.
