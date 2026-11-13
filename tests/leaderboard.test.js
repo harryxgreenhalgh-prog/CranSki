@@ -154,3 +154,32 @@ test('submit-run rejects mismatches, strangers and old versions without saving',
   assert.equal((await handle(new Request('https://x.test', { method: 'OPTIONS' }), db)).status, 200);
   assert.equal(db.calls.recordScore.length, 0);
 });
+
+test('submit-run: a ranked run is recorded with the server score, even if it ended early', async () => {
+  const { sub } = recordRun();
+  const db = fakeDb();
+  const matchCalls = [];
+  db.recordMatchRun = async (a) => (matchCalls.push(a), { ok: true, match: { id: 'm', run_index: 1 } });
+  const match = '11111111-2222-3333-4444-555555555555';
+  // Finished: recorded for the match and on the board.
+  const res = await handle(post({ ...sub, match }), db);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).match.run_index, 1);
+  assert.equal(matchCalls[0].p_total, sub.claimed.total);
+  assert.equal(db.calls.recordScore.length, 1);
+  // Cut short (out of pause time): still counts for the match, not the board.
+  const runs = unpackRuns(sub.inputs).slice(0, 2);
+  const steps = runs[1];
+  const shortRun = rerun({ ...sub, inputs: packRuns(runs), steps, marks: [], claimed: { total: 0 } });
+  const short = { ...sub, inputs: packRuns(runs), steps, marks: [], claimed: { total: shortRun.results.total }, match };
+  const res2 = await handle(post(short), db);
+  assert.equal(res2.status, 200);
+  assert.equal(matchCalls.length, 2);
+  assert.equal(db.calls.recordScore.length, 1);
+  // A wrong claim is still refused.
+  const res3 = await handle(post({ ...short, claimed: { total: 12345 } }), db);
+  assert.equal(res3.status, 422);
+  // The database refuses out-of-turn runs.
+  db.recordMatchRun = async () => ({ error: 'not_your_turn' });
+  assert.equal((await handle(post({ ...sub, match }), db)).status, 409);
+});

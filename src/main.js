@@ -35,7 +35,7 @@ import { mountAccount, addAccountSection, esc } from './ui/accountUI.js';
 import { cloud, cloudStatusText } from './online/cloud.js';
 import { friends, onFriends, setLocation } from './online/friends.js';
 import { mountFriends } from './ui/friendsUI.js';
-import { canPost, submitRun } from './online/leaderboard.js';
+import { canPost, submitRun, submitPacked } from './online/leaderboard.js';
 import { mountBoard } from './ui/boardUI.js';
 import { LiveRoom } from './online/rooms.js';
 import { LOCAL } from './online/net.js';
@@ -46,6 +46,8 @@ import { IdleWatch } from './ui/idle.js';
 import { ChatChannel, mutedRiders, setMuted, REPORT_REASONS } from './online/chat.js';
 import { ChatUI } from './ui/chatUI.js';
 import { party } from './online/party.js';
+import { ranked, ServerMatch, RANKED_PARK } from './online/ranked.js';
+import { mountRanked } from './ui/rankedUI.js';
 import { DuelSession, DUEL_PARKS, CHALLENGE_TIMEOUT, validPose } from './online/duel.js';
 import { Snapshots } from './online/rooms.js';
 import { Reel } from './render/reel.js';
@@ -376,6 +378,10 @@ function boot() {
     live: 'Ride with up to 30 riders. Hold Tab for the roster.',
   };
   async function setPlayMode(m) {
+    if (m === 'ranked') {
+      openRanked();
+      return;
+    }
     if (m === playMode) return;
     if (m === 'live') {
       const me = identity();
@@ -625,20 +631,13 @@ function boot() {
     return r.results ? r.results.total : 0;
   }
 
-  async function startDuel({ id, opp, host, park }) {
+  async function startDuel({ id, opp, host, park, session = null }) {
     const me = identity();
     if (!me || duel) return;
     try {
       if (!verifyMod) verifyMod = await import('./sim/verify.js');
       const lk = live?.remotes.get(opp.uid)?.look;
-      duel = new DuelSession({
-        id,
-        me,
-        opp,
-        host,
-        park,
-        verify: verifyRecord,
-        hooks: {
+      const hooks = {
           onTurn: (uid, run) => duelTurn(uid, run),
           onCountdown: (uid) => {
             countdown = { until: performance.now() + 3600, mine: uid === me.uid };
@@ -659,8 +658,13 @@ function boot() {
           },
           onConnection: (ok) => setCard('conn', ok ? null : { big: 'RECONNECTING…', small: 'Lost the connection to the duel. Trying again.' }),
           onProposal: (p) => duelProposal(p),
-        },
-      });
+          onError: (msg) => toast(msg, 6000),
+      };
+      if (session) {
+        // Ranked: the server is the referee.
+        duel = session;
+        duel.h = hooks;
+      } else duel = new DuelSession({ id, me, opp, host, park, verify: verifyRecord, hooks });
       await duel.connect();
       const model = new RiderModel({ ...DEFAULT_LOOK, ...(lk || {}) });
       if (ASSETS.ready) {
@@ -669,7 +673,7 @@ function boot() {
       }
       model.root.visible = false;
       duelOpp = { model, snaps: new Snapshots(), score: 0, camPos: null, prev: new THREE.Vector3() };
-      toast(`Duel with ${opp.tag} on ${PARK_NAME(park)}!`, 4000);
+      toast(session ? `Ranked ${duel.mode} on ${PARK_NAME(park)} vs ${opp.tag}!` : `Duel with ${opp.tag} on ${PARK_NAME(park)}!`, 4000);
       enterDuelLobby();
     } catch (e) {
       console.warn(e);
@@ -754,7 +758,7 @@ function boot() {
     el.classList.remove('hidden');
     const total = duel.order.length;
     const runTxt = duel.over ? 'FINAL' : `RUN ${duel.run + 1}/${total}`;
-    $('dh-title').textContent = `DUEL · ${PARK_NAME(duel.park)} · ${runTxt}`;
+    $('dh-title').textContent = `${duel.ranked ? `RANKED ${duel.mode.toUpperCase()}` : 'DUEL'} · ${PARK_NAME(duel.park)} · ${runTxt}`;
     const best = (u) => Math.max(0, ...(duel.scores[u] || []));
     $('dh-score').innerHTML = `${esc(duel.me.tag)} <b>${fmt(best(duel.me.uid))}</b> · ${esc(duel.opp.tag)} <b>${fmt(best(duel.opp.uid))}</b>`;
   }
@@ -776,6 +780,20 @@ function boot() {
     $('duelover').classList.remove('hidden');
     $('duelover').querySelector('[data-dact=rematch]').disabled = false;
     $('duelover').querySelector('[data-dact=map]').disabled = false;
+    // Ranked: rating change, and look for another match instead of a rematch.
+    const rk = !!duel.ranked;
+    $('duelover').querySelector('[data-dact=rematch]').textContent = rk ? 'Find another match' : 'Rematch';
+    $('duelover').querySelector('[data-dact=map]').classList.toggle('hidden', rk);
+    $('duelover').querySelector('[data-dact=leave]').textContent = rk ? 'Back to Basecamp' : 'Leave duel';
+    if (rk) {
+      const c = res.changes?.[me.uid];
+      if (res.reason === 'no_show' || duel.view?.status === 'cancelled') $('do-msg').textContent = 'Match called off.';
+      else if (c) {
+        const d = c.after - c.before;
+        $('do-msg').textContent = `Rating ${c.before} → ${c.after} (${d >= 0 ? '+' : ''}${d})${c.placements < 5 ? ` · placement ${c.placements}/5` : ` · ${c.tier}`}${res.reason === 'left' || res.reason === 'timeout' ? ' · the other side left' : ''}`;
+        $('do-msg').className = `acct-msg ${d >= 0 ? 'good' : 'bad'}`;
+      }
+    }
   }
 
   function duelProposal(park) {
@@ -868,6 +886,13 @@ function boot() {
   $('duelover').addEventListener('click', (e) => {
     const act = e.target.closest('[data-dact]')?.dataset.dact;
     if (!act || !duel) return;
+    if (duel.ranked && (act === 'rematch' || act === 'leave')) {
+      const mode = duel.mode;
+      leaveDuel();
+      toBasecamp();
+      if (act === 'rematch') findMatch(mode);
+      return;
+    }
     if (act === 'rematch') {
       duel.proposeAgain(duel.park);
       $('do-msg').textContent = `Waiting for ${duel.opp.tag} to accept…`;
@@ -1009,6 +1034,149 @@ function boot() {
     L.world.update(L.time, focus, camera);
     liveFrame(L, dt);
     renderer.render(L.world.scene, camera);
+  }
+
+  // ------------------------------------------------------------ ranked (Phase 5)
+  const rq = { mode: null, waited: 0, timer: 0, matchId: null, checkingIn: false, partner: null };
+  function openRanked() {
+    openModal('Ranked', '<div class="acct" id="ranked-panel"></div>');
+    mountRanked($('ranked-panel'), {
+      queue: () => (rq.mode ? { mode: rq.mode, waited: rq.waited } : null),
+      onFind: (mode, partner) => findMatch(mode, partner),
+      onCancel: () => cancelSearch(),
+      onAccount: () => openAccount(),
+      partnerOptions: () => (party.info ? party.members.filter((m) => m.id !== account.user?.id) : []),
+      twoVsTwo: rankedTwoVsTwo,
+    });
+  }
+  let rankedTwoVsTwo = false; // switched on with ranked 2v2
+  function updateQueueBar() {
+    const el = $('queuebar');
+    if (!rq.mode || duel) {
+      el.classList.add('hidden');
+      return;
+    }
+    const t = rq.waited || 0;
+    $('qb-text').textContent = rq.matchId ? `Ranked ${rq.mode} · match found, getting ready…` : `Searching ranked ${rq.mode} · ${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+    $('qb-cancel').classList.toggle('hidden', !!rq.matchId);
+    el.classList.remove('hidden');
+  }
+  $('qb-cancel').addEventListener('click', () => cancelSearch());
+  async function findMatch(mode, partner = null) {
+    if (!account.ready) {
+      openAccount();
+      return;
+    }
+    if (duel) {
+      toast('Finish your duel first.');
+      return;
+    }
+    try {
+      const r = await ranked.join(mode, partner || null);
+      if (r?.status === 'penalty') {
+        const s = Math.max(0, Math.ceil((Date.parse(r.until) - Date.now()) / 1000));
+        toast(`You left a ranked match recently. You can queue again in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}.`, 6000);
+        return;
+      }
+      if (r?.status !== 'queued' && r?.status !== 'in_match') {
+        toast(r?.status === 'no_gamertag' ? 'Pick a gamertag first.' : "Couldn't join the queue.");
+        return;
+      }
+      rq.mode = mode;
+      rq.partner = partner;
+      rq.waited = 0;
+      clearInterval(rq.timer);
+      rq.timer = setInterval(queueTick, 2000);
+      queueTick();
+      updateQueueBar();
+    } catch (e) {
+      toast(e.message);
+    }
+  }
+  async function cancelSearch() {
+    clearInterval(rq.timer);
+    rq.mode = null;
+    rq.matchId = null;
+    updateQueueBar();
+    await ranked.leaveQueue().catch(() => {});
+  }
+  async function queueTick() {
+    if (!rq.mode) return;
+    let r;
+    try {
+      r = await ranked.poll();
+    } catch {
+      return;
+    }
+    if (r.status === 'queued') {
+      if (rq.matchId) {
+        // Called off: someone didn't show. We're back at the front of the queue.
+        toast("Your opponent didn't show up. You're back in the queue.", 5000);
+        rq.matchId = null;
+        setCard('count', null);
+        if (state === 'duel' && !duel) toBasecamp();
+      }
+      rq.waited = r.waited || 0;
+    } else if (r.status === 'match') await onMatchView(r.match);
+    else if (r.status === 'idle' || r.status === 'ended') {
+      if (rq.matchId && r.match?.status === 'cancelled') {
+        toast("The match was called off: you didn't check in in time.", 6000);
+        if (state === 'duel' && !duel) toBasecamp();
+      }
+      clearInterval(rq.timer);
+      rq.mode = null;
+      rq.matchId = null;
+    }
+    updateQueueBar();
+  }
+  async function onMatchView(v) {
+    if (v.status === 'checkin') {
+      if (rq.matchId !== v.id) {
+        rq.matchId = v.id;
+        closeModal();
+        toast(`Match found! Ranked ${v.mode} on ${PARK_NAME(v.park)}. Your opponent is revealed at the start.`, 6000);
+        await checkInFor(v);
+      }
+      setCard('count', { big: 'MATCH FOUND', small: `Waiting for everyone to arrive · ${Math.ceil(v.checkin_left)} s` });
+    } else if (v.status === 'live' && !duel) {
+      clearInterval(rq.timer);
+      setCard('count', null);
+      rq.mode = null;
+      rq.matchId = null;
+      updateQueueBar();
+      const me = identity();
+      const session = new ServerMatch({ view: v, me, submit: (rec, total, matchId) => submitPacked(rec, total, matchId) });
+      await startDuel({ id: v.id, opp: session.opp, host: session.host, park: v.park, session });
+    }
+  }
+  // Load APEX, stand at the gate, and tell the server I'm here.
+  async function checkInFor(v) {
+    if (rq.checkingIn) return;
+    rq.checkingIn = true;
+    try {
+      if (live && live.room) await live.leaveRoom();
+      if (!loaded || loaded.id !== v.park) {
+        basecamp.hide();
+        showOverlay(null);
+        state = 'loading';
+        loadingScreen.show(music.track.name);
+        parkId = v.park;
+        await loadPark(v.park, (p, t) => loadingScreen.set(p, t));
+        loadingScreen.hide();
+      }
+      endLift();
+      basecamp.hide();
+      showOverlay(null);
+      loaded.run.reset();
+      loaded.hud.show(false);
+      state = 'duel';
+      await ranked.checkin(v.id);
+    } catch (e) {
+      console.warn(e);
+      toast("Couldn't get to the match.");
+    } finally {
+      rq.checkingIn = false;
+    }
   }
 
   // ------------------------------------------------------------ parties (Phase 4 step 5)
@@ -1599,16 +1767,18 @@ function boot() {
       if (cards.leave) setCard('leave', null);
       else
         setCard('leave', {
-          big: 'Leave the duel?',
-          small: `${duel.opp.tag} will win the runs you don't ride.`,
+          big: duel.ranked ? 'Leave the match?' : 'Leave the duel?',
+          small: duel.ranked ? 'Leaving a ranked match loses it, and you get a cooldown before you can queue again.' : `${duel.opp.tag} will win the runs you don't ride.`,
           buttons: [
             { label: 'Stay', fn: () => setCard('leave', null) },
             {
               label: 'Leave',
               fn: () => {
+                const rk = !!duel?.ranked;
                 setCard('leave', null);
                 leaveDuel();
-                startLift();
+                if (rk) toBasecamp();
+                else startLift();
               },
             },
           ],

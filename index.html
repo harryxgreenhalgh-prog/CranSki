@@ -95,6 +95,7 @@
         <div class="modes">
           <button class="mode on" data-mode="solo">Solo <span class="picked">PICKED</span></button>
           <button class="mode" data-mode="multi" title="Live rooms: ride with up to 30 riders">Live rooms <span class="picked">PICKED</span></button>
+          <button class="mode" data-mode="ranked" title="Ranked 1v1 and 2v2 on APEX">Ranked <small>APEX</small></button>
           <div class="party muted" id="mode-note">Ride alone, race your ghost, never timed out.</div>
         </div>
         <button id="ride" class="btn primary ride-big">RIDE <kbd>Enter</kbd></button>
@@ -155,6 +156,9 @@
         <div id="chat-phrases"></div>
         <div id="chat-hint" class="muted small"></div>
       </div>
+
+      <!-- Ranked: searching for a match -->
+      <div id="queuebar" class="hidden"><span id="qb-text"></span><button class="btn sm" id="qb-cancel">Cancel</button></div>
 
       <!-- Duels: score strip, big cards (challenge, 3-2-1, connection), results, highlight reel -->
       <div id="duelhud" class="hidden"><span id="dh-title"></span><span id="dh-score"></span></div>

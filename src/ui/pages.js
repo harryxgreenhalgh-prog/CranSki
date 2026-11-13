@@ -9,6 +9,13 @@ export const DISCLAIMER =
 
 export const UPDATES = [
   {
+    title: 'Phase 5 · Ranked and progression',
+    items: [
+      'Ranked 1v1 on APEX: FIND MATCH pairs you with a rider near your rating. You see who it is only when the match starts. Play 5 placement matches to get your tier: Bronze, Silver, Gold, Platinum or Diamond. Top 25 board in the Ranked panel.',
+      "Leaving a ranked match loses it and starts a cooldown of 1, then 5, then 15 minutes. If your opponent never shows, you're never penalised and go straight back to the front of the queue.",
+    ],
+  },
+  {
     title: 'Phase 4 · Multiplayer',
     items: [
       'Live rooms: pick Live rooms in Basecamp and ride with up to 30 riders per park in numbered rooms. Hold Tab for the roster; other riders show on the minimap.',
@@ -92,6 +99,8 @@ export const PAGES = {
           <tr><td>Reports you make or that are made about you, with the last 10 minutes of that room's chat</td><td>Moderators only, until reviewed</td></tr>
           <tr><td>Your party: who's in it, who leads it, its park and private-room switch, invites you've sent or received, and 10-minute removals</td><td>The party's members (and riders you invite see the leader's gamertag)</td></tr>
           <tr><td>Duels: whose turn it is and each finished run's inputs and score, sent to your opponent</td><td>Your opponent, live. Never stored.</td></tr>
+          <tr><td>Ranked: your rating, tier and win/loss record for 1v1 and 2v2</td><td>Everyone, once you're in the top 25</td></tr>
+          <tr><td>Ranked matches: who played, the scores, the result, and any leave cooldown you're serving</td><td>The riders in that match. Deleted with your account.</td></tr>
         </tbody>
       </table>
       <p>There are no ads, no analytics and no tracking cookies. Nothing is sold or shared, and CranSki never asks for payment details or passwords.</p>

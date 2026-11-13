@@ -31,7 +31,9 @@ export class Basecamp {
     $('music-btn').addEventListener('click', onMusic);
     $('friends-btn').addEventListener('click', () => (onFriends ? onFriends() : onPage('online')));
     $('account-btn').addEventListener('click', onAccount);
-    document.querySelectorAll('#basecamp .mode').forEach((b) => b.addEventListener('click', () => onMode?.(b.dataset.mode === 'multi' ? 'live' : 'solo')));
+    document.querySelectorAll('#basecamp .mode').forEach((b) =>
+      b.addEventListener('click', () => onMode?.(b.dataset.mode === 'multi' ? 'live' : b.dataset.mode === 'ranked' ? 'ranked' : 'solo'))
+    );
     const name = $('rider-name');
     // Signed in, the lift pass shows your gamertag; change it from Account.
     name.addEventListener('click', () => {
@@ -79,7 +81,7 @@ export class Basecamp {
   }
 
   setMode(mode, note) {
-    document.querySelectorAll('#basecamp .mode').forEach((b) => b.classList.toggle('on', (b.dataset.mode === 'multi') === (mode === 'live')));
+    document.querySelectorAll('#basecamp .mode').forEach((b) => b.classList.toggle('on', b.dataset.mode === (mode === 'live' ? 'multi' : 'solo')));
     $('mode-note').textContent = note;
   }
 

@@ -34,6 +34,11 @@ test('every table that stores rider data is removed with the account', () => {
   assert.ok(tables.length >= 7);
   for (const [, name, body] of tables) {
     if (name === 'private.blocked_name_terms') continue; // no rider data
+    // Tables that list players in an array are cleared by a delete trigger.
+    if (name === 'public.matches') {
+      assert.match(sql, /create trigger forget_matches after delete on public\.profiles/);
+      continue;
+    }
     assert.match(body, /on delete cascade/, `${name} must be deleted along with the account`);
   }
 });

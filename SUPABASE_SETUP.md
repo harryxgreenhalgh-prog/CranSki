@@ -373,3 +373,40 @@ How parties work:
 - [ ] **Realtime** → **Settings** → turn off "Allow public access".
 - [ ] `npx supabase functions deploy chat --no-verify-jwt`
 - [ ] Merge to `main` so GitHub Actions publishes the game.
+
+## 11. Ranked 1v1 (Phase 5, step 1)
+
+The database does everything ranked: matchmaking, whose turn it is, scores, the result, ratings and leave cooldowns. Riders can read ratings but can't change them, because only database functions and the submit-run Edge Function can write to those tables.
+
+1. **SQL Editor**: run `supabase/setup.sql` again. It's safe to run more than once. Or run `supabase/migrations/20261113120000_ranked.sql` on its own. It adds:
+   - `ratings`;
+   - `ranked_queue`;
+   - `matches`;
+   - the functions that run them;
+   - the policies for `match:<id>` channels.
+2. **Redeploy submit-run**. It now records ranked runs. Once this branch is merged to `main`, GitHub Actions deploys it automatically, because the change is under `supabase/functions/`. To deploy it by hand:
+   1. Open **GitHub → Actions → Deploy Supabase functions**.
+   2. Click **Run workflow**.
+3. Nothing else is needed: no new settings and no new secrets.
+
+How ranked works:
+
+- **Basecamp → Ranked → FIND MATCH**. You're matched against the queued rider closest to your rating. The allowed gap starts at 100 and widens by 8 every second you wait.
+- When a match is found, both riders load APEX and check in automatically. You only see who you're riding against once you've both checked in.
+- 2 runs each, taking turns, and the best run wins. Every run is re-ridden by the server before it counts.
+- Ratings start at 1000. You need 5 placement matches before you get a tier: Bronze, Silver (1050+), Gold (1200+), Platinum (1350+) or Diamond (1500+).
+- **Leaving**:
+  - Leaving a live match counts as a loss.
+  - Leaving during check-in starts a cooldown but doesn't cost a loss.
+  - Cooldowns are 1, then 5, then 15 minutes, and they reset after a day.
+  - The rider left waiting is never penalised. If an opponent hasn't checked in after 45 seconds, the match is called off and the rider who did check in goes back to the front of the queue.
+- If the rider whose turn it is goes quiet for 4 minutes, the other rider can claim the match. After 10 minutes the server ends it either way.
+
+### Test it
+
+1. You need two signed-in accounts, for example a computer and an iPad.
+2. On both: **Basecamp → Ranked → FIND MATCH**.
+3. Both load APEX. A toast says "Match found". Then the duel bar shows **RANKED 1V1** and your opponent's gamertag.
+4. Ride your 2 runs each. At the end you see **Rating 1000 → 1032 (+32) · placement 1/5**, or the loss version.
+5. Try leaving during a match: between runs, press **Esc → Leave**. That rider loses, and **Ranked** shows a 1-minute cooldown.
+6. After 5 matches each, both riders appear on the Top 25 board with a tier.

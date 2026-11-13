@@ -22,13 +22,16 @@ export const SUBMIT_ERRORS = {
   bad_inputs: "This run's recording couldn't be read.",
   no_leaderboard: 'This park has no leaderboard.',
   server_not_configured: "The leaderboard server isn't set up yet.",
+  not_your_turn: "It isn't your turn in this match.",
+  not_live: 'That match has ended.',
+  wrong_park: 'Ranked runs are on APEX.',
   server_error: 'The leaderboard server had a problem, so this run wasn\'t posted. Try again later.',
 };
 
 // { ok: true, total, best, improved, rank } or { ok: false, error, message, serverTotal }
 export async function submitRun(record) {
   if (!account.ready) return { ok: false, error: 'not_signed_in', message: SUBMIT_ERRORS.not_signed_in };
-  const body = {
+  return send({
     park: record.park,
     version: record.version,
     steps: record.inputs.steps,
@@ -37,7 +40,27 @@ export async function submitRun(record) {
     grabSlots: record.grabSlots,
     board: !!record.board,
     claimed: { total: record.total },
-  };
+  });
+}
+
+// A run already packed for sending (duels and ranked keep runs this way),
+// optionally as a turn in a ranked match.
+export async function submitPacked(rec, total, match = null) {
+  if (!account.ready) return { ok: false, error: 'not_signed_in', message: SUBMIT_ERRORS.not_signed_in };
+  return send({
+    park: rec.park,
+    version: rec.version,
+    steps: rec.steps,
+    inputs: rec.inputs,
+    marks: rec.marks || [],
+    grabSlots: rec.grabSlots,
+    board: !!rec.board,
+    claimed: { total },
+    ...(match ? { match } : {}),
+  });
+}
+
+async function send(body) {
   try {
     const sb = await getClient();
     const { data, error } = await sb.functions.invoke('submit-run', { body });

@@ -39,6 +39,11 @@ const db = {
     if (error) throw error;
     return data === true;
   },
+  async recordMatchRun(args: Record<string, unknown>) {
+    const { data, error } = await admin!.rpc('ranked_record_run', args);
+    if (error) throw error;
+    return data;
+  },
   async recordScore(args: Record<string, unknown>) {
     const { data, error } = await admin!.rpc('record_score', args);
     if (error) throw error;
