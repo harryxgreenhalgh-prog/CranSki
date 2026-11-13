@@ -13,6 +13,7 @@ export const UPDATES = [
     items: [
       'Ranked 1v1 on APEX: FIND MATCH pairs you with a rider near your rating. You see who it is only when the match starts. Play 5 placement matches to get your tier: Bronze, Silver, Gold, Platinum or Diamond. Top 25 board in the Ranked panel.',
       "Leaving a ranked match loses it and starts a cooldown of 1, then 5, then 15 minutes. If your opponent never shows, you're never penalised and go straight back to the front of the queue.",
+      'Ranked 2v2 on APEX: queue solo, or as a pair with someone in your party. One run each and the best team total wins. It has its own rating, and teammates must be within 500 rating of each other. Leaving counts as a loss plus a 5, 15, then 30 minute break.',
     ],
   },
   {

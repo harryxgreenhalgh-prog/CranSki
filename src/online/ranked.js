@@ -55,6 +55,8 @@ export class ServerMatch {
     this.again = {};
     this.phase = 'lobby';
     this.closed = false;
+    this.looks = {}; // uid -> Locker look, shared over presence
+    this.absent = new Set(); // riders whose connection has dropped
     this.view = null;
     this.apply(view, true);
     for (const p of this.players) {
@@ -77,6 +79,12 @@ export class ServerMatch {
   }
   get myTeam() {
     return this.view.players[this.view.me].team;
+  }
+  get teamPlay() {
+    return this.view.players.length > 2;
+  }
+  tagOf(uid) {
+    return uid === this.me.uid ? this.me.tag : this.players.find((p) => p.uid === uid)?.tag || 'Rider';
   }
   // The opponent (1v1), or the first rider on the other team (2v2).
   get opp() {
@@ -102,6 +110,10 @@ export class ServerMatch {
   get over() {
     return this.view.status === 'done' || this.view.status === 'cancelled';
   }
+  // Seconds the current turn has been going, by the server's clock.
+  get turnAge() {
+    return (this.view.turn_age || 0) + (performance.now() - (this.viewAt || 0)) / 1000;
+  }
   get scores() {
     const out = {};
     for (const p of this.view.players) out[p.id] = (this.view.scores && this.view.scores[p.id]) || [];
@@ -121,13 +133,14 @@ export class ServerMatch {
     if (!view || (this.view && view.id !== this.view.id)) return;
     const before = this.view;
     this.view = view;
+    this.viewAt = performance.now();
     if (first) return;
-    if (view.run_index > before.run_index) {
-      const prevTurn = this.order[before.run_index];
-      if (prevTurn !== this.me.uid) {
-        const s = this.scores[prevTurn] || [];
-        this.h.onOppDone?.(s[s.length - 1] || 0, before.run_index, prevTurn);
-      }
+    // Announce every other rider's run since the last view (a slow poll can skip some).
+    for (let i = before.run_index; i < view.run_index; i++) {
+      const who = this.order[i];
+      if (!who || who === this.me.uid) continue;
+      const k = this.order.slice(0, i).filter((u) => u === who).length;
+      this.h.onOppDone?.((this.scores[who] || [])[k] || 0, i, who);
     }
     if (this.over && !(before.status === 'done' || before.status === 'cancelled')) {
       this.phase = 'over';
@@ -149,7 +162,9 @@ export class ServerMatch {
       },
       onPresence: (list) => {
         const here = new Set(list.map((p) => p.u || p.key));
-        const gone = this.players.some((p) => p.uid !== this.me.uid && !here.has(p.uid));
+        for (const p of list) if (p.u && p.look && typeof p.look === 'object') this.looks[p.u] = p.look;
+        this.absent = new Set(this.players.filter((p) => p.uid !== this.me.uid && !here.has(p.uid)).map((p) => p.uid));
+        const gone = this.absent.size > 0;
         if (gone !== this._gone) {
           this._gone = gone;
           this.h.onOppPresence?.(!gone);
@@ -157,7 +172,7 @@ export class ServerMatch {
       },
       onStatus: (s) => this.h.onConnection?.(s === 'SUBSCRIBED'),
     });
-    await this.ch.track({ u: this.me.uid, tag: this.me.tag });
+    await this.ch.track({ u: this.me.uid, tag: this.me.tag, look: this.me.look || null });
     this._timer = setInterval(() => this.refresh(), 2500);
   }
 

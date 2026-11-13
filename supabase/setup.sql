@@ -1274,6 +1274,7 @@ create table if not exists public.matches (
   players uuid[] not null, -- run order: everyone's first run in this order, then again
   teams integer[] not null, -- team (0 or 1) of each player
   queued_at timestamptz[] not null, -- for putting riders back in the queue
+  partners uuid[] not null default '{}', -- 2v2: each rider's queued partner (or null)
   runs_each integer not null,
   checked_in uuid[] not null default '{}',
   scores jsonb not null default '{}'::jsonb, -- uid -> [run totals]
@@ -1285,6 +1286,7 @@ create table if not exists public.matches (
   result jsonb
 );
 create index if not exists matches_open on public.matches (status, created_at);
+alter table public.matches add column if not exists partners uuid[] not null default '{}';
 
 create table if not exists private.ranked_penalties (
   user_id uuid not null references auth.users (id) on delete cascade,
@@ -1358,6 +1360,31 @@ begin
   insert into private.ranked_penalties (user_id, mode, level, until, last_at) values (p_user, p_mode, lvl, until_at, now())
   on conflict (user_id, mode) do update set level = excluded.level, until = excluded.until, last_at = excluded.last_at;
   return until_at;
+end
+$$;
+
+-- 2v2: leaving before the start still counts as a loss (and a placement).
+create or replace function private.leave_loss(p_user uuid, p_mode text) returns void
+language sql security definer set search_path = '' as $$
+  insert into public.ratings (user_id, mode, rating, placements, losses)
+  values (p_user, p_mode, 984, 1, 1)
+  on conflict (user_id, mode) do update set
+    losses = public.ratings.losses + 1,
+    placements = least(5, public.ratings.placements + 1),
+    rating = greatest(100, public.ratings.rating - 16),
+    updated_at = now()
+$$;
+
+-- Put a rider back at the front of the queue (with their partner, if both are going back).
+create or replace function private.requeue(p_match public.matches, i integer, p_back uuid[]) returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  partner uuid := case when cardinality(p_match.partners) >= i then p_match.partners[i] end;
+begin
+  if partner is not null and not (partner = any (p_back)) then partner := null; end if;
+  insert into public.ranked_queue (user_id, mode, rating, partner, queued_at)
+  values (p_match.players[i], p_match.mode, private.rating_of(p_match.players[i], p_match.mode), partner, p_match.queued_at[i])
+  on conflict (user_id) do nothing;
 end
 $$;
 
@@ -1462,14 +1489,12 @@ begin
   if m.status = 'checkin' then
     update public.matches set status = 'cancelled', ended_at = now(), result = jsonb_build_object('reason', p_reason, 'left', p_user) where id = p_match;
     if (private.ranked_rules(m.mode) ->> 'leave_is_loss_before_start')::boolean then
-      update public.ratings set losses = losses + 1, rating = greatest(100, rating - 16), updated_at = now() where user_id = p_user and mode = m.mode;
+      perform private.leave_loss(p_user, m.mode);
     end if;
     -- Never penalise the riders left waiting: straight back in the queue.
     for i in 1 .. array_length(m.players, 1) loop
       if m.players[i] <> p_user then
-        insert into public.ranked_queue (user_id, mode, rating, queued_at)
-        values (m.players[i], m.mode, private.rating_of(m.players[i], m.mode), m.queued_at[i])
-        on conflict (user_id) do nothing;
+        perform private.requeue(m, i, array_remove(m.players, p_user));
       end if;
     end loop;
     return jsonb_build_object('cancelled', true);
@@ -1492,13 +1517,11 @@ begin
     update public.matches set status = 'cancelled', ended_at = now(), result = jsonb_build_object('reason', 'no_show') where id = m.id;
     for i in 1 .. array_length(m.players, 1) loop
       if m.players[i] = any (m.checked_in) then
-        insert into public.ranked_queue (user_id, mode, rating, queued_at)
-        values (m.players[i], m.mode, private.rating_of(m.players[i], m.mode), m.queued_at[i])
-        on conflict (user_id) do nothing;
+        perform private.requeue(m, i, m.checked_in);
       else
         perform private.penalize(m.players[i], m.mode);
         if (private.ranked_rules(m.mode) ->> 'leave_is_loss_before_start')::boolean then
-          update public.ratings set losses = losses + 1, rating = greatest(100, rating - 16), updated_at = now() where user_id = m.players[i] and mode = m.mode;
+          perform private.leave_loss(m.players[i], m.mode);
         end if;
       end if;
     end loop;
@@ -1564,14 +1587,14 @@ begin
   -- My side first: me and my partner, if I have one waiting.
   team_a := array[p_user];
   if me.partner is not null then
-    if not exists (select 1 from unnest(picks) x where x.user_id = me.partner) then return null; end if;
+    if not exists (select 1 from unnest(picks) x where x.user_id = me.partner and x.partner = p_user) then return null; end if;
     team_a := team_a || me.partner;
   end if;
   foreach cand in array picks loop
     if cand.user_id = any (team_a) or cand.user_id = any (team_b) then continue; end if;
     if cand.partner is not null then
       -- A pair joins together, on the other team if there's room.
-      if not exists (select 1 from unnest(picks) x where x.user_id = cand.partner) then continue; end if;
+      if not exists (select 1 from unnest(picks) x where x.user_id = cand.partner and x.partner = cand.user_id) then continue; end if;
       if cardinality(team_b) = 0 then team_b := array[cand.user_id, cand.partner];
       elsif cardinality(team_a) = 0 then team_a := array[cand.user_id, cand.partner];
       end if;
@@ -1591,8 +1614,10 @@ begin
   ordered := array[team_a[1], team_b[1], team_a[2], team_b[2]]; -- alternate drops
   ts := array[0, 1, 0, 1];
   qts := array(select coalesce((select rq.queued_at from public.ranked_queue rq where rq.user_id = u), now()) from unnest(ordered) u);
-  insert into public.matches (mode, players, teams, queued_at, runs_each)
-  values ('2v2', ordered, ts, qts, 1) returning id into mid;
+  insert into public.matches (mode, players, teams, queued_at, partners, runs_each)
+  values ('2v2', ordered, ts, qts,
+    array(select (select rq.partner from public.ranked_queue rq where rq.user_id = u) from unnest(ordered) u),
+    1) returning id into mid;
   delete from public.ranked_queue where user_id = any (ordered);
   return mid;
 end
@@ -1644,6 +1669,15 @@ begin
   end if;
   if p_mode = '1v1' then p_partner := null; end if;
   if p_partner = me then p_partner := null; end if;
+  -- Teammates within 500 rating of each other.
+  if p_partner is not null then
+    if not exists (select 1 from public.profiles where id = p_partner) then
+      return jsonb_build_object('status', 'bad_partner');
+    end if;
+    if abs(private.rating_of(me, '2v2') - private.rating_of(p_partner, '2v2')) > 500 then
+      return jsonb_build_object('status', 'partner_too_far');
+    end if;
+  end if;
   insert into public.ranked_queue (user_id, mode, rating, partner)
   values (me, p_mode, private.rating_of(me, p_mode), p_partner)
   on conflict (user_id) do update set mode = excluded.mode, rating = excluded.rating, partner = excluded.partner, queued_at = now();
@@ -1677,7 +1711,8 @@ begin
     end if;
     mid := private.ranked_pair(me);
     if mid is null then
-      return jsonb_build_object('status', 'queued', 'mode', q.mode, 'waited', extract(epoch from now() - q.queued_at)::integer);
+      return jsonb_build_object('status', 'queued', 'mode', q.mode, 'waited', extract(epoch from now() - q.queued_at)::integer,
+        'partner_ready', q.partner is not null and exists (select 1 from public.ranked_queue p where p.user_id = q.partner and p.partner = me));
     end if;
   end if;
   return jsonb_build_object('status', 'match', 'match', private.match_view(mid, me));

@@ -410,3 +410,28 @@ How ranked works:
 4. Ride your 2 runs each. At the end you see **Rating 1000 → 1032 (+32) · placement 1/5**, or the loss version.
 5. Try leaving during a match: between runs, press **Esc → Leave**. That rider loses, and **Ranked** shows a 1-minute cooldown.
 6. After 5 matches each, both riders appear on the Top 25 board with a tier.
+
+## 12. Ranked 2v2 (Phase 5, step 2)
+
+1. **SQL Editor**: run `supabase/setup.sql` again. The 2v2 rules are part of the same ranked migration, which now also stores each rider's partner and a "partner ready" flag.
+2. Nothing to deploy. The submit-run change from step 1 already covers 2v2.
+
+How 2v2 works:
+
+- **Basecamp → Ranked → RANKED 2V2**.
+- **Queue solo** to get a teammate near your rating. To queue as a pair, be in a party together, pick **With <name>** and press **FIND MATCH**. Your partner gets a **QUEUE / No thanks** prompt. A pair is only matched once both have queued naming each other. Until then, the search bar says "waiting for <name> to queue with you".
+- Teammates must be within 500 rating of each other. A pair further apart than that gets a message and can queue solo instead.
+- Run order: team A rider 1, team B rider 1, team A rider 2, team B rider 2. Each rider gets one run, and the best team total wins. You watch every run live, including your teammate's.
+- You see your teammate as soon as the match is found. The other team is revealed at the start.
+- 2v2 has its own rating, separate from 1v1, with the same tiers and 5 placement matches.
+- **Leaving** counts as a loss, even during check-in, plus a break of 5, then 15, then 30 minutes. Riders who were left waiting go back to the front of the queue, and pairs stay together.
+- If a rider drops out on their turn, everyone sees **NOT RESPONDING** with the server's 4-minute clock. When it runs out, that rider's team forfeits.
+
+### Test it
+
+You need four signed-in accounts (or four browser profiles).
+
+1. Two of them start a party. Both open **Ranked → RANKED 2V2**. One picks **With <the other>** and presses **FIND MATCH**, and the other presses **QUEUE** on the prompt.
+2. The other two press **FIND MATCH** solo.
+3. All four load APEX. The bar shows **RANKED 2V2**. Each rider gets one run, and the HUD shows **Your team X · Them Y**.
+4. The results card lists both teams with their totals and your rating change.

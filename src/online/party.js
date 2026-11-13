@@ -104,6 +104,7 @@ export class Party {
         changed: () => this.refresh(),
         go: (m) => m?.u === this.info?.leader && m.u !== this.me.uid && this.h.onGo?.(m),
         removed: (m) => m?.target === this.me.uid && this._removed(),
+        ranked: (m) => m?.partner === this.me.uid && this.has(m.u) && this.h.onRankedAsk?.(m),
       },
       onPresence: (list) => {
         this.online = new Map(list.filter((p) => p.u).map((p) => [p.u, { where: p.where, park: p.park }]));
@@ -186,6 +187,12 @@ export class Party {
   go({ park, room, priv }) {
     if (!this.isLeader) return;
     this.ch?.send('go', { u: this.me.uid, tag: this.me.tag, park, room, priv: !!priv, party: this.info.id });
+  }
+
+  // Ask a party member to queue for ranked 2v2 with me.
+  askRanked(partner, mode = '2v2') {
+    if (!this.has(partner)) return;
+    this.ch?.send('ranked', { u: this.me.uid, tag: this.me.tag, partner, mode });
   }
 
   async _removed() {

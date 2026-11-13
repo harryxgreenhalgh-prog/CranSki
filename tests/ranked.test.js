@@ -91,3 +91,60 @@ test('ranked match: 30 s of pause time, and leaving forfeits only an unfinished 
   await done.leave();
   assert.equal(forfeits.length, 1);
 });
+
+test('ranked 2v2: one run each in team order, teammates and opponents, team result', () => {
+  const v2 = (over = {}) =>
+    view({
+      mode: '2v2',
+      me: 1,
+      runs_each: 1,
+      players: [
+        { id: 'a', tag: 'Alpha', team: 0 },
+        { id: 'b', tag: 'Beta', team: 1 },
+        { id: 'c', tag: 'Gamma', team: 0 },
+        { id: 'd', tag: 'Delta', team: 1 },
+      ],
+      ...over,
+    });
+  const { m, events } = make(v2());
+  assert.equal(m.teamPlay, true);
+  assert.deepEqual(m.order, ['a', 'b', 'c', 'd']);
+  assert.equal(m.myTeam, 1);
+  assert.equal(m.opp.uid, 'a');
+  assert.equal(m.tagOf('d'), 'Delta');
+  assert.equal(m.tagOf('b'), 'Beta');
+  m.apply(v2({ run_index: 3, scores: { a: [3000], b: [5000], c: [4000] } }));
+  // My teammate Delta is up; Gamma's run was announced.
+  assert.equal(m.turn, 'd');
+  assert.ok(events.includes('opp c 4000'));
+  m.apply(v2({ run_index: 4, status: 'done', scores: { a: [3000], b: [5000], c: [4000], d: [1000] }, result: { winner_team: 0, reason: 'runs', best: {}, changes: {} } }));
+  const r = m.result();
+  assert.equal(r.winnerTeam, 0);
+  assert.equal(r.winner, 'a');
+  assert.ok(events.includes('over a'));
+});
+
+test('ranked: presence shows who has dropped out and shares Locker looks', async () => {
+  const net = memoryNet();
+  const mk = (uid, tag, look) =>
+    new ServerMatch({
+      view: view({ me: uid === 'a' ? 0 : 1 }),
+      me: { uid, tag, look },
+      submit: async () => ({ ok: false }),
+      api: { poll: async () => ({}), claim: async () => null, forfeit: async () => null },
+      open: net(),
+    });
+  const a = mk('a', 'Alpha', { topColor: 0x123456 });
+  const b = mk('b', 'Beta', null);
+  const seen = [];
+  b.h = { onOppPresence: (here) => seen.push(here) };
+  await b.connect();
+  assert.ok(b.absent.has('a'));
+  await a.connect();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(b.absent.size, 0);
+  assert.deepEqual(b.looks.a, { topColor: 0x123456 });
+  assert.deepEqual(seen, [false, true]);
+  await a.leave();
+  await b.leave();
+});
