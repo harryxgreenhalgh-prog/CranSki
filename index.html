@@ -83,7 +83,7 @@
         <aside class="leftcol">
           <div class="card news"><h4>LATEST UPDATE</h4><div id="news-body"></div></div>
           <div class="card event"><h4>CHALLENGE</h4><div id="event-body"></div></div>
-          <div class="card season"><h4>SEASON PASS</h4><p class="muted">Seasons, tiers and rewards arrive with online play.</p><div class="tierbar"><span style="width: 0%"></span></div></div>
+          <div class="card season" id="season-card" role="button" tabindex="0" title="Open the Season Pass"><h4>SEASON PASS</h4><p class="muted">Sign in to level up the Season Pass by riding.</p><div class="tierbar"><span style="width: 0%"></span></div></div>
           <div class="card podium"><h4>YOUR PODIUM</h4><ol id="podium"></ol></div>
         </aside>
         <div id="passcard" class="passcard">
@@ -217,6 +217,7 @@
           <div id="res-total" class="big-score">0</div>
           <div id="res-best" class="muted"></div>
           <div id="res-frost" class="frostline"></div>
+          <div id="res-xp" class="xpline"></div>
           <div id="res-board" class="boardline"></div>
           <table class="breakdown">
             <tbody>

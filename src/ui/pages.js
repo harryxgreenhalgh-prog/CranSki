@@ -13,6 +13,8 @@ export const UPDATES = [
     items: [
       'Ranked 1v1 on APEX: FIND MATCH pairs you with a rider near your rating. You see who it is only when the match starts. Play 5 placement matches to get your tier: Bronze, Silver, Gold, Platinum or Diamond. Top 25 board in the Ranked panel.',
       "Leaving a ranked match loses it and starts a cooldown of 1, then 5, then 15 minutes. If your opponent never shows, you're never penalised and go straight back to the front of the queue.",
+      'Season Pass: 100 levels of 500 XP. Every run you finish gives 25 XP plus 1 per 3,000 points. Full XP for 3 levels a day, and days you miss roll over; after that, runs give 1/5 XP. A free track, and a premium track for 1,500 FROST that pays back 1,500 FROST. Rewards unlock the moment you reach their level; the reward strip shows what is next.',
+      'Items you own (from the Pass, and soon the Shop) appear in the Locker under YOUR ITEMS.',
       'FROST now lives on the server: sign in and every run you finish, on any park, earns 10 FROST plus 1 per 10,000 points, up to 100 a day. The server re-rides each run before paying, and pays each run once. No real money, ever.',
       'Ranked 2v2 on APEX: queue solo, or as a pair with someone in your party. One run each and the best team total wins. It has its own rating, and teammates must be within 500 rating of each other. Leaving counts as a loss plus a 5, 15, then 30 minute break.',
       'Party matches for parties of 3 or 4: the leader picks a private 2v2 or free-for-all on any leaderboard park, with 1, 3 or 5 runs each, and best run or round wins. Riders take turns while the others watch.',
@@ -97,6 +99,7 @@ export const PAGES = {
           <tr><td>Your best server-checked score on each park, with its best trick and date</td><td>Everyone</td></tr>
           <tr><td>The recorded inputs behind each leaderboard run: which buttons were held at each moment, nothing else</td><td>Nobody through the game; kept so runs can be re-checked</td></tr>
           <tr><td>When you last submitted runs, to stop spam</td><td>Nobody; deleted after a day</td></tr>
+          <tr><td>Your Season Pass progress (XP, level, premium) and the items you own, with where each came from</td><td>Only you</td></tr>
           <tr><td>Your FROST balance, and a history of what you earned and spent (with a fingerprint of each paid run, so a run is only paid once)</td><td>Only you see your balance and recent changes</td></tr>
           <tr><td>Live rooms: your position, pose, tricks and Locker look while you ride, sent to the riders in your room</td><td>Riders in your room, live. Never stored.</td></tr>
           <tr><td>Chat messages</td><td>Your room or party, live. Never stored: every message is filtered and passed straight on.</td></tr>

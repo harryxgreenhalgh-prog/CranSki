@@ -2008,3 +2008,538 @@ revoke all on function public.reward_run(uuid, text, integer, text) from public,
 grant execute on function public.reward_run(uuid, text, integer, text) to service_role;
 revoke all on function public.my_wallet() from public, anon;
 grant execute on function public.my_wallet() to authenticated;
+
+-- =================================================================== 20261116120000_season_pass.sql
+
+-- CranSki · Phase 5 · Step 5: seasons, items you own, and the Season Pass.
+--
+-- Season Pass: 100 levels of 500 XP. Every finished run (re-ridden by the
+-- submit-run Edge Function) gives 25 XP plus 1 per 3,000 points. Each day of
+-- the season allows 1,500 XP (3 levels) at the full rate; days you miss roll
+-- over; past that, runs give 1/5 XP. A free track and a premium track; premium
+-- costs 1,500 FROST and pays back 1,500 FROST over its levels. Rewards are
+-- granted as soon as you reach their level (premium ones too, when you buy it).
+--
+-- Riders read their own pass and items; only these functions change them.
+
+-- ------------------------------------------------------------------ seasons
+create table if not exists public.seasons (
+  id integer primary key,
+  name text not null,
+  starts_at timestamptz not null,
+  ends_at timestamptz not null,
+  ended_at timestamptz
+);
+alter table public.seasons enable row level security;
+revoke all on public.seasons from public, anon, authenticated;
+grant select on public.seasons to anon, authenticated;
+drop policy if exists "Seasons are public" on public.seasons;
+create policy "Seasons are public" on public.seasons for select using (true);
+insert into public.seasons (id, name, starts_at, ends_at)
+select 1, 'Season 1', date_trunc('day', now()), date_trunc('day', now()) + interval '30 days'
+where not exists (select 1 from public.seasons);
+
+-- The season now under way (there's always one).
+create or replace function private.current_season() returns public.seasons
+language plpgsql security definer set search_path = '' as $$
+declare
+  s public.seasons;
+begin
+  select * into s from public.seasons where ended_at is null order by id desc limit 1;
+  if not found then
+    insert into public.seasons (id, name, starts_at, ends_at)
+    select coalesce(max(id), 0) + 1, 'Season ' || (coalesce(max(id), 0) + 1), date_trunc('day', now()), date_trunc('day', now()) + interval '30 days'
+    from public.seasons
+    returning * into s;
+  end if;
+  return s;
+end
+$$;
+
+-- ------------------------------------------------------------------ the catalogue
+-- Filled from src/economy/catalog.js by the generated *_catalog.sql migration.
+create table if not exists public.item_sets (
+  id text primary key,
+  name text not null,
+  set_group integer not null,
+  price integer not null check (price > 0),
+  blurb text not null default ''
+);
+create table if not exists public.items (
+  id text primary key,
+  name text not null,
+  kind text not null,
+  slot text not null,
+  rarity text not null check (rarity in ('rare', 'epic', 'legendary')),
+  source text not null check (source in ('shop', 'set', 'pass')),
+  price integer check (price is null or price > 0),
+  set_id text references public.item_sets (id),
+  look jsonb not null default '{}'::jsonb
+);
+create table if not exists public.pass_rewards (
+  level integer not null check (level between 1 and 100),
+  track text not null check (track in ('free', 'premium')),
+  item_id text references public.items (id),
+  frost integer check (frost is null or frost > 0),
+  primary key (level, track),
+  check ((item_id is null) <> (frost is null))
+);
+alter table public.item_sets enable row level security;
+alter table public.items enable row level security;
+alter table public.pass_rewards enable row level security;
+revoke all on public.item_sets, public.items, public.pass_rewards from public, anon, authenticated;
+grant select on public.item_sets, public.items, public.pass_rewards to anon, authenticated;
+drop policy if exists "Catalogue is public" on public.item_sets;
+create policy "Catalogue is public" on public.item_sets for select using (true);
+drop policy if exists "Catalogue is public" on public.items;
+create policy "Catalogue is public" on public.items for select using (true);
+drop policy if exists "Catalogue is public" on public.pass_rewards;
+create policy "Catalogue is public" on public.pass_rewards for select using (true);
+
+-- ------------------------------------------------------------------ what riders own
+create table if not exists public.inventory (
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  item_id text not null references public.items (id),
+  source text not null check (source in ('shop', 'set', 'pass', 'gift')),
+  price_paid integer not null default 0,
+  bought_at timestamptz not null default now(),
+  primary key (user_id, item_id)
+);
+alter table public.inventory enable row level security;
+revoke all on public.inventory from public, anon, authenticated;
+grant select on public.inventory to authenticated;
+drop policy if exists "Riders see their own items" on public.inventory;
+create policy "Riders see their own items" on public.inventory
+  for select to authenticated using (user_id = (select auth.uid()));
+
+-- ------------------------------------------------------------------ the pass
+create table if not exists public.season_pass (
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  season_id integer not null references public.seasons (id),
+  xp integer not null default 0 check (xp >= 0),
+  full_xp integer not null default 0, -- XP earned at the full rate this season
+  premium boolean not null default false,
+  free_paid integer not null default 0, -- free rewards granted up to this level
+  premium_paid integer not null default 0, -- premium rewards granted up to this level
+  updated_at timestamptz not null default now(),
+  primary key (user_id, season_id)
+);
+alter table public.season_pass enable row level security;
+revoke all on public.season_pass from public, anon, authenticated;
+grant select on public.season_pass to authenticated;
+drop policy if exists "Riders see their own pass" on public.season_pass;
+create policy "Riders see their own pass" on public.season_pass
+  for select to authenticated using (user_id = (select auth.uid()));
+
+create or replace function private.pass_rules() returns jsonb
+language sql immutable set search_path = '' as $$
+  select '{"levels": 100, "xp_per_level": 500, "xp_per_run": 25, "points_per_xp": 3000,
+           "full_xp_per_day": 1500, "reduced_divisor": 5, "premium_price": 1500}'::jsonb
+$$;
+
+create or replace function private.pass_level(p_xp integer) returns integer
+language sql immutable set search_path = '' as $$
+  select least(100, greatest(0, p_xp) / 500)
+$$;
+
+-- Full-rate XP still available (1,500 a day since the season began, minus what's used).
+create or replace function private.full_xp_left(p_season public.seasons, p_full_xp integer) returns integer
+language sql stable set search_path = '' as $$
+  select greatest(0, 1500 * (floor(extract(epoch from (now() - p_season.starts_at)) / 86400)::integer + 1) - p_full_xp)
+$$;
+
+-- Grant every reward the rider has reached and not yet received. Returns what was granted.
+create or replace function private.grant_pass(p_user uuid, p_season integer) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  sp public.season_pass;
+  lvl integer;
+  r public.pass_rewards;
+  out jsonb := '[]'::jsonb;
+begin
+  select * into sp from public.season_pass where user_id = p_user and season_id = p_season for update;
+  if not found then return out; end if;
+  lvl := private.pass_level(sp.xp);
+  for r in
+    select * from public.pass_rewards pr
+    where (pr.track = 'free' and pr.level > sp.free_paid and pr.level <= lvl)
+       or (pr.track = 'premium' and sp.premium and pr.level > sp.premium_paid and pr.level <= lvl)
+    order by pr.level, pr.track
+  loop
+    if r.item_id is not null then
+      insert into public.inventory (user_id, item_id, source) values (p_user, r.item_id, 'pass') on conflict do nothing;
+    else
+      perform private.add_frost(p_user, r.frost, 'pass', format('season:%s:%s:%s', p_season, r.level, r.track));
+    end if;
+    out := out || jsonb_build_object('level', r.level, 'track', r.track, 'item', r.item_id, 'frost', r.frost);
+  end loop;
+  update public.season_pass set free_paid = greatest(free_paid, lvl),
+    premium_paid = case when premium then greatest(premium_paid, lvl) else premium_paid end,
+    updated_at = now()
+  where user_id = p_user and season_id = p_season;
+  return out;
+end
+$$;
+
+-- A finished, re-ridden run: FROST (step 4) and now Season Pass XP. Called only
+-- by the submit-run Edge Function (secret key). The same run pays once.
+create or replace function public.reward_run(p_user uuid, p_park text, p_total integer, p_run_key text)
+returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  rules jsonb := private.frost_rules();
+  today integer;
+  give integer;
+  bal integer;
+  season public.seasons;
+  sp public.season_pass;
+  raw integer;
+  left_full integer;
+  full_part integer;
+  gain integer;
+  granted jsonb;
+begin
+  if p_run_key is null or length(p_run_key) < 16 then raise exception 'bad_run_key'; end if;
+  insert into public.wallets (user_id) values (p_user) on conflict (user_id) do nothing;
+  perform 1 from public.wallets where user_id = p_user for update; -- one reward at a time per rider
+  season := private.current_season();
+  insert into public.season_pass (user_id, season_id) values (p_user, season.id) on conflict do nothing;
+  if exists (select 1 from private.frost_ledger where user_id = p_user and reason = 'run' and ref = p_run_key) then
+    select * into sp from public.season_pass where user_id = p_user and season_id = season.id;
+    return jsonb_build_object(
+      'frost', jsonb_build_object('awarded', 0, 'duplicate', true, 'balance', (select frost from public.wallets where user_id = p_user),
+        'today', private.run_frost_today(p_user), 'cap', rules -> 'daily_cap'),
+      'xp', jsonb_build_object('gained', 0, 'duplicate', true, 'xp', sp.xp, 'level', private.pass_level(sp.xp), 'premium', sp.premium,
+        'full_left', private.full_xp_left(season, sp.full_xp), 'season', season.id, 'granted', '[]'::jsonb));
+  end if;
+
+  -- FROST: 10 + 1 per 10,000 points, capped per day.
+  today := private.run_frost_today(p_user);
+  give := least((rules ->> 'per_run')::integer + greatest(0, p_total) / (rules ->> 'per_points')::integer,
+                greatest(0, (rules ->> 'daily_cap')::integer - today));
+  bal := private.add_frost(p_user, give, 'run', p_run_key);
+
+  -- XP: 25 + 1 per 3,000 points; full rate while today's (rolled-over) allowance lasts, then 1/5.
+  select * into sp from public.season_pass where user_id = p_user and season_id = season.id for update;
+  raw := 25 + greatest(0, p_total) / 3000;
+  left_full := private.full_xp_left(season, sp.full_xp);
+  full_part := least(raw, left_full);
+  gain := full_part + (raw - full_part) / 5;
+  update public.season_pass set xp = xp + gain, full_xp = full_xp + full_part, updated_at = now()
+  where user_id = p_user and season_id = season.id returning * into sp;
+  granted := private.grant_pass(p_user, season.id);
+  return jsonb_build_object(
+    'frost', jsonb_build_object('awarded', give, 'duplicate', false,
+      'balance', (select frost from public.wallets where user_id = p_user), 'today', today + give, 'cap', rules -> 'daily_cap'),
+    'xp', jsonb_build_object('gained', gain, 'reduced', full_part < raw, 'xp', sp.xp, 'level', private.pass_level(sp.xp),
+      'premium', sp.premium, 'full_left', left_full - full_part, 'season', season.id, 'granted', granted));
+end
+$$;
+
+-- Buy the premium track for this season: 1,500 FROST, and its rewards so far straight away.
+create or replace function public.buy_premium_pass() returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  me uuid := auth.uid();
+  season public.seasons;
+  sp public.season_pass;
+  bal integer;
+begin
+  if me is null or not exists (select 1 from public.profiles where id = me) then
+    return jsonb_build_object('status', 'no_gamertag');
+  end if;
+  season := private.current_season();
+  insert into public.season_pass (user_id, season_id) values (me, season.id) on conflict do nothing;
+  select * into sp from public.season_pass where user_id = me and season_id = season.id for update;
+  if sp.premium then return jsonb_build_object('status', 'owned'); end if;
+  begin
+    bal := private.add_frost(me, -(private.pass_rules() ->> 'premium_price')::integer, 'pass', 'premium:' || season.id);
+  exception when others then
+    if sqlerrm = 'not_enough_frost' then return jsonb_build_object('status', 'not_enough_frost'); end if;
+    raise;
+  end;
+  update public.season_pass set premium = true, updated_at = now() where user_id = me and season_id = season.id;
+  return jsonb_build_object('status', 'ok', 'granted', private.grant_pass(me, season.id),
+    'balance', (select frost from public.wallets where user_id = me));
+end
+$$;
+
+-- My pass this season.
+create or replace function public.my_pass() returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  me uuid := auth.uid();
+  season public.seasons := private.current_season();
+  sp public.season_pass;
+begin
+  select * into sp from public.season_pass where user_id = me and season_id = season.id;
+  return jsonb_build_object(
+    'season', jsonb_build_object('id', season.id, 'name', season.name, 'starts_at', season.starts_at, 'ends_at', season.ends_at),
+    'xp', coalesce(sp.xp, 0), 'level', private.pass_level(coalesce(sp.xp, 0)), 'premium', coalesce(sp.premium, false),
+    'full_left', private.full_xp_left(season, coalesce(sp.full_xp, 0)));
+end
+$$;
+
+-- What I own.
+create or replace function public.my_inventory() returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select coalesce(jsonb_agg(jsonb_build_object('item', i.item_id, 'source', i.source, 'at', i.bought_at, 'paid', i.price_paid) order by i.bought_at), '[]'::jsonb)
+  from public.inventory i where i.user_id = (select auth.uid())
+$$;
+
+revoke all on function private.current_season() from public, anon, authenticated;
+revoke all on function private.grant_pass(uuid, integer) from public, anon, authenticated;
+revoke all on function private.full_xp_left(public.seasons, integer) from public, anon, authenticated;
+revoke all on function public.reward_run(uuid, text, integer, text) from public, anon, authenticated;
+grant execute on function public.reward_run(uuid, text, integer, text) to service_role;
+revoke all on function public.buy_premium_pass() from public, anon;
+grant execute on function public.buy_premium_pass() to authenticated;
+revoke all on function public.my_pass() from public, anon;
+grant execute on function public.my_pass() to authenticated;
+revoke all on function public.my_inventory() from public, anon;
+grant execute on function public.my_inventory() to authenticated;
+
+-- =================================================================== 20261116120100_catalog.sql
+
+-- GENERATED by `npm run build:catalog` from src/economy/catalog.js. Do not edit.
+-- The item catalogue, limited-time sets and Season Pass rewards. Safe to run again.
+
+insert into public.item_sets (id, name, set_group, price, blurb) values
+  ('pumpkin-patch', 'Pumpkin Patch', 1, 1400, 'A spooky-season set: glowing orange, midnight black and a dash of purple.'),
+  ('park-baggy', 'Park Baggy', 1, 1400, 'Oversized tee, wide-leg pants, a bright beanie and white twins.'),
+  ('aurora-night', 'Aurora Night', 2, 1400, 'Deep navy with northern-lights green and violet.'),
+  ('spring-slush', 'Spring Slush', 2, 1400, 'Sunny spring-park pastels.')
+on conflict (id) do update set name = excluded.name, set_group = excluded.set_group, price = excluded.price, blurb = excluded.blurb;
+
+insert into public.items (id, name, kind, slot, rarity, source, price, set_id, look) values
+  ('glacier-shell', 'Glacier Shell', 'jacket', 'top', 'rare', 'shop', 800, null, '{"top":"shell","topColor":8377328,"trimColor":2776186}'::jsonb),
+  ('campfire-hoodie', 'Campfire Hoodie', 'jacket', 'top', 'rare', 'shop', 800, null, '{"top":"hoodie","topColor":13784363,"trimColor":3810328}'::jsonb),
+  ('northern-lights-shell', 'Northern Lights Shell', 'jacket', 'top', 'epic', 'shop', 1000, null, '{"top":"shell","topColor":2872207,"trimColor":6962136}'::jsonb),
+  ('static-pop-hoodie', 'Static Pop Hoodie', 'jacket', 'top', 'epic', 'shop', 1000, null, '{"top":"hoodie","topColor":16727717,"trimColor":2086655}'::jsonb),
+  ('molten-core-shell', 'Molten Core Shell', 'jacket', 'top', 'legendary', 'shop', 1200, null, '{"top":"shell","topColor":1710618,"trimColor":16734720}'::jsonb),
+  ('whiteout-parka', 'Whiteout Parka', 'jacket', 'top', 'legendary', 'shop', 1200, null, '{"top":"shell","topColor":16185595,"trimColor":12568271}'::jsonb),
+  ('slate-cargo', 'Slate Cargo Pants', 'pants', 'pants', 'rare', 'shop', 600, null, '{"pants":5989488}'::jsonb),
+  ('moss-baggies', 'Moss Baggies', 'pants', 'pants', 'rare', 'shop', 600, null, '{"pants":5204794}'::jsonb),
+  ('signal-red-baggies', 'Signal Red Baggies', 'pants', 'pants', 'epic', 'shop', 800, null, '{"pants":14168618}'::jsonb),
+  ('midnight-velvet', 'Midnight Velvet Pants', 'pants', 'pants', 'legendary', 'shop', 1000, null, '{"pants":1777482}'::jsonb),
+  ('pine-twins', 'Pine Twins', 'skis', 'ride', 'rare', 'shop', 600, null, '{"ride":"skis","skiColor":4160842}'::jsonb),
+  ('neon-drift-twins', 'Neon Drift Twins', 'skis', 'ride', 'epic', 'shop', 800, null, '{"ride":"skis","skiColor":13041466}'::jsonb),
+  ('comet-twins', 'Comet Twins', 'skis', 'ride', 'legendary', 'shop', 1000, null, '{"ride":"skis","skiColor":15909198}'::jsonb),
+  ('driftwood-deck', 'Driftwood Deck', 'snowboard', 'ride', 'rare', 'shop', 600, null, '{"ride":"board","boardColor":10976079}'::jsonb),
+  ('prism-deck', 'Prism Deck', 'snowboard', 'ride', 'epic', 'shop', 800, null, '{"ride":"board","boardColor":9329663}'::jsonb),
+  ('solar-flare-deck', 'Solar Flare Deck', 'snowboard', 'ride', 'legendary', 'shop', 1000, null, '{"ride":"board","boardColor":16747546}'::jsonb),
+  ('chalk-lid', 'Chalk Lid', 'helmet', 'head', 'rare', 'shop', 600, null, '{"head":"helmet","helmet":"item","helmetFinish":"matte","helmetColor":15262938}'::jsonb),
+  ('lagoon-gloss', 'Lagoon Gloss Helmet', 'helmet', 'head', 'epic', 'shop', 800, null, '{"head":"helmet","helmet":"item","helmetFinish":"gloss","helmetColor":2078118}'::jsonb),
+  ('chrome-comet', 'Chrome Comet Helmet', 'helmet', 'head', 'legendary', 'shop', 1000, null, '{"head":"helmet","helmet":"item","helmetFinish":"metal","helmetColor":12109008}'::jsonb),
+  ('lime-straps', 'Lime Straps', 'bindings', 'gear', 'rare', 'shop', 200, null, '{"bindings":10215482}'::jsonb),
+  ('coral-straps', 'Coral Straps', 'bindings', 'gear', 'epic', 'shop', 400, null, '{"bindings":16740193}'::jsonb),
+  ('sand-boots', 'Sand Boots', 'boots', 'gear', 'rare', 'shop', 200, null, '{"boots":13218442}'::jsonb),
+  ('ruby-boots', 'Ruby Boots', 'boots', 'gear', 'legendary', 'shop', 600, null, '{"boots":10687020}'::jsonb),
+  ('birch-poles', 'Birch Poles', 'poles', 'poles', 'rare', 'shop', 200, null, '{"poles":14997954}'::jsonb),
+  ('laser-poles', 'Laser Poles', 'poles', 'poles', 'epic', 'shop', 400, null, '{"poles":3145680}'::jsonb),
+  ('mustard-mitts', 'Mustard Mitts', 'gloves', 'gloves', 'rare', 'shop', 200, null, '{"gloves":14263595}'::jsonb),
+  ('ice-crystal-mitts', 'Ice Crystal Mitts', 'gloves', 'gloves', 'legendary', 'shop', 600, null, '{"gloves":12577279}'::jsonb),
+  ('rose-lens', 'Rose Lens', 'goggles', 'goggles', 'rare', 'shop', 200, null, '{"lens":16748464}'::jsonb),
+  ('emerald-lens', 'Emerald Lens', 'goggles', 'goggles', 'epic', 'shop', 400, null, '{"lens":2088042}'::jsonb),
+  ('mirror-gold-lens', 'Mirror Gold Lens', 'goggles', 'goggles', 'legendary', 'shop', 600, null, '{"lens":15251747}'::jsonb),
+  ('pumpkin-patch-hoodie', 'Pumpkin Patch Hoodie', 'jacket', 'top', 'epic', 'set', null, 'pumpkin-patch', '{"top":"hoodie","topColor":16741656,"trimColor":1710618}'::jsonb),
+  ('pumpkin-patch-pants', 'Pumpkin Patch Pants', 'pants', 'pants', 'epic', 'set', null, 'pumpkin-patch', '{"pants":2829099}'::jsonb),
+  ('jack-o-lid', 'Jack-o''-Lid', 'helmet', 'head', 'epic', 'set', null, 'pumpkin-patch', '{"head":"helmet","helmet":"item","helmetFinish":"gloss","helmetColor":16741656}'::jsonb),
+  ('spooky-mitts', 'Spooky Mitts', 'gloves', 'gloves', 'epic', 'set', null, 'pumpkin-patch', '{"gloves":6958225}'::jsonb),
+  ('baggy-tee', 'Baggy Tee', 'jacket', 'top', 'epic', 'set', null, 'park-baggy', '{"top":"tee","topColor":16054267,"trimColor":2764600}'::jsonb),
+  ('baggy-wide-legs', 'Baggy Wide-Legs', 'pants', 'pants', 'epic', 'set', null, 'park-baggy', '{"pants":7043727}'::jsonb),
+  ('baggy-beanie', 'Baggy Beanie', 'beanie', 'head', 'epic', 'set', null, 'park-baggy', '{"head":"beanie","beanieItem":"knit","beanieColor":16765503}'::jsonb),
+  ('jib-twins', 'Jib Twins', 'skis', 'ride', 'epic', 'set', null, 'park-baggy', '{"ride":"skis","skiColor":16054267}'::jsonb),
+  ('aurora-shell', 'Aurora Shell', 'jacket', 'top', 'legendary', 'set', null, 'aurora-night', '{"top":"shell","topColor":728378,"trimColor":2872207}'::jsonb),
+  ('aurora-pants', 'Aurora Pants', 'pants', 'pants', 'epic', 'set', null, 'aurora-night', '{"pants":728378}'::jsonb),
+  ('aurora-lens', 'Aurora Lens', 'goggles', 'goggles', 'epic', 'set', null, 'aurora-night', '{"lens":2872207}'::jsonb),
+  ('aurora-deck', 'Aurora Deck', 'snowboard', 'ride', 'epic', 'set', null, 'aurora-night', '{"ride":"board","boardColor":6962136}'::jsonb),
+  ('slush-long-sleeve', 'Slush Long Sleeve', 'jacket', 'top', 'epic', 'set', null, 'spring-slush', '{"top":"longsleeve","topColor":16765404,"trimColor":8377328}'::jsonb),
+  ('slush-pants', 'Slush Pants', 'pants', 'pants', 'epic', 'set', null, 'spring-slush', '{"pants":11069135}'::jsonb),
+  ('slush-mitts', 'Slush Mitts', 'gloves', 'gloves', 'epic', 'set', null, 'spring-slush', '{"gloves":16769126}'::jsonb),
+  ('slush-poles', 'Slush Poles', 'poles', 'poles', 'epic', 'set', null, 'spring-slush', '{"poles":16748464}'::jsonb),
+  ('pass-3-premium', 'Aspen Shell', 'jacket', 'top', 'rare', 'pass', null, null, '{"top":"shell","topColor":14964526,"trimColor":10011097}'::jsonb),
+  ('pass-5-premium', 'Basalt Lens', 'goggles', 'goggles', 'rare', 'pass', null, null, '{"lens":3065014}'::jsonb),
+  ('pass-8-premium', 'Cinder Pants', 'pants', 'pants', 'rare', 'pass', null, null, '{"pants":15919311}'::jsonb),
+  ('pass-10-free', 'Drift Mitts', 'gloves', 'gloves', 'rare', 'pass', null, null, '{"gloves":8599788}'::jsonb),
+  ('pass-10-premium', 'Ember Twins', 'skis', 'ride', 'rare', 'pass', null, null, '{"ride":"skis","skiColor":6724540}'::jsonb),
+  ('pass-13-premium', 'Flint Lid', 'helmet', 'head', 'rare', 'pass', null, null, '{"head":"helmet","helmet":"item","helmetFinish":"gloss","helmetColor":15625293}'::jsonb),
+  ('pass-15-premium', 'Glint Poles', 'poles', 'poles', 'rare', 'pass', null, null, '{"poles":15817653}'::jsonb),
+  ('pass-18-premium', 'Halo Deck', 'snowboard', 'ride', 'rare', 'pass', null, null, '{"ride":"board","boardColor":3835647}'::jsonb),
+  ('pass-20-free', 'Iris Boots', 'boots', 'gear', 'rare', 'pass', null, null, '{"boots":9338302}'::jsonb),
+  ('pass-20-premium', 'Juniper Beanie', 'beanie', 'head', 'rare', 'pass', null, null, '{"head":"beanie","beanieItem":"knit","beanieColor":12339017}'::jsonb),
+  ('pass-23-premium', 'Lumen Straps', 'bindings', 'gear', 'rare', 'pass', null, null, '{"bindings":62932}'::jsonb),
+  ('pass-25-premium', 'Mica Hoodie', 'jacket', 'top', 'rare', 'pass', null, null, '{"top":"hoodie","topColor":15968018,"trimColor":12339017}'::jsonb),
+  ('pass-28-premium', 'Nimbus Lens', 'goggles', 'goggles', 'rare', 'pass', null, null, '{"lens":4020864}'::jsonb),
+  ('pass-30-free', 'Opal Pants', 'pants', 'pants', 'rare', 'pass', null, null, '{"pants":10182117}'::jsonb),
+  ('pass-30-premium', 'Pebble Mitts', 'gloves', 'gloves', 'rare', 'pass', null, null, '{"gloves":16471559}'::jsonb),
+  ('pass-33-premium', 'Quartz Twins', 'skis', 'ride', 'rare', 'pass', null, null, '{"ride":"skis","skiColor":14373985}'::jsonb),
+  ('pass-35-premium', 'Rime Lid', 'helmet', 'head', 'epic', 'pass', null, null, '{"head":"helmet","helmet":"item","helmetFinish":"gloss","helmetColor":6986062}'::jsonb),
+  ('pass-38-premium', 'Sable Poles', 'poles', 'poles', 'epic', 'pass', null, null, '{"poles":48121}'::jsonb),
+  ('pass-40-free', 'Tundra Deck', 'snowboard', 'ride', 'epic', 'pass', null, null, '{"ride":"board","boardColor":2700124}'::jsonb),
+  ('pass-40-premium', 'Umber Boots', 'boots', 'gear', 'epic', 'pass', null, null, '{"boots":16760681}'::jsonb),
+  ('pass-43-premium', 'Vapor Beanie', 'beanie', 'head', 'epic', 'pass', null, null, '{"head":"beanie","beanieItem":"knit","beanieColor":3696193}'::jsonb),
+  ('pass-45-premium', 'Willow Straps', 'bindings', 'gear', 'epic', 'pass', null, null, '{"bindings":16711790}'::jsonb),
+  ('pass-48-premium', 'Yonder Shell', 'jacket', 'top', 'epic', 'pass', null, null, '{"top":"shell","topColor":11060870,"trimColor":3696193}'::jsonb),
+  ('pass-50-free', 'Zephyr Lens', 'goggles', 'goggles', 'epic', 'pass', null, null, '{"lens":10011097}'::jsonb),
+  ('pass-50-premium', 'Cobalt Pants', 'pants', 'pants', 'epic', 'pass', null, null, '{"pants":16704576}'::jsonb),
+  ('pass-53-premium', 'Fern Mitts', 'gloves', 'gloves', 'epic', 'pass', null, null, '{"gloves":14964526}'::jsonb),
+  ('pass-55-premium', 'Garnet Twins', 'skis', 'ride', 'epic', 'pass', null, null, '{"ride":"skis","skiColor":3065014}'::jsonb),
+  ('pass-58-premium', 'Hazel Lid', 'helmet', 'head', 'epic', 'pass', null, null, '{"head":"helmet","helmet":"item","helmetFinish":"gloss","helmetColor":15919311}'::jsonb),
+  ('pass-60-free', 'Indigo Poles', 'poles', 'poles', 'epic', 'pass', null, null, '{"poles":8599788}'::jsonb),
+  ('pass-60-premium', 'Jade Deck', 'snowboard', 'ride', 'epic', 'pass', null, null, '{"ride":"board","boardColor":6724540}'::jsonb),
+  ('pass-63-premium', 'Kelp Boots', 'boots', 'gear', 'epic', 'pass', null, null, '{"boots":15625293}'::jsonb),
+  ('pass-65-premium', 'Lilac Beanie', 'beanie', 'head', 'epic', 'pass', null, null, '{"head":"beanie","beanieItem":"knit","beanieColor":15817653}'::jsonb),
+  ('pass-68-premium', 'Maple Straps', 'bindings', 'gear', 'legendary', 'pass', null, null, '{"bindings":3835647}'::jsonb),
+  ('pass-70-free', 'Nectar Hoodie', 'jacket', 'top', 'legendary', 'pass', null, null, '{"top":"hoodie","topColor":9338302,"trimColor":15817653}'::jsonb),
+  ('pass-70-premium', 'Ochre Lens', 'goggles', 'goggles', 'legendary', 'pass', null, null, '{"lens":12339017}'::jsonb),
+  ('pass-73-premium', 'Plum Pants', 'pants', 'pants', 'legendary', 'pass', null, null, '{"pants":62932}'::jsonb),
+  ('pass-75-premium', 'Russet Mitts', 'gloves', 'gloves', 'legendary', 'pass', null, null, '{"gloves":15968018}'::jsonb),
+  ('pass-78-premium', 'Saffron Twins', 'skis', 'ride', 'legendary', 'pass', null, null, '{"ride":"skis","skiColor":4020864}'::jsonb),
+  ('pass-80-free', 'Teal Lid', 'helmet', 'head', 'legendary', 'pass', null, null, '{"head":"helmet","helmet":"item","helmetFinish":"metal","helmetColor":10182117}'::jsonb),
+  ('pass-80-premium', 'Verdant Poles', 'poles', 'poles', 'legendary', 'pass', null, null, '{"poles":16471559}'::jsonb),
+  ('pass-83-premium', 'Wisteria Deck', 'snowboard', 'ride', 'legendary', 'pass', null, null, '{"ride":"board","boardColor":14373985}'::jsonb),
+  ('pass-85-premium', 'Amber Boots', 'boots', 'gear', 'legendary', 'pass', null, null, '{"boots":6986062}'::jsonb),
+  ('pass-88-premium', 'Birch Beanie', 'beanie', 'head', 'legendary', 'pass', null, null, '{"head":"beanie","beanieItem":"knit","beanieColor":48121}'::jsonb),
+  ('pass-90-free', 'Cedar Straps', 'bindings', 'gear', 'legendary', 'pass', null, null, '{"bindings":2700124}'::jsonb),
+  ('pass-90-premium', 'Dune Shell', 'jacket', 'top', 'legendary', 'pass', null, null, '{"top":"shell","topColor":16760681,"trimColor":48121}'::jsonb),
+  ('pass-93-premium', 'Echo Lens', 'goggles', 'goggles', 'legendary', 'pass', null, null, '{"lens":3696193}'::jsonb),
+  ('pass-95-premium', 'Frostline Pants', 'pants', 'pants', 'legendary', 'pass', null, null, '{"pants":16711790}'::jsonb),
+  ('pass-98-premium', 'Gale Mitts', 'gloves', 'gloves', 'legendary', 'pass', null, null, '{"gloves":11060870}'::jsonb),
+  ('pass-100-free', 'Harbor Twins', 'skis', 'ride', 'legendary', 'pass', null, null, '{"ride":"skis","skiColor":10011097}'::jsonb),
+  ('pass-100-premium', 'Isle Lid', 'helmet', 'head', 'legendary', 'pass', null, null, '{"head":"helmet","helmet":"item","helmetFinish":"metal","helmetColor":16704576}'::jsonb)
+on conflict (id) do update set name = excluded.name, kind = excluded.kind, slot = excluded.slot, rarity = excluded.rarity,
+  source = excluded.source, price = excluded.price, set_id = excluded.set_id, look = excluded.look;
+
+insert into public.pass_rewards (level, track, item_id, frost) values
+  (1, 'premium', null, 25),
+  (2, 'free', null, 25),
+  (2, 'premium', null, 25),
+  (3, 'premium', 'pass-3-premium', null),
+  (4, 'premium', null, 25),
+  (5, 'premium', 'pass-5-premium', null),
+  (6, 'premium', null, 25),
+  (7, 'free', null, 25),
+  (7, 'premium', null, 25),
+  (8, 'premium', 'pass-8-premium', null),
+  (9, 'premium', null, 25),
+  (10, 'free', 'pass-10-free', null),
+  (10, 'premium', 'pass-10-premium', null),
+  (11, 'premium', null, 25),
+  (12, 'free', null, 25),
+  (12, 'premium', null, 25),
+  (13, 'premium', 'pass-13-premium', null),
+  (14, 'premium', null, 25),
+  (15, 'premium', 'pass-15-premium', null),
+  (16, 'premium', null, 25),
+  (17, 'free', null, 25),
+  (17, 'premium', null, 25),
+  (18, 'premium', 'pass-18-premium', null),
+  (19, 'premium', null, 25),
+  (20, 'free', 'pass-20-free', null),
+  (20, 'premium', 'pass-20-premium', null),
+  (21, 'premium', null, 25),
+  (22, 'free', null, 25),
+  (22, 'premium', null, 25),
+  (23, 'premium', 'pass-23-premium', null),
+  (24, 'premium', null, 25),
+  (25, 'premium', 'pass-25-premium', null),
+  (26, 'premium', null, 25),
+  (27, 'free', null, 25),
+  (27, 'premium', null, 25),
+  (28, 'premium', 'pass-28-premium', null),
+  (29, 'premium', null, 25),
+  (30, 'free', 'pass-30-free', null),
+  (30, 'premium', 'pass-30-premium', null),
+  (31, 'premium', null, 25),
+  (32, 'free', null, 25),
+  (32, 'premium', null, 25),
+  (33, 'premium', 'pass-33-premium', null),
+  (34, 'premium', null, 25),
+  (35, 'premium', 'pass-35-premium', null),
+  (36, 'premium', null, 25),
+  (37, 'free', null, 25),
+  (37, 'premium', null, 25),
+  (38, 'premium', 'pass-38-premium', null),
+  (39, 'premium', null, 25),
+  (40, 'free', 'pass-40-free', null),
+  (40, 'premium', 'pass-40-premium', null),
+  (41, 'premium', null, 25),
+  (42, 'free', null, 25),
+  (42, 'premium', null, 25),
+  (43, 'premium', 'pass-43-premium', null),
+  (44, 'premium', null, 25),
+  (45, 'premium', 'pass-45-premium', null),
+  (46, 'premium', null, 25),
+  (47, 'free', null, 25),
+  (47, 'premium', null, 25),
+  (48, 'premium', 'pass-48-premium', null),
+  (49, 'premium', null, 25),
+  (50, 'free', 'pass-50-free', null),
+  (50, 'premium', 'pass-50-premium', null),
+  (51, 'premium', null, 25),
+  (52, 'free', null, 25),
+  (52, 'premium', null, 25),
+  (53, 'premium', 'pass-53-premium', null),
+  (54, 'premium', null, 25),
+  (55, 'premium', 'pass-55-premium', null),
+  (56, 'premium', null, 25),
+  (57, 'free', null, 25),
+  (57, 'premium', null, 25),
+  (58, 'premium', 'pass-58-premium', null),
+  (59, 'premium', null, 25),
+  (60, 'free', 'pass-60-free', null),
+  (60, 'premium', 'pass-60-premium', null),
+  (61, 'premium', null, 25),
+  (62, 'free', null, 25),
+  (62, 'premium', null, 25),
+  (63, 'premium', 'pass-63-premium', null),
+  (64, 'premium', null, 25),
+  (65, 'premium', 'pass-65-premium', null),
+  (66, 'premium', null, 25),
+  (67, 'free', null, 25),
+  (67, 'premium', null, 25),
+  (68, 'premium', 'pass-68-premium', null),
+  (69, 'premium', null, 25),
+  (70, 'free', 'pass-70-free', null),
+  (70, 'premium', 'pass-70-premium', null),
+  (71, 'premium', null, 25),
+  (72, 'free', null, 25),
+  (72, 'premium', null, 25),
+  (73, 'premium', 'pass-73-premium', null),
+  (74, 'premium', null, 25),
+  (75, 'premium', 'pass-75-premium', null),
+  (76, 'premium', null, 25),
+  (77, 'free', null, 25),
+  (77, 'premium', null, 25),
+  (78, 'premium', 'pass-78-premium', null),
+  (79, 'premium', null, 25),
+  (80, 'free', 'pass-80-free', null),
+  (80, 'premium', 'pass-80-premium', null),
+  (81, 'premium', null, 25),
+  (82, 'free', null, 25),
+  (82, 'premium', null, 25),
+  (83, 'premium', 'pass-83-premium', null),
+  (84, 'premium', null, 25),
+  (85, 'premium', 'pass-85-premium', null),
+  (86, 'premium', null, 25),
+  (87, 'free', null, 25),
+  (87, 'premium', null, 25),
+  (88, 'premium', 'pass-88-premium', null),
+  (89, 'premium', null, 25),
+  (90, 'free', 'pass-90-free', null),
+  (90, 'premium', 'pass-90-premium', null),
+  (91, 'premium', null, 25),
+  (92, 'free', null, 25),
+  (92, 'premium', null, 25),
+  (93, 'premium', 'pass-93-premium', null),
+  (94, 'premium', null, 25),
+  (95, 'premium', 'pass-95-premium', null),
+  (96, 'premium', null, 25),
+  (97, 'free', null, 25),
+  (97, 'premium', null, 25),
+  (98, 'premium', 'pass-98-premium', null),
+  (99, 'premium', null, 25),
+  (100, 'free', 'pass-100-free', null),
+  (100, 'premium', 'pass-100-premium', null)
+on conflict (level, track) do update set item_id = excluded.item_id, frost = excluded.frost;

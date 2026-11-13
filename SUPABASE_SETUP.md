@@ -505,3 +505,38 @@ reset role;
 2. The results screen says **+N FROST earned · N/100 today**, and the Basecamp FROST count goes up.
 3. Ride enough runs to pass 100 for the day. The results screen then says **Daily FROST cap reached (100 a day)**.
 4. In Supabase, open **Table Editor → wallets**. You'll see your row. Riders can't edit it.
+
+## 15. Season Pass (Phase 5, step 5)
+
+1. **SQL Editor**: run `supabase/setup.sql` again. It adds two migrations:
+   - `20261116120000_season_pass.sql`:
+     - `seasons`, with Season 1 starting on the day you run it and lasting 30 days;
+     - the item catalogue tables;
+     - `inventory`, the items each rider owns;
+     - `season_pass`, each rider's XP and premium status;
+     - a new `reward_run` that also pays XP;
+     - `buy_premium_pass`, `my_pass` and `my_inventory`.
+   - `20261116120100_catalog.sql`: the items, sets and pass rewards. It's generated from `src/economy/catalog.js` by `npm run build:catalog`, so don't edit it by hand.
+2. Nothing to deploy. submit-run already calls `reward_run`, which now pays XP too.
+
+The rules, all enforced in the database:
+
+- 100 levels of 500 XP. A finished run gives 25 XP plus 1 per 3,000 points.
+- Full XP for 1,500 XP (3 levels) for each day of the season so far. Days you miss roll over, so the allowance is "1,500 × days so far, minus what you've used". Past that, a run gives 1/5 XP.
+- **Free track**: 10 items (every 10th level) and 25 FROST on 20 levels (500 FROST in total).
+- **Premium track**: 40 items and 25 FROST on the other 60 levels, which is the 1,500 FROST it costs, paid back.
+- Rewards are granted the moment you reach their level. If you buy premium later, the premium rewards you've already reached are granted straight away.
+- Riders can read their own pass and items but can't change them.
+
+### Test it
+
+1. Sign in and finish a run. The results screen shows **+N XP · Pass level L**, and the Basecamp **SEASON PASS** card fills up.
+2. Click the card, or the **Pass** tab: you'll see your level, the reward strip with the next unlock outlined, and **Get premium · 1,500 FROST**.
+3. To try premium straight away, give yourself FROST as the database owner. Run this in the **SQL Editor**, replacing the email address with your account's:
+
+   ```sql
+   select private.add_frost((select id from auth.users where email = 'you@example.com'), 1500, 'prize', 'test');
+   ```
+
+   Then press **Get premium**. The FROST is taken, and any premium rewards up to your level arrive.
+4. Pass items appear in the **Locker** under **YOUR ITEMS** in their slot (jacket, gloves, boots and so on). Tap one to wear it, then **Save**.

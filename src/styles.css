@@ -2522,3 +2522,199 @@ body.touching #roombadge {
   gap: 6px;
   align-items: center;
 }
+
+/* Season Pass (Phase 5) */
+.ptile {
+  width: 74px;
+  height: 64px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-line);
+  background: rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 4px;
+  text-align: center;
+  position: relative;
+}
+.ptile small {
+  font-size: 9.5px;
+  line-height: 1.15;
+  color: var(--muted);
+  overflow: hidden;
+  max-height: 2.3em;
+}
+.ptile.empty {
+  background: none;
+  border-style: dashed;
+  opacity: 0.35;
+}
+.ptile.frost b {
+  font-size: 18px;
+  color: #bfe3ff;
+}
+.ptile .psw {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+}
+.ptile.rare {
+  border-color: rgba(30, 123, 255, 0.7);
+}
+.ptile.epic {
+  border-color: rgba(142, 91, 255, 0.85);
+}
+.ptile.legendary {
+  border-color: rgba(255, 176, 46, 0.9);
+  box-shadow: inset 0 0 12px rgba(255, 176, 46, 0.25);
+}
+.ptile.got {
+  background: rgba(56, 224, 140, 0.16);
+}
+.ptile.got::after {
+  content: '✓';
+  position: absolute;
+  top: 2px;
+  right: 5px;
+  font-size: 11px;
+  color: var(--green);
+}
+.ptile.locked {
+  opacity: 0.55;
+}
+.ptile.locked::before {
+  content: '🔒';
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 9px;
+}
+.ptile.next {
+  outline: 2px solid var(--orange);
+  outline-offset: 1px;
+}
+.pnext {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+.pnext > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.pnext small {
+  font-size: 10px;
+}
+.pprem {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #1a1206;
+  background: linear-gradient(90deg, #ffb02e, #ffd76a);
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+.pprem.big {
+  font-size: 14px;
+  padding: 6px 12px;
+}
+.pass-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.pass-head > div:first-child {
+  flex: 1 1 260px;
+}
+.pass-head h3 {
+  margin: 0 0 4px;
+}
+.pass-buy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 280px;
+}
+.tierbar.big {
+  height: 12px;
+}
+.pstrip-wrap {
+  display: flex;
+  gap: 6px;
+  margin: 12px 0;
+}
+.plabels {
+  display: grid;
+  grid-template-rows: 18px 64px 64px;
+  gap: 6px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  align-items: center;
+}
+.pstrip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+.pcol {
+  display: grid;
+  grid-template-rows: 18px 64px 64px;
+  gap: 6px;
+  justify-items: center;
+}
+.plv {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+}
+.pcol.reached .plv {
+  color: var(--green);
+}
+.pcol.up .plv {
+  color: var(--orange);
+}
+.xpline {
+  color: #d9c8ff;
+  font-weight: 700;
+  margin-top: 2px;
+  font-size: 14px;
+}
+.lk-items .item small {
+  display: block;
+}
+.lk-items .item .psw {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: -1px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.card .ptile {
+  width: 58px;
+  height: 46px;
+  border-radius: 8px;
+}
+.card .ptile .psw {
+  width: 18px;
+  height: 18px;
+}
+.card .ptile.frost b {
+  font-size: 14px;
+}
+.card .ptile small {
+  font-size: 8.5px;
+}
+#season-card {
+  cursor: pointer;
+}

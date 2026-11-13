@@ -37,6 +37,9 @@ import { friends, onFriends, setLocation } from './online/friends.js';
 import { mountFriends } from './ui/friendsUI.js';
 import { canPost, canSubmit, submitRun, submitPacked } from './online/leaderboard.js';
 import { wallet, frostText } from './online/wallet.js';
+import { economy } from './online/economy.js';
+import { mountPass } from './ui/passUI.js';
+import { itemById } from './economy/catalog.js';
 import { mountBoard } from './ui/boardUI.js';
 import { LiveRoom } from './online/rooms.js';
 import { LOCAL } from './online/net.js';
@@ -224,6 +227,7 @@ function boot() {
       else if (tab === 'replays') openReplays();
       else if (tab === 'locker') openLocker();
       else if (tab === 'leaderboard') openBoard();
+      else if (tab === 'pass') openPass();
       else openPage('online');
     },
     onPage: (p) => openPage(p),
@@ -793,7 +797,7 @@ function boot() {
     duel.finishRun(res.total, record);
     // Friendly duels and party matches: a finished run still earns FROST.
     if (!duel.ranked && reason === 'finish' && account.ready && canSubmit(record))
-      submitPacked(record, res.total).then((r) => r.ok && r.frost?.awarded > 0 && toast(frostText(r.frost), 3500));
+      submitPacked(record, res.total).then((r) => r.ok && r.frost && toast([frostText(r.frost), xpText(r.xp)].filter(Boolean).join(' · '), 4000));
   }
 
   // During my duel run: stream my pose; pausing or standing still uses up the 30 s.
@@ -1278,7 +1282,7 @@ function boot() {
         me,
         submit: async (rec, total, matchId) => {
           const r = await submitPacked(rec, total, matchId);
-          if (r.ok && r.frost?.awarded > 0) setTimeout(() => toast(frostText(r.frost), 3500), 4200);
+          if (r.ok && r.frost) setTimeout(() => toast([frostText(r.frost), xpText(r.xp)].filter(Boolean).join(' · '), 4000), 4200);
           return r;
         },
       });
@@ -1863,11 +1867,12 @@ function boot() {
     el.textContent = 'Checking your run on the server…';
     const r = await submitRun(rec);
     rec.posting = false;
-    if (r.ok && r.frost && state !== 'results' && state !== 'finish') toast(frostText(r.frost), 4000);
+    if (r.ok && r.frost && state !== 'results' && state !== 'finish') toast([frostText(r.frost), xpText(r.xp)].filter(Boolean).join(' · '), 5000);
     if (lastReplay !== rec) return;
     if (r.ok) {
       rec.posted = true;
       $('res-frost').textContent = frostText(r.frost) || 'FROST: the server is not set up yet';
+      $('res-xp').textContent = xpText(r.xp);
       el.innerHTML = board
         ? `✓ Checked by the server · <b>#${r.rank}</b> on ${name}${r.improved ? ' · new leaderboard best' : ` · your board best is ${fmtN(r.best)}`}`
         : '✓ Checked by the server';
@@ -1885,6 +1890,17 @@ function boot() {
     basecamp.refresh();
   });
   wallet.onChange(() => basecamp.visible && basecamp.refresh());
+  economy.onChange(() => basecamp.visible && basecamp.refresh());
+  function openPass() {
+    openModal('Season Pass', '<div class="acct pass" id="pass-panel"></div>');
+    mountPass($('pass-panel'), { onAccount: () => openAccount() });
+  }
+  // "+35 XP · Level 4 (120/500)" and anything that unlocked.
+  function xpText(x) {
+    if (!x || x.duplicate) return '';
+    const unlocked = (x.granted || []).map((g) => (g.item ? itemById(g.item)?.name || 'an item' : `${g.frost} FROST`));
+    return `+${x.gained} XP${x.reduced ? ' (past today’s full-XP levels: 1/5 XP)' : ''} · Pass level ${x.level}${unlocked.length ? ` · Unlocked: ${unlocked.join(', ')}` : ''}`;
+  }
 
   // Cloud saves (Phase 3 step 2): show the status, and apply what arrives.
   addAccountSection(() => `<h3>CLOUD SAVE</h3><p class="muted">${esc(cloudStatusText())}</p>`);
@@ -2241,7 +2257,8 @@ function boot() {
     if (isNew) profile.setBest(L.id, res.total);
     profile.addRun({ park: L.id, total: res.total, date: Date.now(), best: res.bestTrick?.name || null });
     showResults(res, Math.max(best, res.total), isNew);
-    $('res-frost').textContent = account.ready ? 'Checking your run for FROST…' : 'Sign in to earn FROST';
+    $('res-frost').textContent = account.ready ? 'Checking your run for FROST…' : 'Sign in to earn FROST and Season Pass XP';
+    $('res-xp').textContent = '';
     if (lastReplay) postRun(lastReplay);
     else $('res-board').textContent = '';
     $('finishcard').classList.add('hidden');

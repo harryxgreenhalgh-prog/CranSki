@@ -6,6 +6,7 @@ import { getClient } from './client.js';
 import { packRuns, SIM_VERSION } from '../replay/record.js';
 import { PARKS } from '../parks/index.js';
 import { wallet } from './wallet.js';
+import { economy } from './economy.js';
 
 export const BOARD_PARKS = PARKS.filter((p) => p.leaderboard).map((p) => p.id);
 
@@ -73,6 +74,7 @@ async function send(body) {
     const { data, error } = await sb.functions.invoke('submit-run', { body });
     if (!error) {
       if (data?.frost) wallet.set(data.frost);
+      if (data?.xp) economy.applyRun(data.xp);
       return { ok: true, ...data };
     }
     let info = {};

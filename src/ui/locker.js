@@ -2,6 +2,8 @@
 // Cosmetics change looks only, never speed or handling.
 import { DEFAULT_LOOK, HELMETS, GRAB_INFO, GRAB_NAMES } from '../render/riderModel.js';
 import { profile } from '../store.js';
+import { ALL_ITEMS, KINDS, wear, itemColor } from '../economy/catalog.js';
+import { economy } from '../online/economy.js';
 
 const $ = (id) => document.getElementById(id);
 const hex = (n) => '#' + n.toString(16).padStart(6, '0');
@@ -75,8 +77,20 @@ export class Locker {
     $('locker-slots').innerHTML = SLOTS.map((x) => `<button class="${x.id === slot ? 'on' : ''}" data-slot="${x.id}">${x.name}</button>`).join('');
     $('locker-slots').querySelectorAll('[data-slot]').forEach((b) => b.addEventListener('click', () => this.show(b.dataset.slot)));
     $('locker-title').textContent = s.name.toUpperCase();
-    $('locker-body').innerHTML = this._options(slot);
+    $('locker-body').innerHTML = this._owned(slot) + this._options(slot);
     this._wire();
+  }
+
+  // Items you own for this slot (Shop, sets, Season Pass, gifts).
+  _owned(slot) {
+    const mine = ALL_ITEMS.filter((it) => it.slot === slot && economy.owned.has(it.id));
+    const any = ALL_ITEMS.some((it) => it.slot === slot);
+    if (!any) return '';
+    if (!mine.length) return `<p class="muted small">Items for this slot come from the Shop and the Season Pass.</p>`;
+    const cur = this.draft.items?.[slot];
+    return `<h4>YOUR ITEMS</h4><div class="items lk-items">${mine
+      .map((it) => `<button class="item ${cur === it.id ? 'on' : ''}" data-item="${it.id}"><span class="psw" style="background:#${itemColor(it).toString(16).padStart(6, '0')}"></span>${it.name}<small>${KINDS[it.kind].label} · ${it.rarity}</small></button>`)
+      .join('')}</div>`;
   }
 
   _sw(key, colors) {
@@ -138,6 +152,18 @@ export class Locker {
         if (val === 'true' || val === 'false') val = val === 'true';
         else if (/^\d+$/.test(val)) val = Number(val);
         this.draft[key] = val;
+        // Picking your own colour or style takes the slot's item off.
+        if (this.draft.items) delete this.draft.items[this.slot];
+        if (key === 'helmet' && this.draft.helmet !== 'item') delete this.draft.helmetFinish;
+        this.model.applyLook(this.draft);
+        this.show(this.slot);
+      })
+    );
+    body.querySelectorAll('[data-item]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const it = ALL_ITEMS.find((x) => x.id === b.dataset.item);
+        if (!it || !economy.owned.has(it.id)) return;
+        this.draft = wear(this.draft, it);
         this.model.applyLook(this.draft);
         this.show(this.slot);
       })
