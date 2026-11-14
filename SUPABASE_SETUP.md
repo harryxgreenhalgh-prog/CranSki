@@ -535,7 +535,7 @@ The rules, all enforced in the database:
 3. To try premium straight away, give yourself FROST as the database owner. Run this in the **SQL Editor**, replacing the email address with your account's:
 
    ```sql
-   select private.add_frost((select id from auth.users where email = 'you@example.com'), 1500, 'prize', 'test');
+   select private.add_frost((select id from auth.users where email = 'you@example.com'), 1500, 'admin', 'test');
    ```
 
    Then press **Get premium**. The FROST is taken, and any premium rewards up to your level arrive.
@@ -568,7 +568,7 @@ How it works:
 1. Give yourself some FROST to shop with, or ride for a while. To give it, run this in the **SQL Editor**, replacing the email address with your account's:
 
    ```sql
-   select private.add_frost((select id from auth.users where email = 'you@example.com'), 3000, 'prize', 'test');
+   select private.add_frost((select id from auth.users where email = 'you@example.com'), 3000, 'admin', 'test');
    ```
 
 2. **Shop → Daily**: press **Preview** on a few items and watch your rider change. Press **Buy**, then **Confirm**. Your balance drops, and the item shows **Owned ✓** with a **Wear** button.
@@ -612,3 +612,73 @@ update public.friendships set accepted_at = now() - interval '3 days' where stat
 2. Press **Send**, then **Confirm**. The FROST is taken and the counter says "4 gifts left today".
 3. As the friend: within a minute, or on next sign-in, a toast says "🎁 … sent you …", and the item is in the Locker.
 4. As the friend: **Settings → Chat & gifts** → untick **Accept gifts from friends**. The sender now sees "Gifts turned off".
+
+## 18. Seasons and the scheduled job (Phase 5, step 8)
+
+### 1. Run the SQL
+
+**SQL Editor**: run `supabase/setup.sql` again, or `supabase/migrations/20261119120000_seasons.sql`. It adds:
+
+- `season_podiums`: each board's top 10 when a season ends;
+- `season_records`: every time a season best fell;
+- a new `record_score` that spots records and broadcasts them on the `records` channel;
+- `end_season` and `season_tick`, which do the season change;
+- `season_info`, `season_leaders` and `recent_records`, for the game to read.
+
+### 2. Turn on scheduled jobs (pg_cron)
+
+1. In the Supabase dashboard, open your project.
+2. Go to **Integrations** in the left sidebar, then **Cron**. (In older dashboards: **Database → Extensions**.)
+3. Click **Enable pg_cron**. With Extensions, search for `pg_cron` and turn it on, leaving the default schema.
+4. Go back to the **SQL Editor** and run `supabase/setup.sql` again. Its last part sees that pg_cron is on and schedules the job.
+5. Check it: **Integrations → Cron → Jobs** should list **cranski-season-end**, scheduled `7 * * * *` (at 7 minutes past every hour). You can also run this in the SQL Editor:
+
+   ```sql
+   select jobname, schedule, command, active from cron.job;
+   ```
+
+Every hour the job runs `select public.season_tick()`. That does nothing until the season's end date. Then, in one go, it:
+
+- saves each board's **top 10** as the season's hall of fame;
+- pays the **prize boards** (THE YARD, APEX, BIG AIR): **2,500 / 1,500 / 750** FROST, then **250** for 4th–10th. Only accounts **7+ days old** (since picking a gamertag) **with 20+ finished runs** can win. Places are counted among those riders, so if a brand-new account tops a board, the next eligible rider gets the 2,500. Each prize is paid once.
+- **clears every leaderboard**, and the stored runs behind them;
+- starts the next season (30 days, starting at midnight UTC).
+
+It never touches items, FROST, Season Pass purchases, ranked ratings or friends. Each season has its own Season Pass progress, and the game drops ghosts from earlier seasons the first time it sees the new one.
+
+You can see past runs of the job under **Integrations → Cron → Jobs → cranski-season-end → History**, or by running `select * from cron.job_run_details order by start_time desc limit 10;`.
+
+### 3. Redeploy submit-run
+
+It now tells the rider when their run set a **new season record**. After merging to `main`, GitHub Actions deploys it automatically. To deploy it by hand: **Actions → Deploy Supabase functions → Run workflow**.
+
+### RECORD alerts and Realtime
+
+When a board's season best falls, the database broadcasts it on the private `records` channel. Anyone can listen and only the database can send. Everyone online sees **RECORD** flash with the rider, park and score. The game also checks `recent_records` once a minute, so nobody misses one if the broadcast doesn't arrive.
+
+Nothing to set up: "Allow public access" can stay off. If broadcasting from the database isn't available on your project, records still show up through that once-a-minute check.
+
+### Test it
+
+1. **Crown**: post the top score on a board. In that park, and in Basecamp, your rider wears a gold crown. Other riders in your live room see one floating above you. The board shows 👑 next to #1.
+2. **RECORD**: with two accounts, beat the other account's #1 score on a board. Both see **RECORD · <name> · <park> · <score> (beat <old score>)**, the second account within a minute at most.
+3. **End a season early** (testing only; it really ends it). Run this in the **SQL Editor**:
+
+   ```sql
+   select private.end_season(true);
+   ```
+
+   It returns who won what. Then reload the game:
+   - a toast says **Season 2 has started**;
+   - prize winners get a **🏆 Season 1 prize** toast and the FROST;
+   - the boards are empty;
+   - **Leaderboard → Last season** shows Season 1's top 3 and their prizes.
+
+## Quick checklist for Phase 5
+
+- [ ] Run `supabase/setup.sql` in the SQL Editor. It includes every step, and it's safe to run again.
+- [ ] **Integrations → Cron**: enable pg_cron, then run `setup.sql` once more so the season job is scheduled.
+- [ ] Merge to `main`. GitHub Actions then:
+  - redeploys **submit-run**, which now handles ranked runs, FROST, XP and records;
+  - publishes the game.
+- [ ] Optional: give a test account FROST with `select private.add_frost((select id from auth.users where email = 'you@example.com'), 3000, 'admin', 'test');`

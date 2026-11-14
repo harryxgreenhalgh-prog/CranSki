@@ -2833,3 +2833,80 @@ body.touching #roombadge {
     display: none;
   }
 }
+
+/* Seasons (Phase 5): RECORD flash, board header, hall of fame */
+#record-flash {
+  position: absolute;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  pointer-events: none;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+#record-flash b {
+  font-family: var(--brush);
+  font-style: italic;
+  font-size: 54px;
+  letter-spacing: 0.04em;
+  color: #ffd23f;
+  text-shadow: 0 0 18px rgba(255, 176, 46, 0.8), 0 3px 0 #b85c00;
+}
+#record-flash span {
+  background: var(--panel);
+  border-radius: 99px;
+  padding: 4px 14px;
+  font-weight: 800;
+}
+#record-flash.go {
+  animation: recordflash 5.2s ease-out forwards;
+}
+@keyframes recordflash {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.6);
+  }
+  8% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1.12);
+  }
+  14%,
+  30%,
+  46% {
+    transform: translateX(-50%) scale(1);
+    filter: brightness(1.4);
+  }
+  22%,
+  38% {
+    filter: brightness(0.9);
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) scale(1);
+  }
+}
+.season-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: baseline;
+  margin: 4px 0 8px;
+}
+.prizeboard {
+  background: linear-gradient(90deg, rgba(255, 176, 46, 0.18), rgba(255, 176, 46, 0.04));
+  border: 1px solid rgba(255, 176, 46, 0.45);
+  border-radius: 10px;
+  padding: 6px 10px;
+  margin: 6px 0 10px;
+  font-size: 13px;
+}
+.hall td:first-child {
+  white-space: nowrap;
+}

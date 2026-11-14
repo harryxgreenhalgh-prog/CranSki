@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { textTexture } from './textTexture.js';
 import { unitAlongY } from './assets.js';
+import { makeCrown } from './crown.js';
 
 const COM_HEIGHT = 0.9; // pivot for tricks, metres above the feet
 
@@ -273,6 +274,18 @@ export class RiderModel {
       tmp: new THREE.Vector3(),
     };
     this.applyLook(look);
+  }
+
+  // The season leader wears a crown (on top of whatever's on their head).
+  setCrown(on) {
+    if (!on && !this.crown) return;
+    if (!this.crown) {
+      this.crown = makeCrown(1);
+      this.crown.position.set(0, 0.19, 0);
+      this.crown.rotation.x = -0.12;
+      this.head.add(this.crown);
+    }
+    this.crown.visible = !!on;
   }
 
   applyLook(look) {

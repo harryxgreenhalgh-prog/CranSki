@@ -41,6 +41,7 @@ import { economy } from './online/economy.js';
 import { mountPass } from './ui/passUI.js';
 import { Shop } from './ui/shopUI.js';
 import { gifts } from './online/gifts.js';
+import { seasons, startSeasons } from './online/seasons.js';
 import { itemById } from './economy/catalog.js';
 import { DEFAULT_LOOK as BASE_LOOK } from './render/riderModel.js';
 import { mountBoard } from './ui/boardUI.js';
@@ -321,14 +322,27 @@ function boot() {
     openModal('Account', '<div class="acct" id="acct"></div>');
     mountAccount($('acct'), { onPrivacy: () => openPage('privacy') });
   }
-  function toast(text, ms = 6000) {
+  // A message at the bottom. Sticky ones (prizes, gifts, a new season) are never
+  // cut short: anything that arrives meanwhile waits its turn.
+  const toastQueue = [];
+  function toast(text, ms = 6000, sticky = false) {
+    if (toast.sticky && Date.now() < toast.until) {
+      toastQueue.push([text, ms, sticky]);
+      if (toastQueue.length > 5) toastQueue.splice(toastQueue.findIndex((t) => !t[2]) >>> 0, 1);
+      return;
+    }
     $('toast-text').textContent = text;
     $('toast-btn').classList.add('hidden');
     $('toast').classList.remove('hidden');
+    toast.sticky = sticky;
+    toast.until = Date.now() + ms;
     clearTimeout(toast.t);
     toast.t = setTimeout(() => {
       $('toast').classList.add('hidden');
       $('toast-btn').classList.remove('hidden');
+      toast.sticky = false;
+      const next = toastQueue.shift();
+      if (next) toast(...next);
     }, ms);
   }
   // Back from a sign-in link: welcome, or ask for a gamertag first.
@@ -1878,8 +1892,9 @@ function boot() {
       $('res-frost').textContent = frostText(r.frost) || 'FROST: the server is not set up yet';
       $('res-xp').textContent = xpText(r.xp);
       el.innerHTML = board
-        ? `✓ Checked by the server · <b>#${r.rank}</b> on ${name}${r.improved ? ' · new leaderboard best' : ` · your board best is ${fmtN(r.best)}`}`
+        ? `✓ Checked by the server · <b>#${r.rank}</b> on ${name} this season${r.record ? ' · 👑 NEW SEASON RECORD!' : r.improved ? ' · new season best' : ` · your season best is ${fmtN(r.best)}`}`
         : '✓ Checked by the server';
+      if (board && r.improved) seasons.refreshLeaders();
     } else {
       $('res-frost').textContent = 'No FROST for this run';
       el.textContent = r.message + (r.error === 'mismatch' && r.serverTotal != null ? ` (Server got ${fmtN(r.serverTotal)}.)` : '');
@@ -1913,6 +1928,43 @@ function boot() {
     if (basecamp.visible) basecamp.refresh();
   };
   resumeAccount();
+
+  // ------------------------------------------------------------ seasons (Phase 5)
+  const PRIZE_PARKS = ['yard', 'apex', 'bigair'];
+  seasons.onRecord = (m) => flashRecord(m);
+  seasons.onNewSeason = (season) => {
+    replayDB.clearGhosts();
+    toast(`${season.name} has started! Fresh leaderboards and ghosts. Your items, FROST and ratings stay.`, 8000, true);
+  };
+  seasons.onPrizes = (last, list) => {
+    const lines = list.map((p) => `${p.frost.toLocaleString('en-US')} FROST for ${ordinal(p.place)} on ${PARK_NAME(p.park)}`);
+    toast(`🏆 ${last.name} prize${list.length > 1 ? 's' : ''}: ${lines.join(', ')}!`, 10000, true);
+    wallet.refresh();
+  };
+  const ordinal = (n) => `${n}${n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th'}`;
+  // RECORD: a season best fell (anyone's, anywhere).
+  let flashTimer = 0;
+  function flashRecord(m) {
+    const mine = m.user_id && m.user_id === account.user?.id;
+    $('rf-text').textContent = `${mine ? 'You' : m.gamertag || 'A rider'} · ${PARK_NAME(m.park)} · ${fmt(m.total)}${m.previous ? ` (beat ${fmt(m.previous)})` : ''}${PRIZE_PARKS.includes(m.park) ? ' · prize board' : ''}`;
+    const el = $('record-flash');
+    el.classList.remove('hidden', 'go');
+    void el.offsetWidth; // restart the animation
+    el.classList.add('go');
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => el.classList.add('hidden'), 5200);
+  }
+  // Crowns: the leader of the board you're on (in Basecamp: of any board).
+  let crownAt = 0;
+  function crownTick(now) {
+    if (now - crownAt < 400) return;
+    crownAt = now;
+    const me = account.user?.id;
+    const inPark = loaded && !['basecamp', 'map', 'locker', 'shop', 'boot'].includes(state);
+    model.setCrown(!!me && (inPark ? seasons.leaderOf(loaded.id) === me : seasons.leadsAny(me)));
+    remotes.setCrowned(inPark ? [seasons.leaderOf(loaded.id)] : []);
+  }
+  startSeasons();
 
   let settingsReturn = null;
   const settingsUI = new SettingsUI({
@@ -2010,8 +2062,8 @@ function boot() {
   });
   // A friend sent you something.
   gifts.onReceived = (list) => {
-    for (const g of list.slice(0, 3)) toast(`🎁 ${g.from} sent you ${itemById(g.item)?.name || 'a gift'}! It's in your Locker.`, 6000);
-    if (list.length > 3) toast(`…and ${list.length - 3} more gifts.`, 6000);
+    for (const g of list.slice(0, 3)) toast(`🎁 ${g.from} sent you ${itemById(g.item)?.name || 'a gift'}! It's in your Locker.`, 6000, true);
+    if (list.length > 3) toast(`…and ${list.length - 3} more gifts.`, 6000, true);
   };
   function openShop() {
     blurMenus();
@@ -2236,6 +2288,7 @@ function boot() {
     const runId = L.run;
     if (playMode !== 'live') replayDB.ghost(L.id).then((g) => {
       if (!g || g.version !== SIM_VERSION || loaded !== L || L.run !== runId || state !== 'riding') return;
+      if (seasons.id && g.season && g.season !== seasons.id) return; // last season's ghost
       // Catch the ghost up to where you are now, so it starts with you.
       ghost = new Ghost(L.terrain, g);
       for (let i = 0; i < recorder.steps; i++) ghost.advance();
@@ -2280,6 +2333,7 @@ function boot() {
       inputs: recorder.data(),
       grabSlots: L.run.rider.grabSlots.slice(),
       board: L.run.rider.board,
+      season: seasons.id,
       saved: false,
     };
     replayDB.add(lastReplay);
@@ -2453,6 +2507,7 @@ function boot() {
     input.pollFrame();
     stats.update(dt);
     idle.update(dt, { active: !!(live && live.room) && !duel && !cup, state });
+    crownTick(now);
     if (state !== reportedState) {
       reportedState = state;
       reportLocation();
@@ -2813,6 +2868,7 @@ function boot() {
       return cup;
     },
     party,
+    seasons,
     get lastReplay() {
       return lastReplay;
     },

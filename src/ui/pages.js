@@ -13,6 +13,7 @@ export const UPDATES = [
     items: [
       'Ranked 1v1 on APEX: FIND MATCH pairs you with a rider near your rating. You see who it is only when the match starts. Play 5 placement matches to get your tier: Bronze, Silver, Gold, Platinum or Diamond. Top 25 board in the Ranked panel.',
       "Leaving a ranked match loses it and starts a cooldown of 1, then 5, then 15 minutes. If your opponent never shows, you're never penalised and go straight back to the front of the queue.",
+      'Seasons of about a month. Every park has a season leaderboard; THE YARD, APEX and BIG AIR are prize boards, where the top 10 win 2,500 / 1,500 / 750 FROST, then 250 for 4th–10th (accounts 7+ days old with 20+ runs). Each board\'s leader wears a crown, RECORD flashes for everyone when a season best falls, and a new season brings fresh boards and ghosts. Your items stay.',
       'Season Pass: 100 levels of 500 XP. Every run you finish gives 25 XP plus 1 per 3,000 points. Full XP for 3 levels a day, and days you miss roll over; after that, runs give 1/5 XP. A free track, and a premium track for 1,500 FROST that pays back 1,500 FROST. Rewards unlock the moment you reach their level; the reward strip shows what is next.',
       'Item Shop, priced in FROST only: a daily section of 6 items that changes every day at midnight UTC, and limited-time themed sets (about 1,400 FROST) for one season at a time. Preview anything on your rider before buying. Changed your mind? Return it within 24 hours for all its FROST back (up to 3 returns per account).',
       'Gifts: buy one of today\'s Shop items for a friend (Shop → Gift). Up to 5 a day, to friends of 2+ days, once your account is a week old with 20 finished runs. Gifts can\'t be returned, and you can turn them off in Settings → Chat & gifts.',
@@ -103,6 +104,7 @@ export const PAGES = {
           <tr><td>When you last submitted runs, to stop spam</td><td>Nobody; deleted after a day</td></tr>
           <tr><td>Your Season Pass progress (XP, level, premium) and the items you own, with where each came from</td><td>Only you</td></tr>
           <tr><td>What you bought in the Item Shop, when, for how much FROST, and whether you returned it</td><td>Only you</td></tr>
+          <tr><td>Season results: the top 10 of each board when a season ends (gamertag, score, any prize), and each season record (who, where, the score)</td><td>Everyone</td></tr>
           <tr><td>Gifts: who sent what to whom and when, and your <b>Accept gifts</b> setting</td><td>The sender and the friend who got it (your setting: only you; senders just see that gifts are off)</td></tr>
           <tr><td>Your FROST balance, and a history of what you earned and spent (with a fingerprint of each paid run, so a run is only paid once)</td><td>Only you see your balance and recent changes</td></tr>
           <tr><td>Live rooms: your position, pose, tricks and Locker look while you ride, sent to the riders in your room</td><td>Riders in your room, live. Never stored.</td></tr>

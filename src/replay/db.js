@@ -91,11 +91,20 @@ export const replayDB = {
     }
   },
 
+  // A new season: ghosts start again.
+  async clearGhosts() {
+    try {
+      await tx('ghosts', 'readwrite', (s) => s.clear());
+    } catch {
+      /* ignore */
+    }
+  },
+
   // Keep the best run per park as its ghost.
   async offerGhost(replay) {
     try {
       const cur = await this.ghost(replay.park);
-      if (cur && cur.version === replay.version && cur.total >= replay.total) return false;
+      if (cur && cur.version === replay.version && (cur.season ?? null) === (replay.season ?? null) && cur.total >= replay.total) return false;
       await tx('ghosts', 'readwrite', (s) => s.put({ ...replay, id: undefined }));
       return true;
     } catch {
