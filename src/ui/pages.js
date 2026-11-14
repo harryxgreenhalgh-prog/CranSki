@@ -13,6 +13,7 @@ export const UPDATES = [
     items: [
       'A new rider: one smooth low-poly body on a skeleton, so knees, elbows and shoulders bend naturally. Your back rounds in a tuck, you cheer at the finish, wave and fix your goggles in Basecamp, and flail when you crash.',
       'Parks dressed for launch: chalets in BELLEVUE, floodlight masts, rail legs with base plates and pads, branded boxes, and a snow groomer, ski rack, snowman, event tent, speakers, flags and safety fencing at the start and finish.',
+      'Faster on school laptops: Performance mode draws far less (BELLEVUE went from over 900 draw calls to under 200), uses a lighter mountain skyline and simpler distant trees, and scales the resolution in a few steady steps to hold 30 fps. Full rooms are smoother too, and Basecamp opens after a much smaller download, with each park\'s scenery fetched only when you ride it.',
     ],
   },
   {
@@ -170,7 +171,7 @@ export const PAGES = {
       <ul>
         <li><a href="https://sketchfab.com/3d-models/snowy-wooden-hut-857c02ab61834df8a8d125ccce6fec2a" target="_blank" rel="noopener">“Snowy Wooden Hut”</a> by <a href="https://sketchfab.com/gecko0307" target="_blank" rel="noopener">gecko0307</a> (<code>hut.glb</code>): the Basecamp lodge and start huts</li>
         <li><a href="https://sketchfab.com/3d-models/finish-line-70aecb6bac234266bdebd22322396caa" target="_blank" rel="noopener">“Finish Line”</a> by <a href="https://sketchfab.com/kemalcolak" target="_blank" rel="noopener">Kemal Çolak</a> (<code>finish.glb</code>): the finish line</li>
-        <li><a href="https://sketchfab.com/3d-models/snowy-mountain-terrain-9fa3c56fd32746bcb0e06cd2c4229ca0" target="_blank" rel="noopener">“Snowy Mountain - Terrain”</a> by <a href="https://sketchfab.com/artfromheath" target="_blank" rel="noopener">artfromheath</a> (<code>mountain.glb</code>): the mountains around every park</li>
+        <li><a href="https://sketchfab.com/3d-models/snowy-mountain-terrain-9fa3c56fd32746bcb0e06cd2c4229ca0" target="_blank" rel="noopener">“Snowy Mountain - Terrain”</a> by <a href="https://sketchfab.com/artfromheath" target="_blank" rel="noopener">artfromheath</a> (<code>mountain.glb</code>, and <code>mountain-lo.glb</code>, a simplified copy for Performance mode): the mountains around every park</li>
       </ul>
       <h3>TEXTURES, IMAGES AND FONTS</h3>
       <p>Snow, corduroy, ski top sheets, box panels, signs and the goggle strap are drawn in code. The loading scenes (${SCENES.map((s) => s.name).join(', ')}) are drawn for CranSki as SVG. Text uses your device's own fonts; no font files are downloaded.</p>

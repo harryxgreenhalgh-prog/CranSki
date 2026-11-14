@@ -3,7 +3,7 @@
 // applied with applyLook().
 import * as THREE from 'three';
 import { textTexture } from './textTexture.js';
-import { unitAlongY, ASSETS } from './assets.js';
+import { unitAlongY, ASSETS, sharedGeometries } from './assets.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { makeCrown } from './crown.js';
 
@@ -308,6 +308,20 @@ export class RiderModel {
     const jointSet = () => ({ sh: new THREE.Vector3(), elbow: new THREE.Vector3(), hand: new THREE.Vector3(), elbowHint: new THREE.Vector3(), hip: new THREE.Vector3(), knee: new THREE.Vector3(), ankle: new THREE.Vector3(), kneeHint: new THREE.Vector3() });
     this._joints = { L: jointSet(), R: jointSet() };
     this.applyLook(look);
+  }
+
+  // Free this rider's own GPU resources (geometry and textures from the asset
+  // set are shared and kept).
+  dispose() {
+    const keep = sharedGeometries();
+    ASSETS.body?.traverse((o) => o.geometry && keep.add(o.geometry));
+    const mats = new Set(Object.values(this.mats));
+    this.root.traverse((o) => {
+      if (o.geometry && !keep.has(o.geometry)) o.geometry.dispose();
+      if (o.material) for (const m of Array.isArray(o.material) ? o.material : [o.material]) mats.add(m);
+    });
+    for (const m of mats) if (!m.userData?.shared) m.dispose();
+    this.strapTex?.dispose();
   }
 
   // The season leader wears a crown (on top of whatever's on their head).

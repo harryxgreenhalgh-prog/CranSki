@@ -3,6 +3,7 @@
 // lift speed.
 import * as THREE from 'three';
 import { ASSETS, partMaterials } from './assets.js';
+import { Batch } from './props.js';
 
 class Path {
   constructor(points) {
@@ -111,6 +112,54 @@ function makeTbar() {
   return g;
 }
 
+// The moving carriers on the line drawn as instances: two or three draw calls
+// however many there are. Null when the cabin model isn't loaded.
+const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+function carrierInstances(type, count) {
+  const _m = new THREE.Matrix4();
+  const _s = new THREE.Matrix4();
+  const finish = (m) => {
+    m.frustumCulled = false; // they move along the whole line
+    m.castShadow = true;
+    m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    return m;
+  };
+  if (type === 'tbar') {
+    const bar = finish(new THREE.InstancedMesh(new THREE.CylinderGeometry(0.035, 0.035, 1.1, 8).rotateZ(Math.PI / 2), std(0xffd23f), count));
+    const stem = finish(new THREE.InstancedMesh(new THREE.CylinderGeometry(0.025, 0.025, 1, 6).translate(0, 0.5, 0), std(0x3a3f46), count));
+    return {
+      meshes: [bar, stem],
+      write(i, c) {
+        if (!c.visible) {
+          bar.setMatrixAt(i, ZERO);
+          stem.setMatrixAt(i, ZERO);
+          return;
+        }
+        bar.setMatrixAt(i, c.matrix);
+        stem.setMatrixAt(i, _m.multiplyMatrices(c.matrix, _s.makeScale(1, Math.max(0.1, c.userData.len || 1), 1)));
+      },
+      done() {
+        bar.instanceMatrix.needsUpdate = stem.instanceMatrix.needsUpdate = true;
+      },
+    };
+  }
+  const part = ASSETS.ready && ASSETS.parts.cabin;
+  if (!part) return null;
+  makeCabin(false); // sets up the shared cabin materials
+  const glass = new THREE.MeshStandardMaterial({ color: 0x9fd0ff, transparent: true, opacity: 0.55, roughness: 0.05, metalness: 0.3, depthWrite: false });
+  const cab = finish(new THREE.InstancedMesh(part.geometry, partMaterials(part, { ...cabinMats, cabinGlass: glass }, cabinMats.cabinBody), count));
+  return {
+    meshes: [cab],
+    height: 3.4,
+    write(i, c) {
+      cab.setMatrixAt(i, c.visible ? c.matrix : ZERO);
+    },
+    done() {
+      cab.instanceMatrix.needsUpdate = true;
+    },
+  };
+}
+
 export function buildLift(terrain, scene) {
   const layout = terrain.lift;
   const k = layout.kind;
@@ -118,34 +167,41 @@ export function buildLift(terrain, scene) {
   const steel = std(0x8a939c, { metalness: 0.6, roughness: 0.4 });
   const dark = std(0x3a3f46, { metalness: 0.5 });
 
-  // Towers with a crossarm and sheave wheels.
+  // Towers with a crossarm and sheave wheels: instances of the tower model, or
+  // simple shapes merged into one mesh (a T-bar's slim poles).
   const towerPart = ASSETS.ready && ASSETS.parts.tower && layout.type !== 'tbar' ? ASSETS.parts.tower : null;
-  const towerMats = towerPart ? { steel, darkSteel: dark } : null;
-  for (const t of layout.towers) {
-    const h = k.towerH;
-    if (towerPart) {
-      const m = new THREE.Mesh(towerPart.geometry, partMaterials(towerPart, towerMats, steel));
-      const sx = layout.type === 'ropeway' ? 1.6 : 1;
-      m.scale.set(sx, h / 16, sx);
-      m.position.set(t.x + (layout.side * 4.5) / 2, t.g, t.z);
-      m.castShadow = true;
-      group.add(m);
-      continue;
+  const towerChunks = [];
+  if (towerPart) {
+    // A few towers per batch, so each batch is culled (and dropped past the fog) on its own.
+    const mats = partMaterials(towerPart, { steel, darkSteel: dark }, steel);
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const p = new THREE.Vector3();
+    const sc = new THREE.Vector3();
+    const sx = layout.type === 'ropeway' ? 1.6 : 1;
+    for (let i0 = 0; i0 < layout.towers.length; i0 += 4) {
+      const list = layout.towers.slice(i0, i0 + 4);
+      const im = new THREE.InstancedMesh(towerPart.geometry, mats, list.length);
+      list.forEach((t, i) => im.setMatrixAt(i, m4.compose(p.set(t.x + (layout.side * 4.5) / 2, t.g, t.z), q, sc.set(sx, k.towerH / 16, sx))));
+      im.computeBoundingSphere();
+      im.castShadow = true;
+      group.add(im);
+      towerChunks.push(im);
     }
+  } else {
+    const b = new Batch();
     const r = layout.type === 'ropeway' ? 0.9 : layout.type === 'tbar' ? 0.22 : 0.4;
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.7, r, h, 10), steel);
-    pole.position.set(t.x + (layout.side * 4.5) / 2, t.g + h / 2, t.z);
-    pole.castShadow = true;
-    group.add(pole);
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(7, 0.45, 0.6), dark);
-    arm.position.set(t.x + (layout.side * 4.5) / 2, t.g + h + 0.2, t.z);
-    group.add(arm);
-    for (const off of [0, layout.side * 4.5]) {
-      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.2, 12), dark);
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(t.x + off, t.g + h + 0.05, t.z);
-      group.add(wheel);
+    const h = k.towerH;
+    const wheelGeo = new THREE.CylinderGeometry(0.35, 0.35, 0.2, 12).rotateZ(Math.PI / 2);
+    for (const t of layout.towers) {
+      const cx = t.x + (layout.side * 4.5) / 2;
+      b.addGeometry(new THREE.CylinderGeometry(r * 0.7, r, h, 10), new THREE.Matrix4().makeTranslation(cx, t.g + h / 2, t.z), 0x8a939c);
+      b.addGeometry(new THREE.BoxGeometry(7, 0.45, 0.6), new THREE.Matrix4().makeTranslation(cx, t.g + h + 0.2, t.z), 0x3a3f46);
+      for (const off of [0, layout.side * 4.5]) b.addGeometry(wheelGeo.clone(), new THREE.Matrix4().makeTranslation(t.x + off, t.g + h + 0.05, t.z), 0x3a3f46);
     }
+    wheelGeo.dispose();
+    const m = b.mesh(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.5 }));
+    if (m) group.add(m);
   }
 
   // Cables as thin tubes (they read better than 1-pixel lines).
@@ -185,12 +241,21 @@ export function buildLift(terrain, scene) {
   // Moving carriers.
   const big = layout.type === 'ropeway';
   const count = big ? 2 : Math.max(2, Math.floor(loop / k.cabinGap));
+  const inst = big ? null : carrierInstances(layout.type, count);
   const carriers = [];
   for (let i = 0; i < count; i++) {
-    const c = layout.type === 'tbar' ? makeTbar() : makeCabin(big, 0.55);
-    group.add(c);
+    let c;
+    if (inst) {
+      // A stand-in that only holds the transform; the instances draw it.
+      c = new THREE.Object3D();
+      c.userData.height = inst.height;
+    } else {
+      c = layout.type === 'tbar' ? makeTbar() : makeCabin(big, 0.55);
+      group.add(c);
+    }
     carriers.push(c);
   }
+  if (inst) for (const m of inst.meshes) group.add(m);
   scene.add(group);
 
   // The player's own cabin (glass so you can see yourself) or T-bar.
@@ -223,13 +288,26 @@ export function buildLift(terrain, scene) {
     obj.quaternion.setFromUnitVectors(_d.set(0, 0, -1), _yaw);
     const { stem } = obj.userData;
     const len = cablePos.y - barY;
-    stem.scale.y = Math.max(0.1, len);
-    stem.position.y = len / 2;
+    if (stem) {
+      stem.scale.y = Math.max(0.1, len);
+      stem.position.y = len / 2;
+    } else obj.userData.len = len;
   }
 
   let riding = null; // { d } while the player is on the lift
 
-  function update(time) {
+  const frustum = new THREE.Frustum();
+  const _pm = new THREE.Matrix4();
+  const _sphere = new THREE.Sphere(new THREE.Vector3(), 6);
+  const _cam = new THREE.Vector3();
+
+  // camera and far (the fog distance) let off-screen and fogged-out parts skip drawing.
+  function update(time, camera = null, far = Infinity) {
+    if (camera) {
+      camera.getWorldPosition(_cam);
+      frustum.setFromProjectionMatrix(_pm.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+      for (const im of towerChunks) im.visible = im.boundingSphere.center.distanceTo(_cam) - im.boundingSphere.radius < far;
+    }
     const playerD = riding ? riding.d : -1;
     if (big) {
       // Two cabins shuttling in opposite directions, like a real aerial ropeway.
@@ -253,6 +331,18 @@ export function buildLift(terrain, scene) {
       if (layout.type === 'tbar') {
         placeTbar(c, _p, terrain.height(_p.x, _p.z), _d, false);
       } else hangCabin(c, _p, _d, time, i);
+    }
+    if (inst) {
+      for (let i = 0; i < count; i++) {
+        const c = carriers[i];
+        if (c.visible && camera) {
+          _sphere.center.copy(c.position);
+          c.visible = c.position.distanceTo(_cam) < far && frustum.intersectsSphere(_sphere);
+        }
+        if (c.visible) c.updateMatrix();
+        inst.write(i, c);
+      }
+      inst.done();
     }
   }
   update(0);

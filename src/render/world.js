@@ -6,9 +6,9 @@ import { Sky } from './sky.js';
 import { buildLift } from './lift.js';
 import { SkiTracks } from './tracks.js';
 import { pineSet } from './trees.js';
-import { ASSETS, partMaterials, sceneCopy, modelBounds } from './assets.js';
+import { ASSETS, partMaterials, sceneCopy, hasScene, modelBounds, sharedGeometries } from './assets.js';
 import { textTexture } from './textTexture.js';
-import { propsReady, prop, props, chalet, houseMaterials, lampMaterial, startArea, finishArea } from './props.js';
+import { propsReady, props, lampMaterial, startArea, finishArea, Batch, batchMaterial, placeMatrix } from './props.js';
 
 export { textTexture };
 
@@ -134,32 +134,104 @@ function terrainRows(terrain, step) {
   return [...set].filter((s) => s >= s0 && s <= s1).sort((a, b) => a - b);
 }
 
+// Columns across the run. The run itself (and the pipe walls, kerbs and
+// pavements) gets a fine grid; the banks beyond get their own coarse grid
+// (see buildTerrain), so the fine rows near features don't run out across them.
+function innerHalfWidth(terrain) {
+  const c = terrain.cross;
+  return c.type === 'pipe' ? c.hw + 1 : c.type === 'street' ? c.hw + c.curb + c.walk + 2 : c.hw + 6;
+}
+
 function terrainCols(terrain, perf) {
   const c = terrain.cross;
-  const max = crossExtent(terrain);
-  const inner = c.type === 'pipe' ? c.hw + 1 : c.type === 'street' ? c.hw + c.curb + c.walk + 2 : c.hw + 6;
+  const inner = innerHalfWidth(terrain);
   const fine = c.type === 'pipe' ? (perf ? 0.75 : 0.5) : perf ? 1.5 : 1;
-  const coarse = perf ? 4 : 3;
   const cols = new Set();
   for (let u = -inner; u <= inner + 1e-6; u += fine) cols.add(+u.toFixed(3));
-  for (let u = inner; u <= max; u += coarse) {
-    cols.add(+u.toFixed(3));
-    cols.add(-u.toFixed(3));
-  }
+  cols.add(-inner);
+  cols.add(inner);
   if (c.type === 'pipe') {
     for (const sgn of [-1, 1]) for (const d of [-0.15, -0.05, 0, 0.1]) cols.add(+(sgn * (c.lipU + d)).toFixed(3));
   }
   return [...cols].sort((a, b) => a - b);
 }
 
+// The banks either side: from just inside the run's edge out to the far edge.
+function bankCols(terrain, perf, side) {
+  const inner = innerHalfWidth(terrain);
+  const max = crossExtent(terrain);
+  const coarse = perf ? 4 : 3;
+  const cols = [inner - 1.5];
+  for (let u = inner + coarse / 2; u < max; u += coarse) cols.push(u);
+  cols.push(max);
+  return side < 0 ? cols.map((u) => -u).reverse() : cols;
+}
+
+// Rows for the banks: regular steps, finer only where the slope's pitch changes.
+function bankRows(terrain, step) {
+  const park = terrain.park;
+  const set = new Set();
+  const s0 = -40;
+  const s1 = park.endS + 40;
+  for (let s = s0; s <= s1; s += step) set.add(+s.toFixed(3));
+  for (const [s] of park.slopePoints) for (let d = -1; d <= 1; d += 0.5) set.add(+(s + d).toFixed(3));
+  return [...set].filter((s) => s >= s0 && s <= s1).sort((a, b) => a - b);
+}
+
 function buildTerrain(terrain, group, quality) {
   const perf = quality === 'performance';
-  const rows = terrainRows(terrain, perf ? 2 : quality === 'ultra' ? 1 : 1.25);
-  const cols = terrainCols(terrain, perf);
-  const W = cols.length;
   const mat = perf
     ? new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, map: corduroyTexture() })
     : new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, map: corduroyTexture(), normalMap: snowNormal(), normalScale: new THREE.Vector2(0.55, 0.55), roughness: 0.86, metalness: 0, envMapIntensity: 0.45 });
+  // The run: fine rows (feature edges) across fine columns.
+  terrainGrid(terrain, group, terrainRows(terrain, perf ? 2 : quality === 'ultra' ? 1 : 1.25), terrainCols(terrain, perf), mat, perf, 0);
+  // The banks: coarse rows and columns, tucked just under the run's edge so no seam shows.
+  const rows = bankRows(terrain, perf ? 4 : 2.5);
+  for (const side of [-1, 1]) terrainGrid(terrain, group, rows, bankCols(terrain, perf, side), mat, perf, 0.12);
+  // Features out on the banks (SHIRAKUMO's trails and chutes) get fine strips of their own,
+  // between the run (above) and the banks (below).
+  const fineRows = terrainRows(terrain, perf ? 2 : 1.25);
+  for (const r of offRunAreas(terrain)) {
+    const cols = [];
+    for (let u = r.u0; u < r.u1; u += perf ? 1.5 : 1) cols.push(u);
+    cols.push(r.u1);
+    terrainGrid(terrain, group, fineRows.filter((sv) => sv >= r.s0 && sv <= r.s1), cols, mat, perf, 0.05);
+  }
+}
+
+// Rectangles (in u across, s along) round the features that lie outside the run.
+function offRunAreas(terrain) {
+  const inner = innerHalfWidth(terrain);
+  const rects = [];
+  for (const f of terrain.features) {
+    if (f.visualOnly) continue;
+    const ext = f.halfW + f.side + 2;
+    const spread = Math.abs(f.sin) * (f.a1 - f.a0);
+    if (Math.abs(f.u) + ext + spread < inner) continue;
+    rects.push({ u0: f.u - ext - spread, u1: f.u + ext + spread, s0: f.s + f.a0 * f.cos - 3 - spread, s1: f.s + f.a1 * f.cos + 3 + spread });
+  }
+  // Merge rectangles that touch, so strips never overlap each other.
+  let merged = true;
+  while (merged) {
+    merged = false;
+    for (let i = 0; i < rects.length && !merged; i++) {
+      for (let j = i + 1; j < rects.length; j++) {
+        const a = rects[i];
+        const b = rects[j];
+        if (a.u0 <= b.u1 && b.u0 <= a.u1 && a.s0 <= b.s1 + 6 && b.s0 <= a.s1 + 6) {
+          rects[i] = { u0: Math.min(a.u0, b.u0), u1: Math.max(a.u1, b.u1), s0: Math.min(a.s0, b.s0), s1: Math.max(a.s1, b.s1) };
+          rects.splice(j, 1);
+          merged = true;
+          break;
+        }
+      }
+    }
+  }
+  return rects;
+}
+
+function terrainGrid(terrain, group, rows, cols, mat, perf, drop) {
+  const W = cols.length;
   const c = new THREE.Color();
   const n = { x: 0, y: 1, z: 0 };
   const isPipe = terrain.cross.type === 'pipe';
@@ -180,7 +252,7 @@ function buildTerrain(terrain, group, quality) {
       for (let j = 0; j < W; j++) {
         const u = cols[j];
         const x = cx + u;
-        const y = terrain.height(x, -s);
+        const y = terrain.height(x, -s) - drop;
         pos[k * 3] = x;
         pos[k * 3 + 1] = y;
         pos[k * 3 + 2] = -s;
@@ -290,13 +362,15 @@ function buildPaint(terrain, group) {
   }
 }
 
+const TREE_CHUNK = 100;
 function buildTrees(terrain, group, quality) {
   const trees = terrain.trees;
   const pines = pineSet();
-  // One instanced batch per 200 m (and per variant) so far forest can be culled.
+  // One instanced batch per 100 m (and per variant) so far forest can be culled
+  // and each stretch switches detail on its own.
   const byChunk = new Map();
   for (const t of trees) {
-    const key = Math.floor(t.s / 200);
+    const key = Math.floor(t.s / TREE_CHUNK);
     if (!byChunk.has(key)) byChunk.set(key, { snowy: [], dark: [] });
     byChunk.get(key)[(t.rot * 1000) % 3 < 2 ? 'snowy' : 'dark'].push(t);
   }
@@ -306,24 +380,34 @@ function buildTrees(terrain, group, quality) {
   const p = new THREE.Vector3();
   const yAxis = new THREE.Vector3(0, 1, 0);
   const chunks = [];
+  const place = (im, list) => {
+    list.forEach((t, i) => {
+      p.set(t.x, terrain.height(t.x, -t.s) - 0.2, -t.s);
+      q.setFromAxisAngle(yAxis, t.rot);
+      sc.set(t.scale, t.scale * (0.9 + (t.rot % 0.4)), t.scale);
+      m.compose(p, q, sc);
+      im.setMatrixAt(i, m);
+    });
+    im.computeBoundingSphere();
+    return im;
+  };
   for (const [key, lists] of byChunk) {
-    const g = new THREE.Group();
+    // Near: the detailed pines (snowy and green). Far: the simple pine for the whole chunk.
+    const near = new THREE.Group();
     for (const variant of ['snowy', 'dark']) {
       const list = lists[variant];
       if (!list.length) continue;
-      const im = new THREE.InstancedMesh(pines[variant].geometry, pines[variant].material, list.length);
-      list.forEach((t, i) => {
-        p.set(t.x, terrain.height(t.x, -t.s) - 0.2, -t.s);
-        q.setFromAxisAngle(yAxis, t.rot);
-        sc.set(t.scale, t.scale * (0.9 + (t.rot % 0.4)), t.scale);
-        m.compose(p, q, sc);
-        im.setMatrixAt(i, m);
-      });
+      const im = place(new THREE.InstancedMesh(pines[variant].geometry, pines[variant].material, list.length), list);
       im.castShadow = quality === 'ultra';
-      im.computeBoundingSphere();
-      g.add(im);
+      near.add(im);
     }
-    g.userData.s = key * 200 + 100;
+    const all = [...lists.snowy, ...lists.dark];
+    const mid = place(new THREE.InstancedMesh(pines.far.geometry, pines.far.material, all.length), all);
+    const far = place(new THREE.InstancedMesh(pines.tiny.geometry, pines.tiny.material, all.length), all);
+    mid.visible = far.visible = false;
+    const g = new THREE.Group();
+    g.add(near, mid, far);
+    g.userData = { s: (key + 0.5) * TREE_CHUNK, near, mid, far };
     group.add(g);
     chunks.push(g);
   }
@@ -409,7 +493,7 @@ function buildFarTerrain(terrain, group, quality) {
     const y = farH(u, s);
     spots.push([cs + u, y, -s, 0.8 + rnd() * 0.9, rnd() * 6.28]);
   }
-  const far = pineSet().far;
+  const far = pineSet().tiny;
   const im = new THREE.InstancedMesh(far.geometry, far.material, spots.length);
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
@@ -424,9 +508,12 @@ function buildFarTerrain(terrain, group, quality) {
   group.add(im);
 }
 
-function buildMountainRange(terrain, group) {
-  const tile = sceneCopy('mountain');
-  if (!tile) return false;
+function buildMountainRange(terrain, group, quality) {
+  // Performance mode has its own lighter model (a third of the triangles).
+  const want = quality === 'performance' ? ['mountain-lo', 'mountain'] : ['mountain', 'mountain-lo'];
+  const name = want.find(hasScene);
+  if (!name) return false;
+  const tile = sceneCopy(name);
   const park = terrain.park;
   const b = modelBounds(tile);
   const size = Math.max(b.max.x - b.min.x, b.max.z - b.min.z);
@@ -442,8 +529,10 @@ function buildMountainRange(terrain, group) {
     [0.75, -0.75, 0.7],
     [-0.75, -0.75, 5.1],
   ];
+  // Performance: just the ranges ahead and to the sides (the far ridges fill the rest).
+  if (quality === 'performance') tiles.splice(3);
   tiles.forEach(([dx, dz, rot], i) => {
-    const m = i === 0 ? tile : sceneCopy('mountain');
+    const m = i === 0 ? tile : sceneCopy(name);
     m.scale.setScalar(S);
     m.rotation.y = rot;
     m.position.set(dx * R, base - b.min.y * S, cz + dz * R);
@@ -541,7 +630,8 @@ function courseYaw(terrain, s) {
   return Math.atan2(terrain.centerSlope(s), 1);
 }
 
-function buildGates(terrain, group) {
+function buildGates(terrain, group, quality) {
+  const perf = quality === 'performance';
   const park = terrain.park;
   const hw = terrain.cross.type === 'pipe' ? terrain.cross.floor + 2 : Math.min(terrain.cross.hw, 22);
   // Start gate: posts and a banner just below the start, plus a start hut.
@@ -587,7 +677,7 @@ function buildGates(terrain, group) {
     hut.castShadow = true;
     group.add(hut);
   }
-  if (propsReady()) startArea(terrain, group, s0, c0, rot0);
+  if (propsReady()) startArea(terrain, group, s0, c0, rot0, perf);
 
   // Finish line: blue line, tall side markers, netting and a banner.
   const sf = park.finishS;
@@ -620,13 +710,51 @@ function buildGates(terrain, group) {
     arch(cf, yf, -sf, (hw * 2) / 10, 1.35, rotF);
     banner(group, 'FINISH', cf, yf + 6.4, -sf, Math.min(hw * 1.2, 16), 1.8, undefined, rotF);
   } else banner(group, 'FINISH', cf, yf + 8, -sf, hw * 2 - 1, 2.4, undefined, rotF);
-  if (propsReady()) finishArea(terrain, group, sf, hw);
+  if (propsReady()) finishArea(terrain, group, sf, hw, perf);
 }
 
-function buildObstacles(terrain, group, sky) {
+// Batches keyed by stretch of run, so each still gets frustum-culled.
+function chunked() {
+  const map = new Map();
+  return {
+    at(z) {
+      const k = Math.floor(-z / 160);
+      if (!map.has(k)) map.set(k, new Batch());
+      return map.get(k);
+    },
+    addTo(group, material, name) {
+      for (const b of map.values()) {
+        const m = b.mesh(material);
+        if (m) {
+          m.name = name;
+          group.add(m);
+        }
+      }
+    },
+  };
+}
+
+function buildObstacles(terrain, group, sky, quality) {
   const night = sky.mode === 'aurora';
   const roofMats = new Map();
   const roofSnow = new THREE.MeshLambertMaterial({ color: 0xf4f7fb });
+  // Chalets: every one in the park merged into a few vertex-coloured meshes
+  // (walls and roofs in each house's own colours), with the windows apart so
+  // they can light up at night.
+  const houses = chunked();
+  const glass = chunked();
+  for (const o of terrain.obstacles) {
+    if (o.type !== 'house' || !propsReady()) continue;
+    const m = placeMatrix(o.x, o.y - 0.5, o.z, 0, o.w / 8, o.h / 4.5, o.l / 10);
+    houses.at(o.z).add('chalet', m, { wall: o.color, roof: o.roof }, (n) => n !== 'glass');
+    glass.at(o.z).add('chalet', m, { glass: 0xffffff }, (n) => n === 'glass');
+  }
+  houses.addTo(group, batchMaterial(quality === 'performance'), 'chalets');
+  glass.addTo(
+    group,
+    night ? new THREE.MeshBasicMaterial({ color: 0xffd27a, vertexColors: true }) : new THREE.MeshStandardMaterial({ color: 0xbfd8ee, roughness: 0.15, metalness: 0.2, vertexColors: true }),
+    'chaletGlass'
+  );
   for (const o of terrain.obstacles) {
     if (o.type === 'ball') {
       const m = new THREE.Mesh(new THREE.SphereGeometry(o.r, 28, 20), new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.25, metalness: 0.6 }));
@@ -634,10 +762,7 @@ function buildObstacles(terrain, group, sky) {
       m.castShadow = true;
       group.add(m);
     } else if (o.type === 'house' && propsReady()) {
-      // A chalet in the house's own colours, sized to its footprint.
-      const hm = houseMaterials(o.color, o.roof);
-      const m = chalet(o, night ? { wall: hm.wall, roof: hm.roof, glass: hm.lit } : { wall: hm.wall, roof: hm.roof });
-      if (m) group.add(m);
+      continue; // batched above
     } else if (o.type === 'house') {
       const body = new THREE.Mesh(new THREE.BoxGeometry(o.w, o.h, o.l), new THREE.MeshLambertMaterial({ color: o.color }));
       body.position.set(o.x, o.y + o.h / 2 - 0.5, o.z);
@@ -719,16 +844,21 @@ function buildNamedSigns(terrain, group) {
   }
 }
 
-function buildRails(terrain, group) {
+function buildRails(terrain, group, quality) {
   const steel = new THREE.MeshStandardMaterial({ color: 0xc9d0d8, metalness: 0.8, roughness: 0.3 });
   const legMat = new THREE.MeshLambertMaterial({ color: 0x3a3f46 });
   const blueMat = new THREE.MeshLambertMaterial({ color: BLUE });
-  const boxMat = new THREE.MeshLambertMaterial({ color: 0x2b3440 });
   const rainbowMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
-  const whiteTop = new THREE.MeshStandardMaterial({ color: 0xf4f6f9, roughness: 0.35 });
   const legs = [];
   const pads = [];
   const _q = { x: 0, y: 0, z: 0 };
+  // Boxes: every segment's body, slide top and edges merged into one mesh per
+  // stretch of run, and all the branded side panels into one more.
+  const boxes = chunked();
+  const panels = chunked();
+  const seg = new THREE.Object3D();
+  const part = new THREE.Matrix4();
+  const at = (x, y, z, ry = 0) => new THREE.Matrix4().multiplyMatrices(seg.matrix, part.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, ry, 0)), new THREE.Vector3(1, 1, 1)));
   for (const rail of terrain.rails) {
     const r = rail.radius;
     const pts = rail.pts.map((p) => new THREE.Vector3(p.x, p.y - r, p.z));
@@ -739,26 +869,16 @@ function buildRails(terrain, group) {
         const a = pts[k - 1];
         const b = pts[k];
         const len = a.distanceTo(b);
-        const seg = new THREE.Group();
         seg.position.copy(a).add(b).multiplyScalar(0.5);
         seg.lookAt(b);
-        const body = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.34, len), boxMat);
-        body.castShadow = true;
-        seg.add(body);
-        const top = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.045, len + 0.02), whiteTop);
-        top.position.y = 0.19;
-        seg.add(top);
+        seg.updateMatrix();
+        const box = boxes.at(seg.position.z);
+        box.addGeometry(new THREE.BoxGeometry(0.46, 0.34, len), at(0, 0, 0), 0x2b3440);
+        box.addGeometry(new THREE.BoxGeometry(0.56, 0.045, len + 0.02), at(0, 0.19, 0), 0xf4f6f9);
         for (const sx of [-1, 1]) {
-          const edge = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.05, len + 0.02), blueMat);
-          edge.position.set(sx * 0.28, 0.19, 0);
-          seg.add(edge);
-          const panel = new THREE.Mesh(new THREE.PlaneGeometry(len * 0.94, 0.24), boxPanel(len));
-          panel.position.set(sx * 0.232, 0, 0);
-          panel.userData.sharedMaterial = true; // cached per length, kept between parks
-          panel.rotation.y = (sx * Math.PI) / 2;
-          seg.add(panel);
+          box.addGeometry(new THREE.BoxGeometry(0.03, 0.05, len + 0.02), at(sx * 0.28, 0.19, 0), BLUE);
+          panels.at(seg.position.z).addGeometry(boxPanelGeometry(len), at(sx * 0.232, 0, 0, (sx * Math.PI) / 2), 0xffffff, true);
         }
-        group.add(seg);
       }
     } else {
       let curve;
@@ -816,15 +936,17 @@ function buildRails(terrain, group) {
   if (legMesh) group.add(legMesh);
   const padMesh = props('railPad', pads);
   if (padMesh) group.add(padMesh);
+  boxes.addTo(group, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45 }), 'boxes');
+  panels.addTo(group, boxPanelMaterial(), 'boxPanels');
 }
 
-// The side panels of a box: CRANSKI along a blue band (one texture per length).
-const _panels = new Map();
-function boxPanel(len) {
-  const key = Math.max(1, Math.round(len));
-  if (!_panels.has(key)) {
+// The side panels of a box: CRANSKI along a blue band. One texture repeats
+// every 2 m along the panel, so every box shares it.
+let _panelMat = null;
+function boxPanelMaterial() {
+  if (!_panelMat) {
     const c = document.createElement('canvas');
-    c.width = 64 * key;
+    c.width = 128;
     c.height = 32;
     const g = c.getContext('2d');
     g.fillStyle = '#1e7bff';
@@ -832,13 +954,20 @@ function boxPanel(len) {
     g.fillStyle = '#ffffff';
     g.font = 'italic 900 20px Impact, "Arial Black", sans-serif';
     g.textBaseline = 'middle';
-    for (let x = 6; x < c.width - 40; x += 128) g.fillText('CRANSKI', x, 17);
+    g.fillText('CRANSKI', 6, 17);
     const t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace;
-    const m = new THREE.MeshLambertMaterial({ map: t });
-    _panels.set(key, m);
+    t.wrapS = THREE.RepeatWrapping;
+    _panelMat = new THREE.MeshLambertMaterial({ map: t });
+    _panelMat.userData.shared = true; // kept between parks
   }
-  return _panels.get(key);
+  return _panelMat;
+}
+function boxPanelGeometry(len) {
+  const g = new THREE.PlaneGeometry(len * 0.94, 0.24);
+  const uv = g.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * ((len * 0.94) / 2));
+  return g;
 }
 
 function buildFloodlights(terrain, group) {
@@ -897,17 +1026,17 @@ export function buildWorld(terrain, { quality = 'high', renderer = null } = {}) 
   const sky = new Sky(scene, park.sky || 'day', { hemi, sun });
 
   // Skyline: the snowy mountain terrain model all round the park (or simple peaks).
-  if (!buildMountainRange(terrain, group)) buildMountains(terrain, group);
+  if (!buildMountainRange(terrain, group, quality)) buildMountains(terrain, group);
   buildFarTerrain(terrain, group, quality);
   buildTerrain(terrain, group, quality);
   buildPaint(terrain, group);
   const treeChunks = buildTrees(terrain, group, quality);
-  buildGates(terrain, group);
-  buildObstacles(terrain, group, sky);
+  buildGates(terrain, group, quality);
+  buildObstacles(terrain, group, sky, quality);
   buildStairs(terrain, group);
   buildBoards(terrain, group);
   buildNamedSigns(terrain, group);
-  buildRails(terrain, group);
+  buildRails(terrain, group, quality);
   const lampMat = park.floodlights ? buildFloodlights(terrain, group) : null;
   const lift = buildLift(terrain, scene);
 
@@ -932,6 +1061,9 @@ export function buildWorld(terrain, { quality = 'high', renderer = null } = {}) 
   scene.add(flood);
 
   const drawDist = quality === 'performance' ? 450 : quality === 'ultra' ? 1100 : 800;
+  // Detailed pines only in the 200 m chunks round the camera (Performance: just the nearest).
+  const nearTrees = quality === 'performance' ? 110 : quality === 'ultra' ? 420 : 320;
+  const midTrees = quality === 'performance' ? 240 : quality === 'ultra' ? 900 : 620;
   const sunOffset = sun.position.clone();
   const _v = new THREE.Vector3();
 
@@ -943,7 +1075,7 @@ export function buildWorld(terrain, { quality = 'high', renderer = null } = {}) 
     const s = -rider.z;
     const progress = (s - park.startS) / (park.finishS - park.startS);
     sky.update(time, progress, camera.position);
-    lift.update(time);
+    lift.update(time, camera, drawDist + 60);
     sun.target.position.copy(rider);
     sun.position.copy(rider).add(sunOffset);
     if (lampMat) {
@@ -953,12 +1085,18 @@ export function buildWorld(terrain, { quality = 'high', renderer = null } = {}) 
       flood.position.copy(rider).add(_v.set(0, 14, 6));
     }
     const camS = -camera.position.z;
-    for (const g of treeChunks) g.visible = Math.abs(g.userData.s - camS) < drawDist;
+    for (const g of treeChunks) {
+      const d = Math.abs(g.userData.s - camS);
+      g.visible = d < drawDist;
+      g.userData.near.visible = d < nearTrees;
+      g.userData.mid.visible = d >= nearTrees && d < midTrees;
+      g.userData.far.visible = d >= midTrees;
+    }
   }
 
   function dispose() {
     if (envTex) envTex.dispose();
-    const shared = new Set(Object.values(ASSETS.parts).map((p) => p.geometry));
+    const shared = sharedGeometries();
     scene.traverse((o) => {
       if (o.userData.sharedMaterial || o.userData.shared) return;
       if (o.geometry && !shared.has(o.geometry)) o.geometry.dispose();

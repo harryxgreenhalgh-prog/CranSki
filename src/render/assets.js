@@ -4,6 +4,25 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+
+// The models are meshopt-compressed (tools/optimize-models.sh).
+function gltfLoader() {
+  return new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+}
+
+// Compressed models store some attributes as small integers; turn them back
+// into plain floats so parts can be transformed and merged.
+function toFloat(attr) {
+  if (attr.isInterleavedBufferAttribute || !(attr.array instanceof Float32Array) || attr.normalized) {
+    const n = attr.count;
+    const k = attr.itemSize;
+    const out = new Float32Array(n * k);
+    for (let i = 0; i < n; i++) for (let j = 0; j < k; j++) out[i * k + j] = attr.getComponent(i, j);
+    return new THREE.BufferAttribute(out, k);
+  }
+  return attr;
+}
 
 export const ASSETS = { ready: false, parts: {}, body: null };
 
@@ -17,14 +36,15 @@ function collect(root) {
       if (o.isMesh) meshes.push(o);
     });
     if (!meshes.length) continue;
-    node.updateMatrixWorld(true);
+    root.updateMatrixWorld(true);
     const geos = [];
     const mats = [];
     for (const m of meshes) {
       const g = m.geometry.clone();
-      // Bake any node transform below the part's root into the geometry.
-      const rel = new THREE.Matrix4().copy(node.matrixWorld).invert().multiply(m.matrixWorld);
-      g.applyMatrix4(rel);
+      for (const name of Object.keys(g.attributes)) g.setAttribute(name, toFloat(g.attributes[name]));
+      // Bake every node transform into the geometry: parts are modelled at the
+      // origin, and compressed models keep their dequantising scale on the node.
+      g.applyMatrix4(m.matrixWorld);
       for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(name)) g.deleteAttribute(name);
       geos.push(g);
       mats.push(m.material.name);
@@ -49,7 +69,7 @@ function collect(root) {
 
 export async function loadAssets(onProgress = () => {}) {
   if (ASSETS.ready) return ASSETS;
-  const loader = new GLTFLoader();
+  const loader = gltfLoader();
   const base = import.meta.env?.BASE_URL ?? './';
   let done = 0;
   const total = FILES.length + 1;
@@ -81,7 +101,7 @@ export function loadScene(name) {
     const base = import.meta.env?.BASE_URL ?? './';
     scenes.set(
       name,
-      new GLTFLoader().loadAsync(`${base}models/${name}.glb`).then((g) => {
+      gltfLoader().loadAsync(`${base}models/${name}.glb`).then((g) => {
         g.scene.traverse((o) => {
           if (o.isMesh) {
             o.castShadow = true;
@@ -98,6 +118,10 @@ export function loadScene(name) {
 const ready = new Map();
 export async function preloadScenes(names) {
   await Promise.all(names.map(async (n) => ready.set(n, await loadScene(n))));
+}
+
+export function hasScene(name) {
+  return ready.has(name);
 }
 
 // A copy of a loaded scene (sharing geometry and textures), marked so a park's
@@ -126,6 +150,38 @@ export function unitAlongY(geometry) {
   g.scale(1, 1 / h, 1);
   g.computeBoundingSphere();
   return g;
+}
+
+// One geometry with each material's colour baked into vertex colours, so a
+// many-material part draws in a single call with one vertexColors material.
+// colors: material name -> hex (missing names use `fallback`). Cached by key.
+const _baked = new Map();
+export function bakedPart(name, colors, fallback = 0x888888, key = name) {
+  if (_baked.has(key)) return _baked.get(key);
+  const part = ASSETS.parts[name];
+  if (!part) return null;
+  const src = part.geometry;
+  const g = src.index ? src.toNonIndexed() : src.clone();
+  const n = g.attributes.position.count;
+  const col = new Float32Array(n * 3);
+  const c = new THREE.Color();
+  // toNonIndexed keeps the groups (now in vertex units).
+  const groups = src.groups.length ? src.groups : [{ start: 0, count: src.index ? src.index.count : n, materialIndex: 0 }];
+  for (const grp of groups) {
+    c.setHex(colors[part.mats[grp.materialIndex]] ?? fallback);
+    for (let i = grp.start; i < Math.min(n, grp.start + grp.count); i++) col.set([c.r, c.g, c.b], i * 3);
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  if (g.attributes.uv) g.deleteAttribute('uv');
+  g.clearGroups();
+  g.computeBoundingSphere();
+  _baked.set(key, g);
+  return g;
+}
+
+// Every geometry that belongs to the asset set (never disposed with a park).
+export function sharedGeometries() {
+  return new Set([...Object.values(ASSETS.parts).map((p) => p.geometry), ..._baked.values()]);
 }
 
 // Materials for a part, looked up by the names used in Blender.

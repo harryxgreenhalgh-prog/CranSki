@@ -1,8 +1,11 @@
 import { readFileSync } from 'node:fs';
+// Prints a .glb's node tree as three.js loads it:  node tools/dev/inspect-glb.mjs public/models/rider.glb
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 const buf = readFileSync(process.argv[2]);
 const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
-new GLTFLoader().parse(ab, '', (g) => {
+await MeshoptDecoder.ready;
+new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).parse(ab, '', (g) => {
   const lines = [];
   g.scene.traverse((o) => {
     let d = 0, p = o; while (p.parent) { d++; p = p.parent; }

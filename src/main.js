@@ -63,7 +63,7 @@ import { DuelSession, DUEL_PARKS, CHALLENGE_TIMEOUT, validPose } from './online/
 import { Snapshots } from './online/rooms.js';
 import { Reel } from './render/reel.js';
 import { packRuns } from './replay/record.js';
-import { frameRider, STRIDE } from './render/pose.js';
+import { frameRider, STRIDE, writeFrame } from './render/pose.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -85,7 +85,9 @@ function boot() {
   }
 
   const canvas = $('game');
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+  // Antialiasing costs a lot of fill rate on school laptops: off in Performance (from the next load).
+  const firstLowEnd = load('settings', null) === null && looksLowEnd();
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: settings.graphics !== 'performance' && !firstLowEnd, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -95,7 +97,7 @@ function boot() {
   renderer.toneMappingExposure = 1.0;
 
   // First visit on a phone or weaker machine: start in Performance, with an Undo.
-  if (load('settings', null) === null && looksLowEnd()) {
+  if (firstLowEnd) {
     settings.graphics = 'performance';
     saveSettings();
     $('toast-text').textContent = 'Graphics set to Performance for this device.';
@@ -109,7 +111,11 @@ function boot() {
     setTimeout(() => $('toast').classList.add('hidden'), 9000);
   }
 
-  let dynRes = 1; // Performance mode scales the resolution to hold the frame rate
+  // Performance mode scales the resolution to hold the frame rate, in a few
+  // fixed steps (each change resizes the drawing buffer, so it's done rarely).
+  const DYN_STEPS = [1, 0.85, 0.7, 0.6];
+  let dynStep = 0;
+  let dynRes = 1;
   function applyQuality() {
     const q = settings.graphics;
     renderer.shadowMap.enabled = q !== 'performance';
@@ -150,6 +156,18 @@ function boot() {
   let loaded = null; // { id, meta, terrain, run, world, chase, spray, hud, time }
   let loading = null;
 
+  // The skyline model for the graphics setting (Performance has a lighter one).
+  const mountainModel = () => (settings.graphics === 'performance' ? 'mountain-lo' : 'mountain');
+
+  // Download a park's code and scenery models without building it.
+  function prefetchPark(id) {
+    if (loaded && loaded.id === id) return;
+    parkMeta(id)
+      .load()
+      .then(() => preloadScenes([mountainModel(), 'finish']))
+      .catch(() => {});
+  }
+
   async function loadPark(id, progress = () => {}) {
     if (loaded && loaded.id === id) return loaded;
     if (loading && loading.id === id) return loading.promise;
@@ -157,7 +175,7 @@ function boot() {
     const promise = (async () => {
       const mod = await meta.load(); // each park is its own chunk, fetched when picked
       progress(0.35, 'Loading scenery…');
-      await preloadScenes(['mountain', 'finish', 'hut']).catch((e) => console.error('scenery models', e));
+      await preloadScenes([mountainModel(), 'finish', 'hut']).catch((e) => console.error('scenery models', e));
       progress(0.45, `Shaping ${meta.name}…`);
       await new Promise((r) => setTimeout(r, 0));
       const terrain = new Terrain(mod.park);
@@ -1828,6 +1846,7 @@ function boot() {
     duelTick(L, dt);
     live.tick(L.run.rider, STATUS_OF[state] || 'lift');
     remotes.attach(L.world.scene);
+    remotes.quality = settings.graphics;
     remotes.update(live, dt, camera, L.terrain);
     if (duel) remotes.hideUid(duel.opp.uid);
     L.hud.others = remotes.dots();
@@ -2495,12 +2514,58 @@ function boot() {
   let debugCam = null;
   let reportedState = null;
   let lastVy = 0;
-  let slowFrames = 0;
-  let fastFrames = 0;
+  // Dynamic resolution, aiming to hold 30 fps: frame times are averaged over
+  // 2-second windows. A window under ~27 fps steps the resolution down; three
+  // windows with room to spare step it back up (not within 30 s of having to
+  // step down); and nothing changes within 4 s of the last change.
+  const dyn = { sum: 0, n: 0, start: 0, fast: 0, lastChange: 0, blockUp: 0, prev: 0 };
+  function dynamicResolution(now) {
+    const dt = (now - dyn.prev) / 1000; // the real gap (the game's own dt is clamped)
+    dyn.prev = now;
+    if (settings.graphics !== 'performance' || (state !== 'riding' && state !== 'lift' && state !== 'finish')) {
+      dyn.sum = dyn.n = 0;
+      dyn.start = now;
+      return;
+    }
+    if (dt > 0.5) return; // a one-off hitch (loading, a tab switch) isn't the frame rate
+    dyn.sum += dt;
+    dyn.n++;
+    if (now - dyn.start < 2000) return;
+    const avg = dyn.sum / dyn.n;
+    dyn.sum = dyn.n = 0;
+    dyn.start = now;
+    const roomy = settings.frameCap === 30 ? 1 / 29 : 1 / 45; // capped frames can't run faster than 30
+    let next = dynStep;
+    if (avg > 1 / 27.5) {
+      dyn.fast = 0;
+      next = Math.min(DYN_STEPS.length - 1, dynStep + 1);
+    } else if (avg < roomy) {
+      if (++dyn.fast >= 3 && now > dyn.blockUp) next = Math.max(0, dynStep - 1);
+    } else dyn.fast = 0;
+    if (next !== dynStep && now - dyn.lastChange > 4000) {
+      if (next > dynStep) dyn.blockUp = now + 30000;
+      dynStep = next;
+      dynRes = perf.res = DYN_STEPS[dynStep];
+      dyn.fast = 0;
+      dyn.lastChange = now;
+      applyQuality();
+    }
+  }
+  // Main-thread time per drawn frame (for the stats overlay and benchmarks).
+  const perf = { frames: 0, js: 0, jsMax: 0, res: 1, slow: [], reset() { this.frames = this.js = this.jsMax = 0; this.slow = []; } };
   function frame(now) {
     requestAnimationFrame(frame);
     // 30 fps cap: skip this display frame if it's too soon.
     if (settings.frameCap === 30 && now - lastDraw < 1000 / 30 - 2) return;
+    const t0 = performance.now();
+    drawFrame(now);
+    const ms = performance.now() - t0;
+    perf.frames++;
+    perf.js += ms;
+    if (ms > perf.jsMax) perf.jsMax = ms;
+    if (ms > 250 && perf.slow.length < 20) perf.slow.push({ at: Math.round(now), ms: Math.round(ms), state, programs: renderer.info.programs?.length, calls: renderer.info.render.calls, s: loaded ? Math.round(-loaded.run.rider.pos.z) : null, geos: renderer.info.memory.geometries });
+  }
+  function drawFrame(now) {
     lastDraw = now;
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
@@ -2532,21 +2597,7 @@ function boot() {
     }
     if (settingsUI.isOpen) settingsUI.tick(input.pad());
 
-    // Performance mode: dynamic resolution to hold the frame rate.
-    if (settings.graphics === 'performance') {
-      const target = settings.frameCap === 30 ? 1 / 28 : 1 / 50;
-      if (dt > target * 1.15) slowFrames++;
-      else if (dt < target * 0.8) fastFrames++;
-      if (slowFrames > 20 && dynRes > 0.6) {
-        dynRes = Math.max(0.6, dynRes - 0.1);
-        applyQuality();
-        slowFrames = fastFrames = 0;
-      } else if (fastFrames > 120 && dynRes < 1) {
-        dynRes = Math.min(1, dynRes + 0.1);
-        applyQuality();
-        slowFrames = fastFrames = 0;
-      }
-    }
+    dynamicResolution(now);
 
     if (input.wasPressed('pause') && !settingsUI.capturing) back();
     else if (input.wasPressed('confirm') && $('modal').classList.contains('hidden') && !settingsUI.isOpen) {
@@ -2843,15 +2894,13 @@ function boot() {
     await new Promise((r) => setTimeout(r, 0));
     placeModel(basecampScene.scene);
     renderer.compile(basecampScene.scene, camera);
-    try {
-      await loadPark(parkId, (p, s) => loadingScreen.set(0.3 + p * 0.65, s));
-    } catch (e) {
-      console.error(e); // the park loads again when picked
-    }
+    // Basecamp is ready: show it now. Your last park's code and scenery download
+    // in the background; it's built when you ride (behind the loading screen).
     loadingScreen.ready(() => {
       startAudio();
       music.play();
       toBasecamp();
+      setTimeout(() => prefetchPark(parkId), 1200);
     });
   })();
   requestAnimationFrame((t) => {
@@ -2878,6 +2927,62 @@ function boot() {
     party,
     seasons,
     model,
+    renderer,
+    perf,
+    get world() {
+      return loaded?.world;
+    },
+    // Benchmarks: fill the current park with n riders streaming poses like a full live room.
+    benchRoom(n) {
+      const L = loaded;
+      if (!L) return;
+      const T = L.terrain;
+      const remotesMap = new Map();
+      const bots = [];
+      const colors = [0xff7a2f, 0x1e7bff, 0x22b07d, 0xffd23f, 0xe0406b, 0x8e5bff];
+      for (let i = 0; i < n; i++) {
+        const uid = `bench-${i}`;
+        const look = { ...DEFAULT_LOOK, topColor: colors[i % colors.length], ride: i % 4 === 3 ? 'board' : 'skis' };
+        remotesMap.set(uid, { uid, tag: `Rider ${i + 1}`, look, board: look.ride === 'board', status: 'riding', snaps: new Snapshots(), heard: performance.now(), trick: null, interval: 66 });
+        bots.push({ uid, s: T.park.startS + 10 + (i * 37) % Math.max(60, T.park.finishS - T.park.startS - 40), u: ((i * 7) % 11) - 5, v: 9 + (i % 5) });
+      }
+      const fake = {
+        room: { bench: true },
+        park: L.id,
+        remotes: remotesMap,
+        tick() {},
+        sendTrick() {},
+        leaveRoom: async () => {},
+        counts: () => ({}),
+      };
+      const q = new THREE.Quaternion();
+      const yAxis = new THREE.Vector3(0, 1, 0);
+      const rider = { pos: new THREE.Vector3(), q, mode: 'ground', load: 0.3, tucking: false, lean: 0, switchStance: false, activeGrab: null, air: null, omega: new THREE.Vector3(), rail: null, butter: null, sink: 0, speed: 10 };
+      let last = performance.now();
+      const step = () => {
+        if (live !== fake) return;
+        const t = performance.now();
+        const dt = Math.min(0.1, (t - last) / 1000);
+        last = t;
+        for (const b of bots) {
+          b.s += b.v * dt;
+          if (b.s > T.park.finishS) b.s = T.park.startS + 10;
+          const x = T.center(b.s) + b.u + Math.sin(t / 900 + b.v) * 3;
+          rider.pos.set(x, T.height(x, -b.s), -b.s);
+          q.setFromAxisAngle(yAxis, Math.cos(t / 900 + b.v) * 0.4);
+          rider.lean = Math.sin(t / 900 + b.v);
+          const f = new Array(STRIDE);
+          writeFrame(rider, f, 0);
+          const e = remotesMap.get(b.uid);
+          e.snaps.push(t, f, t);
+          e.heard = t;
+        }
+        setTimeout(step, 66);
+      };
+      live = fake;
+      step();
+      return n;
+    },
     // Screenshots: hold the camera at pos looking at look ({x,y,z}), or null to release.
     setDebugCam(pos, look) {
       debugCam = pos ? { pos: new THREE.Vector3(pos.x, pos.y, pos.z), look: new THREE.Vector3(look.x, look.y, look.z) } : null;

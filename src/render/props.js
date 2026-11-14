@@ -3,6 +3,7 @@
 // (groomer, ski rack, snowman, event tent, speakers, flags and safety fence).
 // Everything here is decoration: the simulation never sees it.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { ASSETS, partMaterials } from './assets.js';
 
 // One set of materials for every prop, shared across parks (never disposed).
@@ -34,6 +35,96 @@ function mats() {
   };
   for (const m of Object.values(MATS)) m.userData.shared = true;
   return MATS;
+}
+
+// ---- static batching: many placed props merged into one vertex-coloured mesh
+// (one draw call however many there are). Colours come from the prop's own
+// materials unless overridden by name.
+const _colors = () => Object.fromEntries(Object.entries(mats()).map(([k, m]) => [k, m.color.getHex()]));
+export class Batch {
+  constructor() {
+    this.geos = [];
+  }
+  // A placed copy of a prop. keep(name) picks which materials to include.
+  add(name, matrix, colorOver = {}, keep = () => true) {
+    const part = ASSETS.parts[name];
+    if (!part) return this;
+    const src = part.geometry;
+    const g = src.index ? src.toNonIndexed() : src.clone();
+    const n = g.attributes.position.count;
+    const colors = { ..._colors(), ...colorOver };
+    const groups = src.groups.length ? src.groups : [{ start: 0, count: n, materialIndex: 0 }];
+    const pos = [];
+    const nor = [];
+    const col = [];
+    const c = new THREE.Color();
+    const P = g.attributes.position.array;
+    const N = g.attributes.normal.array;
+    for (const grp of groups) {
+      const mname = part.mats[grp.materialIndex];
+      if (!keep(mname)) continue;
+      c.setHex(colors[mname] ?? 0x888888);
+      for (let i = grp.start; i < Math.min(n, grp.start + grp.count); i++) {
+        pos.push(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]);
+        nor.push(N[i * 3], N[i * 3 + 1], N[i * 3 + 2]);
+        col.push(c.r, c.g, c.b);
+      }
+    }
+    g.dispose();
+    if (!pos.length) return this;
+    const out = new THREE.BufferGeometry();
+    out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    out.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    out.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    out.applyMatrix4(matrix);
+    this.geos.push(out);
+    return this;
+  }
+  // A plain geometry (positions + normals, and uvs if keepUv), all one colour.
+  addGeometry(geo, matrix, hex, keepUv = false) {
+    const g = geo.index ? geo.toNonIndexed() : geo.clone();
+    geo.dispose();
+    for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && !(keepUv && k === 'uv')) g.deleteAttribute(k);
+    const n = g.attributes.position.count;
+    const c = new THREE.Color(hex);
+    const col = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) col.set([c.r, c.g, c.b], i * 3);
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.applyMatrix4(matrix);
+    this.geos.push(g);
+    return this;
+  }
+  mesh(material) {
+    if (!this.geos.length) return null;
+    const g = mergeGeometries(this.geos);
+    for (const x of this.geos) x.dispose();
+    this.geos = [];
+    g.computeBoundingSphere();
+    const m = new THREE.Mesh(g, material);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    return m;
+  }
+}
+
+// The vertex-colour materials batches use (shared, never disposed).
+let _batchMats = null;
+export function batchMaterial(perf) {
+  if (!_batchMats) {
+    _batchMats = {
+      std: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0.05 }),
+      lam: new THREE.MeshLambertMaterial({ vertexColors: true }),
+    };
+    _batchMats.std.userData.shared = _batchMats.lam.userData.shared = true;
+  }
+  return perf ? _batchMats.lam : _batchMats.std;
+}
+
+const _m4 = new THREE.Matrix4();
+const _q4 = new THREE.Quaternion();
+const _e4 = new THREE.Euler();
+export function placeMatrix(x, y, z, ry = 0, sx = 1, sy = 1, sz = 1) {
+  return _m4.compose(new THREE.Vector3(x, y, z), _q4.setFromEuler(_e4.set(0, ry, 0)), new THREE.Vector3(sx, sy, sz)).clone();
 }
 
 export function propsReady() {
@@ -79,84 +170,49 @@ export function lampMaterial() {
   return mats().lamp;
 }
 
-// A chalet sized to a house obstacle (w across, h to the eaves, l along the run).
-export function chalet(o, colorMats) {
-  const m = prop('chalet', colorMats);
-  if (!m) return null;
-  m.scale.set(o.w / 8, o.h / 4.5, o.l / 10);
-  m.position.set(o.x, o.y - 0.5, o.z);
-  return m;
-}
-
-const _house = new Map();
-export function houseMaterials(color, roof) {
-  const key = `${color}:${roof}`;
-  if (!_house.has(key)) {
-    const wall = new THREE.MeshStandardMaterial({ color, roughness: 0.9 });
-    const r = new THREE.MeshStandardMaterial({ color: roof, roughness: 0.8 });
-    const lit = new THREE.MeshBasicMaterial({ color: 0xffd27a }); // windows at night
-    wall.userData.shared = r.userData.shared = lit.userData.shared = true;
-    _house.set(key, { wall, roof: r, lit });
-  }
-  return _house.get(key);
-}
-
-// Start area: the groomer parked beside the hut, a ski rack, a snowman and flags.
-export function startArea(terrain, group, s0, c0, rot) {
+// Start area: the groomer parked beside the hut, a ski rack, a snowman and flags
+// (all merged into one mesh).
+export function startArea(terrain, group, s0, c0, rot, perf = false) {
   const at = (dx, dz) => {
     const x = c0 + dx;
     const z = -s0 + dz;
     return { x, y: terrain.height(x, z), z };
   };
-  const place = (m, p, ry) => {
-    if (!m) return;
-    m.position.set(p.x, p.y - 0.05, p.z);
-    m.rotation.y = ry;
-    group.add(m);
-  };
+  const b = new Batch();
+  const place = (name, p, ry, dy = -0.05) => b.add(name, placeMatrix(p.x, p.y + dy, p.z, ry));
   const hw = Math.min(terrain.cross.hw ?? 12, 22);
-  place(prop('snowcat'), at(hw + 7, 6), rot + 0.5);
-  place(prop('skiRack'), at(-hw + 1, 3), rot + Math.PI / 2);
-  place(prop('snowman'), at(-hw - 2, -4), rot + 0.4);
-  const flags = [at(-6.5, 1.5), at(6.5, 1.5)].map((p) => ({ ...p, ry: rot }));
-  const f = props('flag', flags);
-  if (f) group.add(f);
+  place('snowcat', at(hw + 7, 6), rot + 0.5);
+  place('skiRack', at(-hw + 1, 3), rot + Math.PI / 2);
+  place('snowman', at(-hw - 2, -4), rot + 0.4);
+  for (const p of [at(-6.5, 1.5), at(6.5, 1.5)]) place('flag', p, rot, 0);
+  const m = b.mesh(batchMaterial(perf));
+  if (m) {
+    m.name = 'startArea';
+    group.add(m);
+  }
 }
 
-// Finish area: tent and speakers off to one side, flags and safety fence along the run-out.
-export function finishArea(terrain, group, sf, hw) {
+// Finish area: tent and speakers off to one side, flags and safety fence along
+// the run-out (all merged into one mesh).
+export function finishArea(terrain, group, sf, hw, perf = false) {
   const cAt = (s) => terrain.center(s);
   const pt = (s, u) => {
     const x = cAt(s) + u;
     return { x, y: terrain.height(x, -s), z: -s };
   };
   const yaw = (s) => Math.atan2(cAt(s + 1) - cAt(s - 1), 2);
-  const t = pt(sf + 14, hw + 6);
-  const tent = prop('tent');
-  if (tent) {
-    tent.position.set(t.x, t.y, t.z);
-    tent.rotation.y = yaw(sf + 14);
-    group.add(tent);
-  }
-  const sp = pt(sf + 22, hw + 6);
-  const spk = prop('speakers');
-  if (spk) {
-    spk.position.set(sp.x, sp.y, sp.z);
-    spk.rotation.y = yaw(sf + 22) + Math.PI / 2;
-    group.add(spk);
-  }
-  const flags = [];
-  for (const side of [-1, 1]) for (const d of [-8, 4]) flags.push({ ...pt(sf + d, side * (hw + 1.5)), ry: yaw(sf + d) });
-  const f = props('flag', flags);
-  if (f) group.add(f);
+  const b = new Batch();
+  const place = (name, p, ry) => b.add(name, placeMatrix(p.x, p.y, p.z, ry));
+  place('tent', pt(sf + 14, hw + 6), yaw(sf + 14));
+  place('speakers', pt(sf + 22, hw + 6), yaw(sf + 22) + Math.PI / 2);
+  for (const side of [-1, 1]) for (const d of [-8, 4]) place('flag', pt(sf + d, side * (hw + 1.5)), yaw(sf + d));
   // Fence sections either side of the run-out.
-  const fence = [];
   for (const side of [-1, 1]) {
-    for (let d = 6; d <= 46; d += 4) {
-      const p = pt(sf + d, side * (hw + 0.5));
-      fence.push({ ...p, ry: Math.PI / 2 + yaw(sf + d) });
-    }
+    for (let d = 6; d <= 46; d += 4) place('fence', pt(sf + d, side * (hw + 0.5)), Math.PI / 2 + yaw(sf + d));
   }
-  const fm = props('fence', fence);
-  if (fm) group.add(fm);
+  const m = b.mesh(batchMaterial(perf));
+  if (m) {
+    m.name = 'finishArea';
+    group.add(m);
+  }
 }

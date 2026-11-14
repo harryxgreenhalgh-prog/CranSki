@@ -21,3 +21,4 @@ Changes: textures resized and meshes simplified for the web by `tools/blender/im
   https://sketchfab.com/3d-models/finish-line-70aecb6bac234266bdebd22322396caa
 - `mountain.glb`: "Snowy Mountain - Terrain" by artfromheath (https://sketchfab.com/artfromheath),
   https://sketchfab.com/3d-models/snowy-mountain-terrain-9fa3c56fd32746bcb0e06cd2c4229ca0
+  (`mountain-lo.glb` is a simplified copy of the same model, used in Performance mode)

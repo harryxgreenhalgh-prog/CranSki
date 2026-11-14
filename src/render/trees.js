@@ -2,7 +2,7 @@
 // when they've loaded; otherwise simple tiered cones built here.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { ASSETS, partMaterials } from './assets.js';
+import { ASSETS, bakedPart } from './assets.js';
 
 function colored(geo, hex) {
   const g = geo.index ? geo.toNonIndexed() : geo;
@@ -46,6 +46,27 @@ function pine(variant, segs) {
   return g;
 }
 
+// A tiny distant pine (about 30 triangles): two green cones and a snowy tip.
+let _tiny = null;
+function tinyPine() {
+  if (_tiny) return _tiny;
+  const parts = [];
+  const a = new THREE.ConeGeometry(2.4, 4.6, 5, 1);
+  a.translate(0, 3.6, 0);
+  parts.push(colored(a, 0x1a4430));
+  const b = new THREE.ConeGeometry(1.6, 3.6, 5, 1);
+  b.rotateY(0.6);
+  b.translate(0, 6.2, 0);
+  parts.push(colored(b, 0x1d4a33));
+  const c = new THREE.ConeGeometry(0.9, 1.6, 5, 1);
+  c.rotateY(0.3);
+  c.translate(0, 7.6, 0);
+  parts.push(colored(c, 0xeef3fa));
+  _tiny = mergeGeometries(parts);
+  _tiny.computeVertexNormals();
+  return _tiny;
+}
+
 let cache = null;
 let mats = null;
 
@@ -54,17 +75,14 @@ export function pineSet() {
   if (cache && cache.fromAssets === ASSETS.ready) return cache;
   const P = ASSETS.parts;
   if (ASSETS.ready && P.pineSnowy) {
-    mats ||= {
-      bark: new THREE.MeshLambertMaterial({ color: 0x4a3324 }),
-      needles: new THREE.MeshLambertMaterial({ color: 0x1d4c33 }),
-      needlesDark: new THREE.MeshLambertMaterial({ color: 0x123524 }),
-      snow: new THREE.MeshLambertMaterial({ color: 0xf0f4fa }),
-    };
-    const make = (name) => ({ geometry: P[name].geometry, material: partMaterials(P[name], mats, mats.needles) });
-    cache = { fromAssets: true, snowy: make('pineSnowy'), dark: make('pineGreen'), far: make('pineFar') };
+    // Colours baked into the vertices: each batch of trees is one draw call.
+    mats ||= new THREE.MeshLambertMaterial({ vertexColors: true });
+    const colors = { bark: 0x4a3324, needles: 0x1d4c33, needlesDark: 0x123524, snow: 0xf0f4fa };
+    const make = (name) => ({ geometry: bakedPart(name, colors, colors.needles), material: mats });
+    cache = { fromAssets: true, snowy: make('pineSnowy'), dark: make('pineGreen'), far: make('pineFar'), tiny: { geometry: tinyPine(), material: mats } };
   } else {
     const material = new THREE.MeshLambertMaterial({ vertexColors: true });
-    cache = { fromAssets: false, snowy: { geometry: pine('snowy', 8), material }, dark: { geometry: pine('dark', 8), material }, far: { geometry: pine('snowy', 6), material } };
+    cache = { fromAssets: false, snowy: { geometry: pine('snowy', 8), material }, dark: { geometry: pine('dark', 8), material }, far: { geometry: pine('snowy', 6), material }, tiny: { geometry: tinyPine(), material } };
   }
   return cache;
 }
