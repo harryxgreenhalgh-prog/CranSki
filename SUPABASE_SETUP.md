@@ -540,3 +540,38 @@ The rules, all enforced in the database:
 
    Then press **Get premium**. The FROST is taken, and any premium rewards up to your level arrive.
 4. Pass items appear in the **Locker** under **YOUR ITEMS** in their slot (jacket, gloves, boots and so on). Tap one to wear it, then **Save**.
+
+## 16. Item Shop (Phase 5, step 6)
+
+1. **SQL Editor**: run `supabase/setup.sql` again, or `supabase/migrations/20261117120000_shop.sql`. It adds:
+   - `purchases`: each rider can read only their own;
+   - `shop_today`: anyone can see the daily items and the sets on sale;
+   - `buy_item`, `buy_set`, `return_purchase` and `my_purchases`.
+2. Nothing to deploy.
+
+How it works:
+
+- **Basecamp → Shop**. Everything is priced in FROST, which is earned only by riding. Nothing in the game costs real money.
+- **Daily**: 6 Shop items, a different 6 every day at midnight UTC. The database picks them, so everyone sees the same ones, and you can only buy what's in today's 6.
+- **Limited sets**: whole themed sets at 1,400 FROST each, on sale for one season (Pumpkin Patch and Park Baggy in Season 1; Aurora Night and Spring Slush in Season 2; then they take turns).
+- **Preview** puts an item, or a whole set, on your rider. Drag to turn them round. Nothing is saved until you buy and press **Wear**, or pick the item in the Locker.
+- **Buy** asks you to confirm with a second tap. The database checks the item is on sale today, that you don't already own it, and that you have enough FROST. It then takes the FROST and gives you the item in one go.
+- **Purchases**: return anything within 24 hours for all its FROST back, up to 3 returns per account, ever. A returned item comes off your rider.
+- Prices follow the design's table:
+  - Jacket: 800 / 1,000 / 1,200 (rare / epic / legendary).
+  - Pants, skis, snowboard and helmet: 600 / 800 / 1,000.
+  - Bindings, poles, gloves, boots and goggles: 200 / 400 / 600.
+- All item names are CranSki's own. The catalogue is `src/economy/catalog.js`. After changing it, run `npm run build:sql` and run `setup.sql` again.
+
+### Test it
+
+1. Give yourself some FROST to shop with, or ride for a while. To give it, run this in the **SQL Editor**, replacing the email address with your account's:
+
+   ```sql
+   select private.add_frost((select id from auth.users where email = 'you@example.com'), 3000, 'prize', 'test');
+   ```
+
+2. **Shop → Daily**: press **Preview** on a few items and watch your rider change. Press **Buy**, then **Confirm**. Your balance drops, and the item shows **Owned ✓** with a **Wear** button.
+3. **Limited sets → Preview set**, then buy a set. All its items appear in the Locker.
+4. **Purchases → Return**: your FROST comes back, and the count of returns left goes down. A fourth return on the same account is refused.
+5. Check the lock: in the SQL Editor, `set role authenticated; insert into public.inventory (user_id, item_id, source) values (gen_random_uuid(), 'comet-twins', 'shop');` fails with "permission denied". Afterwards, run `reset role;`.

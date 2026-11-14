@@ -35,6 +35,7 @@ export const economy = {
   async refresh() {
     if (!account.ready) {
       this.pass = null;
+      this.loaded = false;
       this.owned = new Set();
       this.ownedInfo = new Map();
       this._emit();
@@ -51,6 +52,7 @@ export const economy = {
   },
 
   _setInventory(inv) {
+    this.loaded = true;
     this.owned = new Set((inv || []).map((r) => r.item));
     this.ownedInfo = new Map((inv || []).map((r) => [r.item, r]));
   },
@@ -73,6 +75,26 @@ export const economy = {
     else this.refresh();
     if (xp.granted?.some((g) => g.item)) this.refreshInventory();
     this._emit();
+  },
+
+  // ---- Item Shop (all checked and done by database functions)
+  shopToday: () => rpc('shop_today'),
+  myPurchases: () => rpc('my_purchases'),
+  async buyItem(id) {
+    return this._afterSpend(await rpc('buy_item', { p_item: id }));
+  },
+  async buySet(id) {
+    return this._afterSpend(await rpc('buy_set', { p_set: id }));
+  },
+  async returnPurchase(id) {
+    return this._afterSpend(await rpc('return_purchase', { p_purchase: id }));
+  },
+  async _afterSpend(r) {
+    if (r?.status === 'ok') {
+      if (Number.isFinite(r.balance)) wallet.set({ balance: r.balance });
+      await this.refreshInventory();
+    }
+    return r;
   },
 
   async buyPremium() {

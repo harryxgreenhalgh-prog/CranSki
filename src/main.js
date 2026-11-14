@@ -39,7 +39,9 @@ import { canPost, canSubmit, submitRun, submitPacked } from './online/leaderboar
 import { wallet, frostText } from './online/wallet.js';
 import { economy } from './online/economy.js';
 import { mountPass } from './ui/passUI.js';
+import { Shop } from './ui/shopUI.js';
 import { itemById } from './economy/catalog.js';
+import { DEFAULT_LOOK as BASE_LOOK } from './render/riderModel.js';
 import { mountBoard } from './ui/boardUI.js';
 import { LiveRoom } from './online/rooms.js';
 import { LOCAL } from './online/net.js';
@@ -228,6 +230,7 @@ function boot() {
       else if (tab === 'locker') openLocker();
       else if (tab === 'leaderboard') openBoard();
       else if (tab === 'pass') openPass();
+      else if (tab === 'shop') openShop();
       else openPage('online');
     },
     onPage: (p) => openPage(p),
@@ -1994,6 +1997,40 @@ function boot() {
       toBasecamp();
     },
   });
+  const shop = new Shop({
+    model,
+    look,
+    onSaveLook: (lk) => {
+      profile.look = lk;
+      ghostModel.applyLook(look());
+    },
+    onClose: () => toBasecamp(),
+    onAccount: () => openAccount(),
+  });
+  function openShop() {
+    blurMenus();
+    basecamp.hide();
+    showOverlay(null);
+    state = 'shop';
+    lockerYaw = 0;
+    shop.open();
+  }
+  // An item you no longer own (returned) comes off your rider.
+  economy.onChange(() => {
+    if (!account.ready || !economy.loaded) return;
+    const lk = profile.look;
+    const worn = Object.entries(lk.items || {});
+    const gone = worn.filter(([, id]) => !economy.owned.has(id));
+    if (!gone.length) return;
+    const next = { ...lk, items: { ...lk.items } };
+    for (const [slot, id] of gone) {
+      for (const k of Object.keys(itemById(id)?.look || {})) next[k] = BASE_LOOK[k];
+      delete next.items[slot];
+    }
+    profile.look = next;
+    model.applyLook(look());
+    ghostModel.applyLook(look());
+  });
   function openLocker() {
     blurMenus();
     basecamp.hide();
@@ -2005,11 +2042,11 @@ function boot() {
   {
     let drag = null;
     $('game').addEventListener('pointerdown', (e) => {
-      if (state === 'locker') drag = e.clientX;
+      if (state === 'locker' || state === 'shop') drag = e.clientX;
     });
     window.addEventListener('pointerup', () => (drag = null));
     window.addEventListener('pointermove', (e) => {
-      if (drag === null || state !== 'locker') return;
+      if (drag === null || (state !== 'locker' && state !== 'shop')) return;
       lockerYaw += (e.clientX - drag) * 0.01;
       drag = e.clientX;
     });
@@ -2351,6 +2388,10 @@ function boot() {
       locker.close(false);
       return;
     }
+    if (state === 'shop') {
+      shop.close();
+      return;
+    }
     if (state === 'replay') {
       if (!$('clip').classList.contains('hidden')) replayView.closeClip();
       else if (!replayView.exporting) replayView.close();
@@ -2461,14 +2502,15 @@ function boot() {
     }
 
     // -------------------------------------------- Basecamp and map: the lobby scene
-    const inLobby = state === 'basecamp' || state === 'map' || state === 'locker' || (state === 'loading' && !loaded);
+    const inLobby = state === 'basecamp' || state === 'map' || state === 'locker' || state === 'shop' || (state === 'loading' && !loaded);
     if (inLobby) {
       placeModel(basecampScene.scene);
       model.root.visible = true;
       model.root.position.set(0, COM_HEIGHT, 0);
-      model.root.quaternion.setFromAxisAngle(tmp.set(0, 1, 0), Math.PI - 0.35 + (state === 'locker' ? lockerYaw + 0.35 : 0));
+      const dressing = state === 'locker' || state === 'shop';
+      model.root.quaternion.setFromAxisAngle(tmp.set(0, 1, 0), Math.PI - 0.35 + (dressing ? lockerYaw + 0.35 : 0));
       model.update({ ...IDLE, crouch: 0.05 + 0.05 * Math.sin(time * 1.6) }, dt);
-      basecampScene.frameCamera(camera, camera.aspect, state === 'locker' ? (locker.focus === 'full' ? 'locker' : locker.focus) : 'full', dt);
+      basecampScene.frameCamera(camera, camera.aspect, state === 'locker' ? (locker.focus === 'full' ? 'locker' : locker.focus) : state === 'shop' ? shop.focus : 'full', dt);
       basecampScene.update(time, camera);
       if (camera.fov !== 50) {
         camera.fov = 50;
