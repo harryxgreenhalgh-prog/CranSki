@@ -2434,3 +2434,287 @@ body.touching #roombadge {
   left: 50%;
   transform: translateX(-50%);
 }
+
+/* ---------------------------------------------------------------- ranked (Phase 5) */
+.rk-me {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 8px 0;
+}
+
+.rk-me b {
+  font-family: var(--brush);
+  font-style: italic;
+  font-size: 30px;
+}
+
+.rk-tier {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #6b7280;
+  color: #fff;
+}
+
+.rk-tier.bronze { background: #a2643a; }
+.rk-tier.silver { background: #9aa4b1; color: #0d1b2a; }
+.rk-tier.gold { background: #e5b23a; color: #0d1b2a; }
+.rk-tier.platinum { background: #58c2c9; color: #0d1b2a; }
+.rk-tier.diamond { background: #8e5bff; }
+
+.rk-search {
+  font-weight: 800;
+}
+
+#queuebar {
+  position: absolute;
+  left: 50%;
+  top: 64px;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 6px 16px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 2px solid var(--blue);
+  font-weight: 800;
+  font-size: 13px;
+  pointer-events: auto;
+}
+
+#queuebar.hidden {
+  display: none;
+}
+
+/* Party match setup (Phase 5) */
+.pm-teams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 8px 0;
+}
+.pm-teams h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  opacity: 0.75;
+}
+.pm-teams .btn {
+  display: block;
+  width: 100%;
+  margin-bottom: 6px;
+  text-align: left;
+}
+.pm-maps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 8px 0;
+}
+.pm-maps label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Season Pass (Phase 5) */
+.ptile {
+  width: 74px;
+  height: 64px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-line);
+  background: rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 4px;
+  text-align: center;
+  position: relative;
+}
+.ptile small {
+  font-size: 9.5px;
+  line-height: 1.15;
+  color: var(--muted);
+  overflow: hidden;
+  max-height: 2.3em;
+}
+.ptile.empty {
+  background: none;
+  border-style: dashed;
+  opacity: 0.35;
+}
+.ptile.frost b {
+  font-size: 18px;
+  color: #bfe3ff;
+}
+.ptile .psw {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+}
+.ptile.rare {
+  border-color: rgba(30, 123, 255, 0.7);
+}
+.ptile.epic {
+  border-color: rgba(142, 91, 255, 0.85);
+}
+.ptile.legendary {
+  border-color: rgba(255, 176, 46, 0.9);
+  box-shadow: inset 0 0 12px rgba(255, 176, 46, 0.25);
+}
+.ptile.got {
+  background: rgba(56, 224, 140, 0.16);
+}
+.ptile.got::after {
+  content: '✓';
+  position: absolute;
+  top: 2px;
+  right: 5px;
+  font-size: 11px;
+  color: var(--green);
+}
+.ptile.locked {
+  opacity: 0.55;
+}
+.ptile.locked::before {
+  content: '🔒';
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 9px;
+}
+.ptile.next {
+  outline: 2px solid var(--orange);
+  outline-offset: 1px;
+}
+.pnext {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+.pnext > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.pnext small {
+  font-size: 10px;
+}
+.pprem {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #1a1206;
+  background: linear-gradient(90deg, #ffb02e, #ffd76a);
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+.pprem.big {
+  font-size: 14px;
+  padding: 6px 12px;
+}
+.pass-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.pass-head > div:first-child {
+  flex: 1 1 260px;
+}
+.pass-head h3 {
+  margin: 0 0 4px;
+}
+.pass-buy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 280px;
+}
+.tierbar.big {
+  height: 12px;
+}
+.pstrip-wrap {
+  display: flex;
+  gap: 6px;
+  margin: 12px 0;
+}
+.plabels {
+  display: grid;
+  grid-template-rows: 18px 64px 64px;
+  gap: 6px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  align-items: center;
+}
+.pstrip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+.pcol {
+  display: grid;
+  grid-template-rows: 18px 64px 64px;
+  gap: 6px;
+  justify-items: center;
+}
+.plv {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+}
+.pcol.reached .plv {
+  color: var(--green);
+}
+.pcol.up .plv {
+  color: var(--orange);
+}
+.xpline {
+  color: #d9c8ff;
+  font-weight: 700;
+  margin-top: 2px;
+  font-size: 14px;
+}
+.lk-items .item small {
+  display: block;
+}
+.lk-items .item .psw {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: -1px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.card .ptile {
+  width: 58px;
+  height: 46px;
+  border-radius: 8px;
+}
+.card .ptile .psw {
+  width: 18px;
+  height: 18px;
+}
+.card .ptile.frost b {
+  font-size: 14px;
+}
+.card .ptile small {
+  font-size: 8.5px;
+}
+#season-card {
+  cursor: pointer;
+}

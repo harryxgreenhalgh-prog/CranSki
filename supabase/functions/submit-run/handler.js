@@ -1,15 +1,17 @@
-// submit-run: the leaderboard referee.
+// submit-run: the leaderboard and FROST referee.
 //
 // The game sends a finished run as its recorded inputs plus the score the
 // player saw. This re-rides the inputs through the same deterministic
 // simulation (sim.js, bundled from src/sim/verify.js) and:
 //   - rejects the run if the re-ride doesn't reach the finish line or its score
 //     doesn't match the claimed one;
-//   - otherwise saves the score it calculated itself (never the claimed one).
+//   - otherwise saves the score it calculated itself (never the claimed one) on
+//     the park's leaderboard, and pays the run's FROST (once per run, capped
+//     per day; the database decides how much).
 //
 // Plain JavaScript so the Node tests can run it too; index.ts wires it to
 // Supabase.
-import { rerun, SIM_VERSION } from './sim.js';
+import { rerun, onLeaderboard, SIM_VERSION } from './sim.js';
 
 export const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -18,6 +20,13 @@ export const CORS = {
 };
 
 const MAX_BODY = 600000;
+
+// Identifies a run by its inputs, so the same run is only ever paid once.
+export async function runKey(sub) {
+  const text = JSON.stringify([sub.park, sub.version, sub.steps, sub.inputs, sub.marks, sub.grabSlots, sub.board]);
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -59,27 +68,53 @@ export async function handle(req, db) {
 
   // Re-ride the run from its inputs.
   const r = rerun(sub);
-  if (!r.ok) {
+  const match = typeof sub.match === 'string' && /^[0-9a-f-]{36}$/.test(sub.match) ? sub.match : null;
+  // A ranked run may end before the finish line (out of pause time); it still
+  // counts, at the score the server gets for it.
+  const counted = r.ok || (match && r.reason === 'not_finished' && r.results && r.results.total === sub.claimed.total);
+  if (!counted) {
     const status = r.reason === 'mismatch' || r.reason === 'not_finished' ? 422 : 400;
     return json({ error: r.reason, server_total: r.results ? r.results.total : null }, status);
   }
-
-  // Save only what the server calculated.
   const res = r.results;
-  const saved = await db.recordScore({
-    p_user: uid,
-    p_park: sub.park,
-    p_total: res.total,
-    p_time: res.time,
-    p_best_trick: res.bestTrick ? res.bestTrick.name : null,
-    p_top_speed: res.topSpeedKmh,
-    p_airtime: res.airtime,
-    p_sim_version: SIM_VERSION,
-    p_steps: sub.steps,
-    p_inputs: sub.inputs,
-    p_marks: sub.marks,
-    p_grab_slots: sub.grabSlots,
-    p_board: sub.board,
-  });
-  return json({ ok: true, total: res.total, best: saved.best, improved: saved.improved, rank: saved.rank });
+  const out = { ok: true, total: res.total };
+
+  // Ranked match: the database records the server's score for this turn.
+  if (match) {
+    if (!db.recordMatchRun) return json({ error: 'server_not_configured' }, 500);
+    const m = await db.recordMatchRun({ p_user: uid, p_match: match, p_park: sub.park, p_total: res.total });
+    if (!m || m.error) return json({ error: (m && m.error) || 'match_failed' }, 409);
+    out.match = m.match;
+  }
+
+  // Save only what the server calculated (finished runs go on the board).
+  if (r.ok && onLeaderboard(sub.park)) {
+    const saved = await db.recordScore({
+      p_user: uid,
+      p_park: sub.park,
+      p_total: res.total,
+      p_time: res.time,
+      p_best_trick: res.bestTrick ? res.bestTrick.name : null,
+      p_top_speed: res.topSpeedKmh,
+      p_airtime: res.airtime,
+      p_sim_version: SIM_VERSION,
+      p_steps: sub.steps,
+      p_inputs: sub.inputs,
+      p_marks: sub.marks,
+      p_grab_slots: sub.grabSlots,
+      p_board: sub.board,
+    });
+    Object.assign(out, { best: saved.best, improved: saved.improved, rank: saved.rank });
+  }
+
+  // FROST (and later Season Pass XP) for every finished run, on any park.
+  if (r.ok && db.rewardRun) {
+    try {
+      const reward = await db.rewardRun({ p_user: uid, p_park: sub.park, p_total: res.total, p_run_key: await runKey(sub) });
+      if (reward) Object.assign(out, reward);
+    } catch (e) {
+      console.error('reward_run failed', e);
+    }
+  }
+  return json(out);
 }

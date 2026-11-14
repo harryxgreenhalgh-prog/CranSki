@@ -373,3 +373,170 @@ How parties work:
 - [ ] **Realtime** → **Settings** → turn off "Allow public access".
 - [ ] `npx supabase functions deploy chat --no-verify-jwt`
 - [ ] Merge to `main` so GitHub Actions publishes the game.
+
+## 11. Ranked 1v1 (Phase 5, step 1)
+
+The database does everything ranked: matchmaking, whose turn it is, scores, the result, ratings and leave cooldowns. Riders can read ratings but can't change them, because only database functions and the submit-run Edge Function can write to those tables.
+
+1. **SQL Editor**: run `supabase/setup.sql` again. It's safe to run more than once. Or run `supabase/migrations/20261113120000_ranked.sql` on its own. It adds:
+   - `ratings`;
+   - `ranked_queue`;
+   - `matches`;
+   - the functions that run them;
+   - the policies for `match:<id>` channels.
+2. **Redeploy submit-run**. It now records ranked runs. Once this branch is merged to `main`, GitHub Actions deploys it automatically, because the change is under `supabase/functions/`. To deploy it by hand:
+   1. Open **GitHub → Actions → Deploy Supabase functions**.
+   2. Click **Run workflow**.
+3. Nothing else is needed: no new settings and no new secrets.
+
+How ranked works:
+
+- **Basecamp → Ranked → FIND MATCH**. You're matched against the queued rider closest to your rating. The allowed gap starts at 100 and widens by 8 every second you wait.
+- When a match is found, both riders load APEX and check in automatically. You only see who you're riding against once you've both checked in.
+- 2 runs each, taking turns, and the best run wins. Every run is re-ridden by the server before it counts.
+- Ratings start at 1000. You need 5 placement matches before you get a tier: Bronze, Silver (1050+), Gold (1200+), Platinum (1350+) or Diamond (1500+).
+- **Leaving**:
+  - Leaving a live match counts as a loss.
+  - Leaving during check-in starts a cooldown but doesn't cost a loss.
+  - Cooldowns are 1, then 5, then 15 minutes, and they reset after a day.
+  - The rider left waiting is never penalised. If an opponent hasn't checked in after 45 seconds, the match is called off and the rider who did check in goes back to the front of the queue.
+- If the rider whose turn it is goes quiet for 4 minutes, the other rider can claim the match. After 10 minutes the server ends it either way.
+
+### Test it
+
+1. You need two signed-in accounts, for example a computer and an iPad.
+2. On both: **Basecamp → Ranked → FIND MATCH**.
+3. Both load APEX. A toast says "Match found". Then the duel bar shows **RANKED 1V1** and your opponent's gamertag.
+4. Ride your 2 runs each. At the end you see **Rating 1000 → 1032 (+32) · placement 1/5**, or the loss version.
+5. Try leaving during a match: between runs, press **Esc → Leave**. That rider loses, and **Ranked** shows a 1-minute cooldown.
+6. After 5 matches each, both riders appear on the Top 25 board with a tier.
+
+## 12. Ranked 2v2 (Phase 5, step 2)
+
+1. **SQL Editor**: run `supabase/setup.sql` again. The 2v2 rules are part of the same ranked migration, which now also stores each rider's partner and a "partner ready" flag.
+2. Nothing to deploy. The submit-run change from step 1 already covers 2v2.
+
+How 2v2 works:
+
+- **Basecamp → Ranked → RANKED 2V2**.
+- **Queue solo** to get a teammate near your rating. To queue as a pair, be in a party together, pick **With <name>** and press **FIND MATCH**. Your partner gets a **QUEUE / No thanks** prompt. A pair is only matched once both have queued naming each other. Until then, the search bar says "waiting for <name> to queue with you".
+- Teammates must be within 500 rating of each other. A pair further apart than that gets a message and can queue solo instead.
+- Run order: team A rider 1, team B rider 1, team A rider 2, team B rider 2. Each rider gets one run, and the best team total wins. You watch every run live, including your teammate's.
+- You see your teammate as soon as the match is found. The other team is revealed at the start.
+- 2v2 has its own rating, separate from 1v1, with the same tiers and 5 placement matches.
+- **Leaving** counts as a loss, even during check-in, plus a break of 5, then 15, then 30 minutes. Riders who were left waiting go back to the front of the queue, and pairs stay together.
+- If a rider drops out on their turn, everyone sees **NOT RESPONDING** with the server's 4-minute clock. When it runs out, that rider's team forfeits.
+
+### Test it
+
+You need four signed-in accounts (or four browser profiles).
+
+1. Two of them start a party. Both open **Ranked → RANKED 2V2**. One picks **With <the other>** and presses **FIND MATCH**, and the other presses **QUEUE** on the prompt.
+2. The other two press **FIND MATCH** solo.
+3. All four load APEX. The bar shows **RANKED 2V2**. Each rider gets one run, and the HUD shows **Your team X · Them Y**.
+4. The results card lists both teams with their totals and your rating change.
+
+## 13. Party matches and the CRANSKI CUP (Phase 5, step 3)
+
+1. **SQL Editor**: run `supabase/setup.sql` again, or `supabase/migrations/20261114120000_party_matches.sql` on its own. It lets a party's members use one more private channel, `pmatch:<party id>`. There are no new tables: results aren't stored and don't change ratings.
+2. Nothing to deploy.
+
+How it works:
+
+- **Basecamp → Party match**. Only the party leader sets it up, and the party needs 3 or 4 riders, all online.
+- **PRIVATE MATCH**:
+  - Free-for-all (3 or 4 riders) or 2v2 (exactly 4). Tap a name to swap teams.
+  - Any leaderboard park: APEX, BIG AIR, THE YARD, FOREST LINE, ASPEN PIPE or BELLEVUE.
+  - 1, 3 or 5 runs each.
+  - **Best run**: each rider's best counts, added up per team in 2v2. **Round wins**: each round of runs goes to the top rider or team; most rounds wins, with ties broken on total points.
+  - Riders take turns while everyone else watches, like a duel.
+- **CRANSKI CUP**:
+  - Up to 5 maps, free-for-all or 2v2.
+  - **Total score** (every run counts) or **round wins** (each map is a round).
+  - On each map, everyone waits at the gate, gets a 3-2-1 and drops in together in the party's private room, so you see each other ride. Each run has a 3-minute limit.
+- Everyone in the party gets a **JOIN / Skip** prompt. A free-for-all starts with whoever joins (at least 2 riders). A 2v2 needs all four.
+- The leader referees: GO, moving on to the next map, and skipping the turn of a rider who has dropped out. If the leader drops out, the next rider takes over.
+- Every rider re-rides everyone else's recorded inputs, so a typed-in score doesn't count.
+- At the end, the leader can press **Play again**.
+
+### Test it
+
+You need three or four signed-in accounts that are friends, for example a computer, an iPad and a second browser profile.
+
+1. Make a party: **Friends → Start a party → Invite**, then the others press **Join**.
+2. As the leader: **Basecamp → Party match → PRIVATE MATCH → FREE-FOR-ALL**, pick APEX and **1 RUN EACH**, then press **START**.
+3. Everyone else presses **JOIN**. You all load APEX, take turns, and see the results table.
+4. As the leader: **Play again**, or go back to **Party match**, pick **CRANSKI CUP**, choose 2 or 3 maps, then press **START**. On each map, everyone drops in together and sees the others ride. The final table has a column for each map.
+
+## 14. FROST on the server (Phase 5, step 4)
+
+FROST is the only currency, and it's earned only by riding. There are no real-money purchases anywhere.
+
+1. **SQL Editor**: run `supabase/setup.sql` again, or `supabase/migrations/20261115120000_frost.sql`. It adds:
+   - `wallets`: each rider can read only their own row, and nobody can write to it from the game;
+   - a private ledger of every change;
+   - `reward_run`, which only the submit-run function can call;
+   - `my_wallet`, for the game to read the balance.
+2. **Redeploy submit-run**. It now pays FROST and re-rides SHIRAKUMO runs too, for FROST only (SHIRAKUMO still has no leaderboard). After merging to `main`, GitHub Actions deploys it automatically. To deploy it by hand:
+   1. Open **Actions → Deploy Supabase functions**.
+   2. Click **Run workflow**.
+
+How it works:
+
+- When you finish a run while signed in, the game sends its inputs to submit-run. That happens on any park, and in duels, party matches and the Cup too.
+- The server re-rides the run. If it reaches the finish line with the same score, the database pays 10 FROST + 1 per 10,000 points, up to 100 a day (the day resets at midnight UTC).
+- A run is paid only once: the server keeps a fingerprint of each paid run.
+- The results screen shows what the server paid, for example **+12 FROST earned · 34/100 today**, and the balance at the top of Basecamp updates.
+- The old FROST count kept in the browser is no longer used.
+
+### Check the lock (optional)
+
+In the **SQL Editor**, this should fail with "permission denied", because riders can't change balances:
+
+```sql
+set role authenticated;
+update public.wallets set frost = 99999;
+reset role;
+```
+
+### Test it
+
+1. Sign in, then ride any park to the finish.
+2. The results screen says **+N FROST earned · N/100 today**, and the Basecamp FROST count goes up.
+3. Ride enough runs to pass 100 for the day. The results screen then says **Daily FROST cap reached (100 a day)**.
+4. In Supabase, open **Table Editor → wallets**. You'll see your row. Riders can't edit it.
+
+## 15. Season Pass (Phase 5, step 5)
+
+1. **SQL Editor**: run `supabase/setup.sql` again. It adds two migrations:
+   - `20261116120000_season_pass.sql`:
+     - `seasons`, with Season 1 starting on the day you run it and lasting 30 days;
+     - the item catalogue tables;
+     - `inventory`, the items each rider owns;
+     - `season_pass`, each rider's XP and premium status;
+     - a new `reward_run` that also pays XP;
+     - `buy_premium_pass`, `my_pass` and `my_inventory`.
+   - `20261116120100_catalog.sql`: the items, sets and pass rewards. It's generated from `src/economy/catalog.js` by `npm run build:catalog`, so don't edit it by hand.
+2. Nothing to deploy. submit-run already calls `reward_run`, which now pays XP too.
+
+The rules, all enforced in the database:
+
+- 100 levels of 500 XP. A finished run gives 25 XP plus 1 per 3,000 points.
+- Full XP for 1,500 XP (3 levels) for each day of the season so far. Days you miss roll over, so the allowance is "1,500 × days so far, minus what you've used". Past that, a run gives 1/5 XP.
+- **Free track**: 10 items (every 10th level) and 25 FROST on 20 levels (500 FROST in total).
+- **Premium track**: 40 items and 25 FROST on the other 60 levels, which is the 1,500 FROST it costs, paid back.
+- Rewards are granted the moment you reach their level. If you buy premium later, the premium rewards you've already reached are granted straight away.
+- Riders can read their own pass and items but can't change them.
+
+### Test it
+
+1. Sign in and finish a run. The results screen shows **+N XP · Pass level L**, and the Basecamp **SEASON PASS** card fills up.
+2. Click the card, or the **Pass** tab: you'll see your level, the reward strip with the next unlock outlined, and **Get premium · 1,500 FROST**.
+3. To try premium straight away, give yourself FROST as the database owner. Run this in the **SQL Editor**, replacing the email address with your account's:
+
+   ```sql
+   select private.add_frost((select id from auth.users where email = 'you@example.com'), 1500, 'prize', 'test');
+   ```
+
+   Then press **Get premium**. The FROST is taken, and any premium rewards up to your level arrive.
+4. Pass items appear in the **Locker** under **YOUR ITEMS** in their slot (jacket, gloves, boots and so on). Tap one to wear it, then **Save**.

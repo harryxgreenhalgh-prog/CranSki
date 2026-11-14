@@ -9,6 +9,19 @@ export const DISCLAIMER =
 
 export const UPDATES = [
   {
+    title: 'Phase 5 · Ranked and progression',
+    items: [
+      'Ranked 1v1 on APEX: FIND MATCH pairs you with a rider near your rating. You see who it is only when the match starts. Play 5 placement matches to get your tier: Bronze, Silver, Gold, Platinum or Diamond. Top 25 board in the Ranked panel.',
+      "Leaving a ranked match loses it and starts a cooldown of 1, then 5, then 15 minutes. If your opponent never shows, you're never penalised and go straight back to the front of the queue.",
+      'Season Pass: 100 levels of 500 XP. Every run you finish gives 25 XP plus 1 per 3,000 points. Full XP for 3 levels a day, and days you miss roll over; after that, runs give 1/5 XP. A free track, and a premium track for 1,500 FROST that pays back 1,500 FROST. Rewards unlock the moment you reach their level; the reward strip shows what is next.',
+      'Items you own (from the Pass, and soon the Shop) appear in the Locker under YOUR ITEMS.',
+      'FROST now lives on the server: sign in and every run you finish, on any park, earns 10 FROST plus 1 per 10,000 points, up to 100 a day. The server re-rides each run before paying, and pays each run once. No real money, ever.',
+      'Ranked 2v2 on APEX: queue solo, or as a pair with someone in your party. One run each and the best team total wins. It has its own rating, and teammates must be within 500 rating of each other. Leaving counts as a loss plus a 5, 15, then 30 minute break.',
+      'Party matches for parties of 3 or 4: the leader picks a private 2v2 or free-for-all on any leaderboard park, with 1, 3 or 5 runs each, and best run or round wins. Riders take turns while the others watch.',
+      'The CRANSKI CUP: up to 5 maps, 2v2 or free-for-all, total score or round wins. On each map everyone drops in together in the party\'s private room.',
+    ],
+  },
+  {
     title: 'Phase 4 · Multiplayer',
     items: [
       'Live rooms: pick Live rooms in Basecamp and ride with up to 30 riders per park in numbered rooms. Hold Tab for the roster; other riders show on the minimap.',
@@ -62,13 +75,13 @@ export const PAGES = {
   privacy: {
     title: 'Privacy',
     html: `
-      <p>Playing solo needs no account and sends nothing to any server. The game is static files on GitHub Pages, and your progress stays in this browser. Signing in is optional; you only need it for cloud saves, friends and leaderboards.</p>
+      <p>Playing solo needs no account and sends nothing to any server. The game is static files on GitHub Pages, and your progress stays in this browser. Signing in is optional; you only need it for cloud saves, friends, leaderboards, multiplayer and FROST.</p>
 
       <h3>ON THIS DEVICE</h3>
       <p>Kept in this browser (local storage and IndexedDB):</p>
       <ul>
-        <li>Your rider name, settings, Locker choices, personal bests, FROST balance and recent run summaries.</li>
-        <li>Replays and best-run ghosts. They stay here unless you press <b>Post</b> on one, which sends that run's inputs to the leaderboard (see below).</li>
+        <li>Your rider name, settings, Locker choices, personal bests and recent run summaries.</li>
+        <li>Replays and best-run ghosts. They stay here. When you're signed in, each run you finish is also sent to the server (its inputs only) so it can check the score for the leaderboard and for FROST (see below).</li>
         <li>If you sign in: your sign-in session (so you stay signed in), when your cloud save last synced, and your <b>Appear offline</b> choice.</li>
       </ul>
       <p><button class="btn" id="wipe-data">Delete my CranSki data on this device</button></p>
@@ -86,12 +99,17 @@ export const PAGES = {
           <tr><td>Your best server-checked score on each park, with its best trick and date</td><td>Everyone</td></tr>
           <tr><td>The recorded inputs behind each leaderboard run: which buttons were held at each moment, nothing else</td><td>Nobody through the game; kept so runs can be re-checked</td></tr>
           <tr><td>When you last submitted runs, to stop spam</td><td>Nobody; deleted after a day</td></tr>
+          <tr><td>Your Season Pass progress (XP, level, premium) and the items you own, with where each came from</td><td>Only you</td></tr>
+          <tr><td>Your FROST balance, and a history of what you earned and spent (with a fingerprint of each paid run, so a run is only paid once)</td><td>Only you see your balance and recent changes</td></tr>
           <tr><td>Live rooms: your position, pose, tricks and Locker look while you ride, sent to the riders in your room</td><td>Riders in your room, live. Never stored.</td></tr>
           <tr><td>Chat messages</td><td>Your room or party, live. Never stored: every message is filtered and passed straight on.</td></tr>
           <tr><td>Chat strikes and mutes (how many times your messages broke the chat rules, and until when you're muted), but not the messages</td><td>Nobody; strikes reset after 15 minutes</td></tr>
           <tr><td>Reports you make or that are made about you, with the last 10 minutes of that room's chat</td><td>Moderators only, until reviewed</td></tr>
           <tr><td>Your party: who's in it, who leads it, its park and private-room switch, invites you've sent or received, and 10-minute removals</td><td>The party's members (and riders you invite see the leader's gamertag)</td></tr>
           <tr><td>Duels: whose turn it is and each finished run's inputs and score, sent to your opponent</td><td>Your opponent, live. Never stored.</td></tr>
+          <tr><td>Ranked: your rating, tier and win/loss record for 1v1 and 2v2</td><td>Everyone, once you're in the top 25</td></tr>
+          <tr><td>Ranked matches: who played, the scores, the result, and any leave cooldown you're serving</td><td>The riders in that match. Deleted with your account.</td></tr>
+          <tr><td>Party matches and the CRANSKI CUP: who's in, whose turn it is, and each finished run's inputs and score</td><td>Your party, live. Never stored.</td></tr>
         </tbody>
       </table>
       <p>There are no ads, no analytics and no tracking cookies. Nothing is sold or shared, and CranSki never asks for payment details or passwords.</p>
@@ -142,7 +160,7 @@ export const PAGES = {
     title: 'Coming later',
     html: `
       <p>The Item Shop, the Season Pass and multiplayer (live rooms, duels and parties) arrive in later phases.</p>
-      <p>Available now: sign in with an email link for cloud saves, friends and leaderboards where the server re-rides each run to check the score. Everything you earn still works on this device without an account.</p>`,
+      <p>Available now: sign in with an email link for cloud saves, friends, FROST and leaderboards where the server re-rides each run to check the score. Solo riding still works without an account.</p>`,
   },
 };
 

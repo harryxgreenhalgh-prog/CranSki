@@ -5,11 +5,19 @@ import { account, notSetUp } from './account.js';
 import { getClient } from './client.js';
 import { packRuns, SIM_VERSION } from '../replay/record.js';
 import { PARKS } from '../parks/index.js';
+import { wallet } from './wallet.js';
+import { economy } from './economy.js';
 
 export const BOARD_PARKS = PARKS.filter((p) => p.leaderboard).map((p) => p.id);
 
+// Leaderboard parks.
 export function canPost(record) {
   return !!record && BOARD_PARKS.includes(record.park) && record.version === SIM_VERSION;
+}
+
+// Any park: every finished run the server re-rides earns FROST.
+export function canSubmit(record) {
+  return !!record && PARKS.some((p) => p.id === record.park) && record.version === SIM_VERSION;
 }
 
 export const SUBMIT_ERRORS = {
@@ -22,13 +30,16 @@ export const SUBMIT_ERRORS = {
   bad_inputs: "This run's recording couldn't be read.",
   no_leaderboard: 'This park has no leaderboard.',
   server_not_configured: "The leaderboard server isn't set up yet.",
+  not_your_turn: "It isn't your turn in this match.",
+  not_live: 'That match has ended.',
+  wrong_park: 'Ranked runs are on APEX.',
   server_error: 'The leaderboard server had a problem, so this run wasn\'t posted. Try again later.',
 };
 
 // { ok: true, total, best, improved, rank } or { ok: false, error, message, serverTotal }
 export async function submitRun(record) {
   if (!account.ready) return { ok: false, error: 'not_signed_in', message: SUBMIT_ERRORS.not_signed_in };
-  const body = {
+  return send({
     park: record.park,
     version: record.version,
     steps: record.inputs.steps,
@@ -37,11 +48,35 @@ export async function submitRun(record) {
     grabSlots: record.grabSlots,
     board: !!record.board,
     claimed: { total: record.total },
-  };
+  });
+}
+
+// A run already packed for sending (duels and ranked keep runs this way),
+// optionally as a turn in a ranked match.
+export async function submitPacked(rec, total, match = null) {
+  if (!account.ready) return { ok: false, error: 'not_signed_in', message: SUBMIT_ERRORS.not_signed_in };
+  return send({
+    park: rec.park,
+    version: rec.version,
+    steps: rec.steps,
+    inputs: rec.inputs,
+    marks: rec.marks || [],
+    grabSlots: rec.grabSlots,
+    board: !!rec.board,
+    claimed: { total },
+    ...(match ? { match } : {}),
+  });
+}
+
+async function send(body) {
   try {
     const sb = await getClient();
     const { data, error } = await sb.functions.invoke('submit-run', { body });
-    if (!error) return { ok: true, ...data };
+    if (!error) {
+      if (data?.frost) wallet.set(data.frost);
+      if (data?.xp) economy.applyRun(data.xp);
+      return { ok: true, ...data };
+    }
     let info = {};
     try {
       info = await error.context?.json?.();

@@ -2,6 +2,8 @@
 import { parkMeta } from '../parks/index.js';
 import { profile } from '../store.js';
 import { account } from '../online/account.js';
+import { wallet } from '../online/wallet.js';
+import { passCardHtml } from './passUI.js';
 import { UPDATES } from './pages.js';
 
 const $ = (id) => document.getElementById(id);
@@ -31,7 +33,11 @@ export class Basecamp {
     $('music-btn').addEventListener('click', onMusic);
     $('friends-btn').addEventListener('click', () => (onFriends ? onFriends() : onPage('online')));
     $('account-btn').addEventListener('click', onAccount);
-    document.querySelectorAll('#basecamp .mode').forEach((b) => b.addEventListener('click', () => onMode?.(b.dataset.mode === 'multi' ? 'live' : 'solo')));
+    $('season-card').addEventListener('click', () => onTab('pass'));
+    $('season-card').addEventListener('keydown', (e) => (e.key === 'Enter' || e.key === ' ') && onTab('pass'));
+    document.querySelectorAll('#basecamp .mode').forEach((b) =>
+      b.addEventListener('click', () => onMode?.({ multi: 'live', ranked: 'ranked', party: 'party' }[b.dataset.mode] || 'solo'))
+    );
     const name = $('rider-name');
     // Signed in, the lift pass shows your gamertag; change it from Account.
     name.addEventListener('click', () => {
@@ -79,7 +85,7 @@ export class Basecamp {
   }
 
   setMode(mode, note) {
-    document.querySelectorAll('#basecamp .mode').forEach((b) => b.classList.toggle('on', (b.dataset.mode === 'multi') === (mode === 'live')));
+    document.querySelectorAll('#basecamp .mode').forEach((b) => b.classList.toggle('on', b.dataset.mode === (mode === 'live' ? 'multi' : 'solo')));
     $('mode-note').textContent = note;
   }
 
@@ -91,7 +97,9 @@ export class Basecamp {
   }
 
   refresh() {
-    $('frost').textContent = fmt(profile.frost);
+    $('frost').textContent = wallet.frost === null ? '—' : fmt(wallet.frost);
+    $('frost').parentElement.title = account.ready ? `FROST: earned by riding · ${wallet.today}/${wallet.cap} today` : 'FROST: sign in, then earn it by riding';
+    $('season-card').innerHTML = passCardHtml();
     this.refreshAccount();
     const runs = profile.runs;
     $('pc-runs').textContent = `${runs.length} run${runs.length === 1 ? '' : 's'}`;

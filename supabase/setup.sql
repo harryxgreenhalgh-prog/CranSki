@@ -1227,3 +1227,1319 @@ create policy "cranski: party members send" on realtime.messages
     realtime.messages.extension in ('broadcast', 'presence')
     and public.in_party_topic((select realtime.topic()), false)
   );
+
+-- =================================================================== 20261113120000_ranked.sql
+
+-- CranSki · Phase 5 · Ranked 1v1 and 2v2 on APEX (DESIGN.md, Modes and multiplayer).
+--
+-- Everything here is decided by the database, never by the game:
+--   - matchmaking by rating (the window widens the longer you wait);
+--   - check-in: both riders must show up within 45 seconds, otherwise the
+--     match is called off, the no-show gets a cooldown, and whoever turned up
+--     goes straight back to the front of the queue (never penalised);
+--   - the opponent stays hidden until the match starts;
+--   - runs only count once the submit-run Edge Function has re-ridden them;
+--   - results and ratings (Elo), 5 placement matches, then a tier;
+--   - leaving: 1v1 cooldowns of 1, 5, then 15 minutes (a match already under
+--     way is lost); 2v2 leaving counts as a loss plus 5, 15, then 30 minutes.
+-- Riders can read the public ratings board, but can't write any of these
+-- tables: every change goes through the functions below.
+
+create table if not exists public.ratings (
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  mode text not null check (mode in ('1v1', '2v2')),
+  rating integer not null default 1000,
+  placements integer not null default 0, -- placement matches played (0-5)
+  wins integer not null default 0,
+  losses integer not null default 0,
+  draws integer not null default 0,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, mode)
+);
+create index if not exists ratings_board on public.ratings (mode, rating desc) where placements >= 5;
+
+create table if not exists public.ranked_queue (
+  user_id uuid primary key references public.profiles (id) on delete cascade,
+  mode text not null check (mode in ('1v1', '2v2')),
+  rating integer not null,
+  partner uuid references public.profiles (id) on delete cascade, -- 2v2: queued as a pair
+  queued_at timestamptz not null default now()
+);
+
+create table if not exists public.matches (
+  id uuid primary key default gen_random_uuid(),
+  mode text not null check (mode in ('1v1', '2v2')),
+  park text not null default 'apex',
+  status text not null default 'checkin' check (status in ('checkin', 'live', 'done', 'cancelled')),
+  players uuid[] not null, -- run order: everyone's first run in this order, then again
+  teams integer[] not null, -- team (0 or 1) of each player
+  queued_at timestamptz[] not null, -- for putting riders back in the queue
+  partners uuid[] not null default '{}', -- 2v2: each rider's queued partner (or null)
+  runs_each integer not null,
+  checked_in uuid[] not null default '{}',
+  scores jsonb not null default '{}'::jsonb, -- uid -> [run totals]
+  run_index integer not null default 0,
+  turn_started_at timestamptz,
+  created_at timestamptz not null default now(),
+  started_at timestamptz,
+  ended_at timestamptz,
+  result jsonb
+);
+create index if not exists matches_open on public.matches (status, created_at);
+alter table public.matches add column if not exists partners uuid[] not null default '{}';
+
+create table if not exists private.ranked_penalties (
+  user_id uuid not null references auth.users (id) on delete cascade,
+  mode text not null,
+  level integer not null default 0,
+  until timestamptz not null,
+  last_at timestamptz not null,
+  primary key (user_id, mode)
+);
+
+-- Deleting an account deletes the matches it played in (they hold player ids
+-- in a list, which a foreign key can't cascade).
+create or replace function private.forget_matches() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  delete from public.matches where old.id = any (players);
+  return old;
+end
+$$;
+drop trigger if exists forget_matches on public.profiles;
+create trigger forget_matches after delete on public.profiles
+  for each row execute function private.forget_matches();
+
+alter table public.ratings enable row level security;
+alter table public.ranked_queue enable row level security;
+alter table public.matches enable row level security;
+revoke all on public.ratings, public.ranked_queue, public.matches from anon, authenticated;
+grant select on public.ratings to anon, authenticated;
+drop policy if exists "Ratings are public" on public.ratings;
+create policy "Ratings are public" on public.ratings for select to anon, authenticated using (true);
+
+-- ------------------------------------------------------------------ helpers
+create or replace function private.ranked_rules(p_mode text) returns jsonb
+language sql immutable set search_path = '' as $$
+  select case p_mode
+    when '1v1' then '{"players": 2, "runs_each": 2, "cooldowns": [1, 5, 15], "leave_is_loss_before_start": false}'::jsonb
+    else '{"players": 4, "runs_each": 1, "cooldowns": [5, 15, 30], "leave_is_loss_before_start": true}'::jsonb
+  end
+$$;
+
+create or replace function public.ranked_tier(p_rating integer, p_placements integer) returns text
+language sql immutable set search_path = '' as $$
+  select case
+    when p_placements < 5 then 'Unranked'
+    when p_rating >= 1500 then 'Diamond'
+    when p_rating >= 1350 then 'Platinum'
+    when p_rating >= 1200 then 'Gold'
+    when p_rating >= 1050 then 'Silver'
+    else 'Bronze' end
+$$;
+
+create or replace function private.rating_of(p_user uuid, p_mode text) returns integer
+language sql stable security definer set search_path = '' as $$
+  select coalesce((select rating from public.ratings where user_id = p_user and mode = p_mode), 1000)
+$$;
+
+-- Cooldown for leaving: steps up each time within a day.
+create or replace function private.penalize(p_user uuid, p_mode text) returns timestamptz
+language plpgsql security definer set search_path = '' as $$
+declare
+  st private.ranked_penalties;
+  steps integer[] := array(select jsonb_array_elements_text(private.ranked_rules(p_mode) -> 'cooldowns')::integer);
+  lvl integer := 0;
+  until_at timestamptz;
+begin
+  select * into st from private.ranked_penalties where user_id = p_user and mode = p_mode;
+  if found and st.last_at > now() - interval '1 day' then
+    lvl := least(st.level + 1, array_length(steps, 1) - 1);
+  end if;
+  until_at := now() + make_interval(mins => steps[lvl + 1]);
+  insert into private.ranked_penalties (user_id, mode, level, until, last_at) values (p_user, p_mode, lvl, until_at, now())
+  on conflict (user_id, mode) do update set level = excluded.level, until = excluded.until, last_at = excluded.last_at;
+  return until_at;
+end
+$$;
+
+-- 2v2: leaving before the start still counts as a loss (and a placement).
+create or replace function private.leave_loss(p_user uuid, p_mode text) returns void
+language sql security definer set search_path = '' as $$
+  insert into public.ratings (user_id, mode, rating, placements, losses)
+  values (p_user, p_mode, 984, 1, 1)
+  on conflict (user_id, mode) do update set
+    losses = public.ratings.losses + 1,
+    placements = least(5, public.ratings.placements + 1),
+    rating = greatest(100, public.ratings.rating - 16),
+    updated_at = now()
+$$;
+
+-- Put a rider back at the front of the queue (with their partner, if both are going back).
+create or replace function private.requeue(p_match public.matches, i integer, p_back uuid[]) returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  partner uuid := case when cardinality(p_match.partners) >= i then p_match.partners[i] end;
+begin
+  if partner is not null and not (partner = any (p_back)) then partner := null; end if;
+  insert into public.ranked_queue (user_id, mode, rating, partner, queued_at)
+  values (p_match.players[i], p_match.mode, private.rating_of(p_match.players[i], p_match.mode), partner, p_match.queued_at[i])
+  on conflict (user_id) do nothing;
+end
+$$;
+
+-- Ratings after a finished match. winner: team 0 or 1, or null for a draw.
+create or replace function private.apply_result(p_match uuid, p_winner integer, p_reason text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  m public.matches;
+  i integer;
+  avg0 numeric;
+  avg1 numeric;
+  mine numeric;
+  theirs numeric;
+  expected numeric;
+  score numeric;
+  r public.ratings;
+  before_rating integer;
+  k integer;
+  changes jsonb := '{}'::jsonb;
+  totals jsonb := '{}'::jsonb;
+begin
+  select * into m from public.matches where id = p_match for update;
+  if m.status = 'done' then return m.result; end if;
+  for i in 1 .. array_length(m.players, 1) loop
+    insert into public.ratings (user_id, mode) values (m.players[i], m.mode) on conflict do nothing;
+  end loop;
+  select avg(rt.rating) into avg0 from public.ratings rt, unnest(m.players, m.teams) as p(uid, team) where rt.user_id = p.uid and rt.mode = m.mode and p.team = 0;
+  select avg(rt.rating) into avg1 from public.ratings rt, unnest(m.players, m.teams) as p(uid, team) where rt.user_id = p.uid and rt.mode = m.mode and p.team = 1;
+  for i in 1 .. array_length(m.players, 1) loop
+    select * into r from public.ratings where user_id = m.players[i] and mode = m.mode for update;
+    before_rating := r.rating;
+    mine := case when m.teams[i] = 0 then avg0 else avg1 end;
+    theirs := case when m.teams[i] = 0 then avg1 else avg0 end;
+    expected := 1 / (1 + power(10::numeric, (theirs - mine) / 400));
+    score := case when p_winner is null then 0.5 when p_winner = m.teams[i] then 1 else 0 end;
+    k := case when r.placements < 5 then 64 else 32 end;
+    update public.ratings set
+      rating = greatest(100, r.rating + round(k * (score - expected))::integer),
+      placements = least(5, r.placements + 1),
+      wins = wins + (score = 1)::integer,
+      losses = losses + (score = 0)::integer,
+      draws = draws + (score = 0.5)::integer,
+      updated_at = now()
+    where user_id = r.user_id and mode = r.mode
+    returning * into r;
+    changes := changes || jsonb_build_object(m.players[i]::text, jsonb_build_object(
+      'before', before_rating, 'after', r.rating,
+      'tier', public.ranked_tier(r.rating, r.placements), 'placements', r.placements));
+  end loop;
+  -- Best run (1v1) or team total (2v2), for the results screen.
+  for i in 1 .. array_length(m.players, 1) loop
+    totals := totals || jsonb_build_object(m.players[i]::text, coalesce((select max(v::integer) from jsonb_array_elements_text(m.scores -> m.players[i]::text) v), 0));
+  end loop;
+  update public.matches set status = 'done', ended_at = now(),
+    result = jsonb_build_object('winner_team', p_winner, 'reason', p_reason, 'changes', changes, 'best', totals)
+  where id = p_match returning result into changes;
+  return changes;
+end
+$$;
+
+-- Decide a match whose runs are all in.
+create or replace function private.finish_match(p_match uuid) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  m public.matches;
+  t0 integer := 0;
+  t1 integer := 0;
+  i integer;
+  best integer;
+begin
+  select * into m from public.matches where id = p_match;
+  for i in 1 .. array_length(m.players, 1) loop
+    -- 1v1: each rider's best run; 2v2: each rider's (single) run, summed per team.
+    best := coalesce((select max(v::integer) from jsonb_array_elements_text(m.scores -> m.players[i]::text) v), 0);
+    if m.mode = '1v1' then
+      if m.teams[i] = 0 then t0 := greatest(t0, best); else t1 := greatest(t1, best); end if;
+    else
+      if m.teams[i] = 0 then t0 := t0 + best; else t1 := t1 + best; end if;
+    end if;
+  end loop;
+  return private.apply_result(p_match, case when t0 = t1 then null when t0 > t1 then 0 else 1 end, 'runs')
+    || jsonb_build_object('team_totals', jsonb_build_array(t0, t1));
+end
+$$;
+
+-- Someone leaves (or vanishes): before the start the match is called off and
+-- everyone else goes back to the front of the queue; once under way their team
+-- loses. Either way they get a cooldown. 2v2 leaving always counts as a loss.
+create or replace function private.leave_match(p_match uuid, p_user uuid, p_reason text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  m public.matches;
+  i integer;
+  idx integer;
+  out jsonb;
+begin
+  select * into m from public.matches where id = p_match for update;
+  if m.status not in ('checkin', 'live') then return null; end if;
+  idx := array_position(m.players, p_user);
+  if idx is null then return null; end if;
+  perform private.penalize(p_user, m.mode);
+  if m.status = 'checkin' then
+    update public.matches set status = 'cancelled', ended_at = now(), result = jsonb_build_object('reason', p_reason, 'left', p_user) where id = p_match;
+    if (private.ranked_rules(m.mode) ->> 'leave_is_loss_before_start')::boolean then
+      perform private.leave_loss(p_user, m.mode);
+    end if;
+    -- Never penalise the riders left waiting: straight back in the queue.
+    for i in 1 .. array_length(m.players, 1) loop
+      if m.players[i] <> p_user then
+        perform private.requeue(m, i, array_remove(m.players, p_user));
+      end if;
+    end loop;
+    return jsonb_build_object('cancelled', true);
+  end if;
+  out := private.apply_result(p_match, 1 - m.teams[idx], p_reason);
+  return out;
+end
+$$;
+
+-- Tidy up: no-shows after 45 s, and matches stuck on someone's turn.
+create or replace function private.ranked_cleanup() returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  m public.matches;
+  i integer;
+begin
+  for m in select * from public.matches where status = 'checkin' and created_at < now() - interval '45 seconds' for update skip locked loop
+    -- Everyone who didn't check in is a no-show and gets the cooldown; the
+    -- riders who did turn up go straight back to the front of the queue.
+    update public.matches set status = 'cancelled', ended_at = now(), result = jsonb_build_object('reason', 'no_show') where id = m.id;
+    for i in 1 .. array_length(m.players, 1) loop
+      if m.players[i] = any (m.checked_in) then
+        perform private.requeue(m, i, m.checked_in);
+      else
+        perform private.penalize(m.players[i], m.mode);
+        if (private.ranked_rules(m.mode) ->> 'leave_is_loss_before_start')::boolean then
+          perform private.leave_loss(m.players[i], m.mode);
+        end if;
+      end if;
+    end loop;
+  end loop;
+  for m in select * from public.matches where status = 'live' and turn_started_at < now() - interval '10 minutes' for update skip locked loop
+    perform private.leave_match(m.id, m.players[m.run_index % array_length(m.players, 1) + 1], 'timeout');
+  end loop;
+end
+$$;
+
+-- Try to make a match that includes p_user (called while they wait).
+create or replace function private.ranked_pair(p_user uuid) returns uuid
+language plpgsql security definer set search_path = '' as $$
+declare
+  me public.ranked_queue;
+  other public.ranked_queue;
+  waited numeric;
+  win integer;
+  mid uuid;
+  picks public.ranked_queue[];
+  cand public.ranked_queue;
+  team_a uuid[];
+  team_b uuid[];
+  ordered uuid[];
+  qts timestamptz[];
+  ts integer[];
+begin
+  select * into me from public.ranked_queue where user_id = p_user for update skip locked;
+  if not found then return null; end if;
+  waited := extract(epoch from now() - me.queued_at);
+  win := least(800, 100 + (waited * 8)::integer);
+
+  if me.mode = '1v1' then
+    select * into other from public.ranked_queue rq
+    where rq.mode = '1v1' and rq.user_id <> p_user and abs(rq.rating - me.rating) <= win
+    order by abs(rq.rating - me.rating), rq.queued_at
+    limit 1 for update skip locked;
+    if not found then return null; end if;
+    -- Whoever has waited longer drops first.
+    if other.queued_at < me.queued_at then
+      ordered := array[other.user_id, p_user];
+      qts := array[other.queued_at, me.queued_at];
+    else
+      ordered := array[p_user, other.user_id];
+      qts := array[me.queued_at, other.queued_at];
+    end if;
+    insert into public.matches (mode, players, teams, queued_at, runs_each)
+    values ('1v1', ordered, array[0, 1], qts, 2) returning id into mid;
+    delete from public.ranked_queue where user_id in (p_user, other.user_id);
+    return mid;
+  end if;
+
+  -- 2v2: four riders whose ratings are within 500 of each other (pairs stay
+  -- together). Gather candidates near my rating, oldest first.
+  picks := array(
+    select rq from public.ranked_queue rq
+    where rq.mode = '2v2' and abs(rq.rating - me.rating) <= least(500, win)
+    order by (rq.user_id = p_user) desc, rq.queued_at
+    limit 8 for update skip locked
+  );
+  team_a := '{}';
+  team_b := '{}';
+  -- My side first: me and my partner, if I have one waiting.
+  team_a := array[p_user];
+  if me.partner is not null then
+    if not exists (select 1 from unnest(picks) x where x.user_id = me.partner and x.partner = p_user) then return null; end if;
+    team_a := team_a || me.partner;
+  end if;
+  foreach cand in array picks loop
+    if cand.user_id = any (team_a) or cand.user_id = any (team_b) then continue; end if;
+    if cand.partner is not null then
+      -- A pair joins together, on the other team if there's room.
+      if not exists (select 1 from unnest(picks) x where x.user_id = cand.partner and x.partner = cand.user_id) then continue; end if;
+      if cardinality(team_b) = 0 then team_b := array[cand.user_id, cand.partner];
+      elsif cardinality(team_a) = 0 then team_a := array[cand.user_id, cand.partner];
+      end if;
+    elsif cand.user_id <> me.partner or me.partner is null then
+      if cardinality(team_a) < 2 then team_a := team_a || cand.user_id;
+      elsif cardinality(team_b) < 2 then team_b := team_b || cand.user_id;
+      end if;
+    end if;
+    exit when cardinality(team_a) = 2 and cardinality(team_b) = 2;
+  end loop;
+  if cardinality(team_a) <> 2 or cardinality(team_b) <> 2 then return null; end if;
+  -- Teammates within 500 of each other.
+  if abs(private.rating_of(team_a[1], '2v2') - private.rating_of(team_a[2], '2v2')) > 500
+     or abs(private.rating_of(team_b[1], '2v2') - private.rating_of(team_b[2], '2v2')) > 500 then
+    return null;
+  end if;
+  ordered := array[team_a[1], team_b[1], team_a[2], team_b[2]]; -- alternate drops
+  ts := array[0, 1, 0, 1];
+  qts := array(select coalesce((select rq.queued_at from public.ranked_queue rq where rq.user_id = u), now()) from unnest(ordered) u);
+  insert into public.matches (mode, players, teams, queued_at, partners, runs_each)
+  values ('2v2', ordered, ts, qts,
+    array(select (select rq.partner from public.ranked_queue rq where rq.user_id = u) from unnest(ordered) u),
+    1) returning id into mid;
+  delete from public.ranked_queue where user_id = any (ordered);
+  return mid;
+end
+$$;
+
+-- A match as a rider sees it. Before it starts the opponents are hidden.
+create or replace function private.match_view(p_match uuid, p_user uuid) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object(
+    'id', m.id, 'mode', m.mode, 'park', m.park, 'status', m.status,
+    'me', array_position(m.players, p_user) - 1,
+    'players', (
+      select jsonb_agg(jsonb_build_object(
+        'id', case when m.status = 'checkin' and p.uid <> p_user and p.team <> m.teams[array_position(m.players, p_user)] then null else p.uid end,
+        'tag', case when m.status = 'checkin' and p.uid <> p_user and p.team <> m.teams[array_position(m.players, p_user)] then null else pr.gamertag end,
+        'team', p.team,
+        'checked_in', p.uid = any (m.checked_in)
+      ) order by p.ord)
+      from unnest(m.players, m.teams) with ordinality as p(uid, team, ord)
+      join public.profiles pr on pr.id = p.uid
+    ),
+    'runs_each', m.runs_each,
+    'run_index', m.run_index,
+    'scores', case when m.status = 'checkin' then '{}'::jsonb else m.scores end,
+    'turn_age', extract(epoch from now() - coalesce(m.turn_started_at, m.created_at)),
+    'checkin_left', greatest(0, 45 - extract(epoch from now() - m.created_at)),
+    'result', m.result
+  )
+  from public.matches m where m.id = p_match
+$$;
+
+-- ------------------------------------------------------------------ riders' functions
+
+-- Join the queue. p_partner: (2v2) your partner, who must also be queueing with you.
+create or replace function public.ranked_join(p_mode text, p_partner uuid default null) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  me uuid := auth.uid();
+  pen private.ranked_penalties;
+begin
+  if me is null or not exists (select 1 from public.profiles where id = me) then
+    return jsonb_build_object('status', 'no_gamertag');
+  end if;
+  if p_mode not in ('1v1', '2v2') then return jsonb_build_object('status', 'bad_mode'); end if;
+  select * into pen from private.ranked_penalties where user_id = me and mode = p_mode and until > now();
+  if found then return jsonb_build_object('status', 'penalty', 'until', pen.until); end if;
+  if exists (select 1 from public.matches where me = any (players) and status in ('checkin', 'live')) then
+    return jsonb_build_object('status', 'in_match');
+  end if;
+  if p_mode = '1v1' then p_partner := null; end if;
+  if p_partner = me then p_partner := null; end if;
+  -- Teammates within 500 rating of each other.
+  if p_partner is not null then
+    if not exists (select 1 from public.profiles where id = p_partner) then
+      return jsonb_build_object('status', 'bad_partner');
+    end if;
+    if abs(private.rating_of(me, '2v2') - private.rating_of(p_partner, '2v2')) > 500 then
+      return jsonb_build_object('status', 'partner_too_far');
+    end if;
+  end if;
+  insert into public.ranked_queue (user_id, mode, rating, partner)
+  values (me, p_mode, private.rating_of(me, p_mode), p_partner)
+  on conflict (user_id) do update set mode = excluded.mode, rating = excluded.rating, partner = excluded.partner, queued_at = now();
+  return jsonb_build_object('status', 'queued');
+end
+$$;
+
+create or replace function public.ranked_leave_queue() returns void
+language sql security definer set search_path = '' as $$
+  delete from public.ranked_queue where user_id = (select auth.uid())
+$$;
+
+-- Call every couple of seconds while queued or in a match.
+create or replace function public.ranked_poll() returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  me uuid := auth.uid();
+  mid uuid;
+  q public.ranked_queue;
+begin
+  if me is null then return jsonb_build_object('status', 'signed_out'); end if;
+  perform private.ranked_cleanup();
+  select id into mid from public.matches where me = any (players) and status in ('checkin', 'live') order by created_at desc limit 1;
+  if mid is null then
+    select * into q from public.ranked_queue where user_id = me;
+    if not found then
+      -- A match that just ended (or was called off) is still worth showing.
+      select id into mid from public.matches where me = any (players) and ended_at > now() - interval '2 minutes' order by ended_at desc limit 1;
+      if mid is not null then return jsonb_build_object('status', 'ended', 'match', private.match_view(mid, me)); end if;
+      return jsonb_build_object('status', 'idle');
+    end if;
+    mid := private.ranked_pair(me);
+    if mid is null then
+      return jsonb_build_object('status', 'queued', 'mode', q.mode, 'waited', extract(epoch from now() - q.queued_at)::integer,
+        'partner_ready', q.partner is not null and exists (select 1 from public.ranked_queue p where p.user_id = q.partner and p.partner = me));
+    end if;
+  end if;
+  return jsonb_build_object('status', 'match', 'match', private.match_view(mid, me));
+end
+$$;
+
+-- I've loaded the park and I'm ready. Starts the match once everyone is.
+create or replace function public.ranked_checkin(p_match uuid) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  me uuid := auth.uid();
+  m public.matches;
+begin
+  select * into m from public.matches where id = p_match and me = any (players) for update;
+  if not found then return null; end if;
+  if m.status = 'checkin' and not (me = any (m.checked_in)) then
+    m.checked_in := m.checked_in || me;
+    update public.matches set checked_in = m.checked_in where id = p_match;
+    if cardinality(m.checked_in) = cardinality(m.players) then
+      update public.matches set status = 'live', started_at = now(), turn_started_at = now() where id = p_match;
+    end if;
+  end if;
+  return private.match_view(p_match, me);
+end
+$$;
+
+-- Leave a match (counts as described at the top).
+create or replace function public.ranked_forfeit(p_match uuid) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+begin
+  perform private.leave_match(p_match, auth.uid(), 'left');
+  return private.match_view(p_match, auth.uid());
+end
+$$;
+
+-- The rider whose turn it is hasn't finished within 4 minutes: they've
+-- dropped out and their side forfeits. (The server's clock decides.)
+create or replace function public.ranked_claim(p_match uuid) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  me uuid := auth.uid();
+  m public.matches;
+  turn uuid;
+begin
+  select * into m from public.matches where id = p_match and me = any (players);
+  if not found or m.status <> 'live' then return private.match_view(p_match, me); end if;
+  turn := m.players[m.run_index % array_length(m.players, 1) + 1];
+  if turn <> me and m.teams[array_position(m.players, turn)] <> m.teams[array_position(m.players, me)]
+     and m.turn_started_at < now() - interval '4 minutes' then
+    perform private.leave_match(p_match, turn, 'timeout');
+  end if;
+  return private.match_view(p_match, me);
+end
+$$;
+
+-- Called by the submit-run Edge Function (secret key) after it has re-ridden
+-- the run: records the server's score for whoever's turn it is.
+create or replace function public.ranked_record_run(p_user uuid, p_match uuid, p_park text, p_total integer) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  m public.matches;
+  turn uuid;
+begin
+  select * into m from public.matches where id = p_match for update;
+  if not found or m.status <> 'live' then return jsonb_build_object('error', 'not_live'); end if;
+  if p_park <> m.park then return jsonb_build_object('error', 'wrong_park'); end if;
+  turn := m.players[m.run_index % array_length(m.players, 1) + 1];
+  if turn <> p_user then return jsonb_build_object('error', 'not_your_turn'); end if;
+  m.scores := jsonb_set(m.scores, array[p_user::text], coalesce(m.scores -> p_user::text, '[]'::jsonb) || to_jsonb(greatest(0, p_total)));
+  update public.matches set scores = m.scores, run_index = run_index + 1, turn_started_at = now() where id = p_match;
+  if m.run_index + 1 >= array_length(m.players, 1) * m.runs_each then
+    perform private.finish_match(p_match);
+  end if;
+  return jsonb_build_object('ok', true, 'match', private.match_view(p_match, p_user));
+end
+$$;
+
+-- My ratings in both modes, any cooldown, and whether I'm queued.
+create or replace function public.my_ranked() returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object(
+    'ratings', (select coalesce(jsonb_object_agg(md, jsonb_build_object(
+        'rating', coalesce(r.rating, 1000), 'placements', coalesce(r.placements, 0),
+        'wins', coalesce(r.wins, 0), 'losses', coalesce(r.losses, 0), 'draws', coalesce(r.draws, 0),
+        'tier', public.ranked_tier(coalesce(r.rating, 1000), coalesce(r.placements, 0)))), '{}'::jsonb)
+      from unnest(array['1v1', '2v2']) md
+      left join public.ratings r on r.user_id = (select auth.uid()) and r.mode = md),
+    'penalties', (select coalesce(jsonb_object_agg(mode, until), '{}'::jsonb) from private.ranked_penalties where user_id = (select auth.uid()) and until > now()),
+    'queued', (select mode from public.ranked_queue where user_id = (select auth.uid()))
+  )
+$$;
+
+-- Top 25 (placements done).
+create or replace function public.ranked_board(p_mode text)
+returns table (rank bigint, user_id uuid, gamertag text, rating integer, tier text, wins integer, losses integer)
+language sql stable set search_path = '' as $$
+  select row_number() over (order by r.rating desc, r.updated_at), r.user_id, p.gamertag, r.rating,
+         public.ranked_tier(r.rating, r.placements), r.wins, r.losses
+  from public.ratings r join public.profiles p on p.id = r.user_id
+  where r.mode = p_mode and r.placements >= 5
+  order by r.rating desc, r.updated_at
+  limit 25
+$$;
+
+-- Match channels 'match:<id>': only that match's riders, once it has started.
+create or replace function public.in_match_topic(t text) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from public.matches m
+    where m.id::text = substring(t from '^match:([0-9a-f-]{36})$')
+      and (select auth.uid()) = any (m.players)
+      and m.status in ('live', 'done')
+  )
+$$;
+
+do $$
+declare
+  fn text;
+begin
+  foreach fn in array array[
+    'public.ranked_join(text, uuid)', 'public.ranked_leave_queue()', 'public.ranked_poll()',
+    'public.ranked_checkin(uuid)', 'public.ranked_forfeit(uuid)', 'public.ranked_claim(uuid)',
+    'public.my_ranked()', 'public.in_match_topic(text)'
+  ] loop
+    execute format('revoke all on function %s from public, anon', fn);
+    execute format('grant execute on function %s to authenticated', fn);
+  end loop;
+end
+$$;
+revoke all on function public.ranked_record_run(uuid, uuid, text, integer) from public, anon, authenticated;
+grant execute on function public.ranked_record_run(uuid, uuid, text, integer) to service_role;
+grant execute on function public.ranked_board(text) to anon, authenticated;
+grant execute on function public.ranked_tier(integer, integer) to anon, authenticated;
+revoke all on all functions in schema private from public, anon, authenticated;
+
+drop policy if exists "cranski: match riders listen" on realtime.messages;
+create policy "cranski: match riders listen" on realtime.messages
+  for select to authenticated
+  using (realtime.messages.extension in ('broadcast', 'presence') and public.in_match_topic((select realtime.topic())));
+
+drop policy if exists "cranski: match riders send" on realtime.messages;
+create policy "cranski: match riders send" on realtime.messages
+  for insert to authenticated
+  with check (realtime.messages.extension in ('broadcast', 'presence') and public.in_match_topic((select realtime.topic())));
+
+-- =================================================================== 20261114120000_party_matches.sql
+
+-- CranSki · Phase 5 · Step 3: private party matches and the CRANSKI CUP.
+--
+-- A party's riders run their private 2v2 / free-for-all matches and the
+-- CRANSKI CUP over the party's own Realtime channel 'pmatch:<party id>':
+-- who's in, GO, each finished run's recorded inputs (which every rider re-rides
+-- to check the score) and the turn-by-turn pose of whoever is riding. The
+-- result isn't stored and changes no rating, so there are no new tables.
+--
+-- This only widens the party channel check so that 'pmatch:<id>' is, like
+-- 'party:<id>', open to that party's members and nobody else.
+create or replace function public.in_party_topic(t text, include_chat boolean) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from public.party_members m
+    where m.user_id = (select auth.uid())
+      and m.party_id::text = coalesce(
+        substring(t from '^party:([0-9a-f-]{36})$'),
+        substring(t from '^pmatch:([0-9a-f-]{36})$'),
+        case when include_chat then substring(t from '^pchat:([0-9a-f-]{36})$') end,
+        substring(t from '^room:[a-z]+:p([0-9a-f-]{36})$')
+      )
+  )
+$$;
+revoke all on function public.in_party_topic(text, boolean) from public, anon;
+grant execute on function public.in_party_topic(text, boolean) to authenticated;
+
+-- =================================================================== 20261115120000_frost.sql
+
+-- CranSki · Phase 5 · Step 4: FROST, earned only by riding.
+--
+-- FROST is the only currency and there are no real-money purchases anywhere.
+-- A finished run earns 10 FROST plus 1 per 10,000 points, at most 100 a day
+-- (UTC). Only the submit-run Edge Function pays it, after it has re-ridden the
+-- run from its inputs, and only once per run.
+--
+-- Riders can read their own balance and nothing else. Every change goes
+-- through private.add_frost(), called only by database functions that the
+-- Edge Functions (secret key) or the game's own checked actions call, and is
+-- written to a private ledger.
+
+create table if not exists public.wallets (
+  user_id uuid primary key references public.profiles (id) on delete cascade,
+  frost integer not null default 0 check (frost >= 0),
+  updated_at timestamptz not null default now()
+);
+alter table public.wallets enable row level security;
+revoke all on public.wallets from public, anon, authenticated;
+grant select on public.wallets to authenticated;
+drop policy if exists "Riders see their own wallet" on public.wallets;
+create policy "Riders see their own wallet" on public.wallets
+  for select to authenticated using (user_id = (select auth.uid()));
+
+create table if not exists private.frost_ledger (
+  id bigserial primary key,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  day date not null default ((now() at time zone 'utc')::date),
+  delta integer not null,
+  reason text not null, -- run | pass | shop | return | gift_in | gift_out | prize
+  ref text,
+  created_at timestamptz not null default now()
+);
+create index if not exists frost_ledger_user on private.frost_ledger (user_id, created_at desc);
+create index if not exists frost_ledger_day on private.frost_ledger (user_id, day) where reason = 'run';
+-- A run pays out once, however often it's sent.
+create unique index if not exists frost_ledger_run_once on private.frost_ledger (user_id, ref) where reason = 'run';
+
+-- Rules in one place (also read by the game for its help text).
+create or replace function private.frost_rules() returns jsonb
+language sql immutable set search_path = '' as $$
+  select '{"per_run": 10, "per_points": 10000, "daily_cap": 100}'::jsonb
+$$;
+
+-- Add (or take, with a negative delta) FROST. Locks the wallet row so two
+-- changes at once can't both spend the same FROST. Raises 'not_enough_frost'.
+create or replace function private.add_frost(p_user uuid, p_delta integer, p_reason text, p_ref text default null)
+returns integer
+language plpgsql security definer set search_path = '' as $$
+declare
+  bal integer;
+begin
+  insert into public.wallets (user_id) values (p_user) on conflict (user_id) do nothing;
+  select frost into bal from public.wallets where user_id = p_user for update;
+  if bal + p_delta < 0 then raise exception 'not_enough_frost'; end if;
+  insert into private.frost_ledger (user_id, delta, reason, ref) values (p_user, p_delta, p_reason, p_ref);
+  update public.wallets set frost = frost + p_delta, updated_at = now() where user_id = p_user returning frost into bal;
+  return bal;
+end
+$$;
+
+-- FROST earned from runs today (UTC).
+create or replace function private.run_frost_today(p_user uuid) returns integer
+language sql stable security definer set search_path = '' as $$
+  select coalesce(sum(delta), 0)::integer from private.frost_ledger
+  where user_id = p_user and reason = 'run' and day = (now() at time zone 'utc')::date
+$$;
+
+-- Called by the submit-run Edge Function (secret key) once it has re-ridden a
+-- finished run. p_run_key identifies the run (a hash of its inputs), so the
+-- same run never pays twice. Returns what was paid and the new balance.
+-- (Phase 5 step 5 adds Season Pass XP here.)
+create or replace function public.reward_run(p_user uuid, p_park text, p_total integer, p_run_key text)
+returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  rules jsonb := private.frost_rules();
+  today integer;
+  give integer;
+  bal integer;
+begin
+  if p_run_key is null or length(p_run_key) < 16 then raise exception 'bad_run_key'; end if;
+  insert into public.wallets (user_id) values (p_user) on conflict (user_id) do nothing;
+  -- One reward at a time per rider, so the daily cap holds.
+  perform 1 from public.wallets where user_id = p_user for update;
+  if exists (select 1 from private.frost_ledger where user_id = p_user and reason = 'run' and ref = p_run_key) then
+    return jsonb_build_object('frost', jsonb_build_object('awarded', 0, 'duplicate', true,
+      'balance', (select frost from public.wallets where user_id = p_user),
+      'today', private.run_frost_today(p_user), 'cap', rules -> 'daily_cap'));
+  end if;
+  today := private.run_frost_today(p_user);
+  give := least((rules ->> 'per_run')::integer + greatest(0, p_total) / (rules ->> 'per_points')::integer,
+                greatest(0, (rules ->> 'daily_cap')::integer - today));
+  -- Recorded even when the cap is reached (as 0), so the run still counts once.
+  bal := private.add_frost(p_user, give, 'run', p_run_key);
+  return jsonb_build_object('frost', jsonb_build_object('awarded', give, 'duplicate', false,
+    'balance', bal, 'today', today + give, 'cap', rules -> 'daily_cap'));
+end
+$$;
+
+-- My balance, today's run FROST, and my last few changes.
+create or replace function public.my_wallet() returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object(
+    'frost', coalesce((select frost from public.wallets where user_id = (select auth.uid())), 0),
+    'today', private.run_frost_today((select auth.uid())),
+    'cap', private.frost_rules() -> 'daily_cap',
+    'recent', coalesce((
+      select jsonb_agg(jsonb_build_object('delta', l.delta, 'reason', l.reason, 'at', l.created_at) order by l.created_at desc)
+      from (select * from private.frost_ledger where user_id = (select auth.uid()) and delta <> 0 order by created_at desc limit 10) l
+    ), '[]'::jsonb)
+  )
+$$;
+
+revoke all on function private.add_frost(uuid, integer, text, text) from public, anon, authenticated;
+revoke all on function private.run_frost_today(uuid) from public, anon, authenticated;
+revoke all on function public.reward_run(uuid, text, integer, text) from public, anon, authenticated;
+grant execute on function public.reward_run(uuid, text, integer, text) to service_role;
+revoke all on function public.my_wallet() from public, anon;
+grant execute on function public.my_wallet() to authenticated;
+
+-- =================================================================== 20261116120000_season_pass.sql
+
+-- CranSki · Phase 5 · Step 5: seasons, items you own, and the Season Pass.
+--
+-- Season Pass: 100 levels of 500 XP. Every finished run (re-ridden by the
+-- submit-run Edge Function) gives 25 XP plus 1 per 3,000 points. Each day of
+-- the season allows 1,500 XP (3 levels) at the full rate; days you miss roll
+-- over; past that, runs give 1/5 XP. A free track and a premium track; premium
+-- costs 1,500 FROST and pays back 1,500 FROST over its levels. Rewards are
+-- granted as soon as you reach their level (premium ones too, when you buy it).
+--
+-- Riders read their own pass and items; only these functions change them.
+
+-- ------------------------------------------------------------------ seasons
+create table if not exists public.seasons (
+  id integer primary key,
+  name text not null,
+  starts_at timestamptz not null,
+  ends_at timestamptz not null,
+  ended_at timestamptz
+);
+alter table public.seasons enable row level security;
+revoke all on public.seasons from public, anon, authenticated;
+grant select on public.seasons to anon, authenticated;
+drop policy if exists "Seasons are public" on public.seasons;
+create policy "Seasons are public" on public.seasons for select using (true);
+insert into public.seasons (id, name, starts_at, ends_at)
+select 1, 'Season 1', date_trunc('day', now()), date_trunc('day', now()) + interval '30 days'
+where not exists (select 1 from public.seasons);
+
+-- The season now under way (there's always one).
+create or replace function private.current_season() returns public.seasons
+language plpgsql security definer set search_path = '' as $$
+declare
+  s public.seasons;
+begin
+  select * into s from public.seasons where ended_at is null order by id desc limit 1;
+  if not found then
+    insert into public.seasons (id, name, starts_at, ends_at)
+    select coalesce(max(id), 0) + 1, 'Season ' || (coalesce(max(id), 0) + 1), date_trunc('day', now()), date_trunc('day', now()) + interval '30 days'
+    from public.seasons
+    returning * into s;
+  end if;
+  return s;
+end
+$$;
+
+-- ------------------------------------------------------------------ the catalogue
+-- Filled from src/economy/catalog.js by the generated *_catalog.sql migration.
+create table if not exists public.item_sets (
+  id text primary key,
+  name text not null,
+  set_group integer not null,
+  price integer not null check (price > 0),
+  blurb text not null default ''
+);
+create table if not exists public.items (
+  id text primary key,
+  name text not null,
+  kind text not null,
+  slot text not null,
+  rarity text not null check (rarity in ('rare', 'epic', 'legendary')),
+  source text not null check (source in ('shop', 'set', 'pass')),
+  price integer check (price is null or price > 0),
+  set_id text references public.item_sets (id),
+  look jsonb not null default '{}'::jsonb
+);
+create table if not exists public.pass_rewards (
+  level integer not null check (level between 1 and 100),
+  track text not null check (track in ('free', 'premium')),
+  item_id text references public.items (id),
+  frost integer check (frost is null or frost > 0),
+  primary key (level, track),
+  check ((item_id is null) <> (frost is null))
+);
+alter table public.item_sets enable row level security;
+alter table public.items enable row level security;
+alter table public.pass_rewards enable row level security;
+revoke all on public.item_sets, public.items, public.pass_rewards from public, anon, authenticated;
+grant select on public.item_sets, public.items, public.pass_rewards to anon, authenticated;
+drop policy if exists "Catalogue is public" on public.item_sets;
+create policy "Catalogue is public" on public.item_sets for select using (true);
+drop policy if exists "Catalogue is public" on public.items;
+create policy "Catalogue is public" on public.items for select using (true);
+drop policy if exists "Catalogue is public" on public.pass_rewards;
+create policy "Catalogue is public" on public.pass_rewards for select using (true);
+
+-- ------------------------------------------------------------------ what riders own
+create table if not exists public.inventory (
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  item_id text not null references public.items (id),
+  source text not null check (source in ('shop', 'set', 'pass', 'gift')),
+  price_paid integer not null default 0,
+  bought_at timestamptz not null default now(),
+  primary key (user_id, item_id)
+);
+alter table public.inventory enable row level security;
+revoke all on public.inventory from public, anon, authenticated;
+grant select on public.inventory to authenticated;
+drop policy if exists "Riders see their own items" on public.inventory;
+create policy "Riders see their own items" on public.inventory
+  for select to authenticated using (user_id = (select auth.uid()));
+
+-- ------------------------------------------------------------------ the pass
+create table if not exists public.season_pass (
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  season_id integer not null references public.seasons (id),
+  xp integer not null default 0 check (xp >= 0),
+  full_xp integer not null default 0, -- XP earned at the full rate this season
+  premium boolean not null default false,
+  free_paid integer not null default 0, -- free rewards granted up to this level
+  premium_paid integer not null default 0, -- premium rewards granted up to this level
+  updated_at timestamptz not null default now(),
+  primary key (user_id, season_id)
+);
+alter table public.season_pass enable row level security;
+revoke all on public.season_pass from public, anon, authenticated;
+grant select on public.season_pass to authenticated;
+drop policy if exists "Riders see their own pass" on public.season_pass;
+create policy "Riders see their own pass" on public.season_pass
+  for select to authenticated using (user_id = (select auth.uid()));
+
+create or replace function private.pass_rules() returns jsonb
+language sql immutable set search_path = '' as $$
+  select '{"levels": 100, "xp_per_level": 500, "xp_per_run": 25, "points_per_xp": 3000,
+           "full_xp_per_day": 1500, "reduced_divisor": 5, "premium_price": 1500}'::jsonb
+$$;
+
+create or replace function private.pass_level(p_xp integer) returns integer
+language sql immutable set search_path = '' as $$
+  select least(100, greatest(0, p_xp) / 500)
+$$;
+
+-- Full-rate XP still available (1,500 a day since the season began, minus what's used).
+create or replace function private.full_xp_left(p_season public.seasons, p_full_xp integer) returns integer
+language sql stable set search_path = '' as $$
+  select greatest(0, 1500 * (floor(extract(epoch from (now() - p_season.starts_at)) / 86400)::integer + 1) - p_full_xp)
+$$;
+
+-- Grant every reward the rider has reached and not yet received. Returns what was granted.
+create or replace function private.grant_pass(p_user uuid, p_season integer) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  sp public.season_pass;
+  lvl integer;
+  r public.pass_rewards;
+  out jsonb := '[]'::jsonb;
+begin
+  select * into sp from public.season_pass where user_id = p_user and season_id = p_season for update;
+  if not found then return out; end if;
+  lvl := private.pass_level(sp.xp);
+  for r in
+    select * from public.pass_rewards pr
+    where (pr.track = 'free' and pr.level > sp.free_paid and pr.level <= lvl)
+       or (pr.track = 'premium' and sp.premium and pr.level > sp.premium_paid and pr.level <= lvl)
+    order by pr.level, pr.track
+  loop
+    if r.item_id is not null then
+      insert into public.inventory (user_id, item_id, source) values (p_user, r.item_id, 'pass') on conflict do nothing;
+    else
+      perform private.add_frost(p_user, r.frost, 'pass', format('season:%s:%s:%s', p_season, r.level, r.track));
+    end if;
+    out := out || jsonb_build_object('level', r.level, 'track', r.track, 'item', r.item_id, 'frost', r.frost);
+  end loop;
+  update public.season_pass set free_paid = greatest(free_paid, lvl),
+    premium_paid = case when premium then greatest(premium_paid, lvl) else premium_paid end,
+    updated_at = now()
+  where user_id = p_user and season_id = p_season;
+  return out;
+end
+$$;
+
+-- A finished, re-ridden run: FROST (step 4) and now Season Pass XP. Called only
+-- by the submit-run Edge Function (secret key). The same run pays once.
+create or replace function public.reward_run(p_user uuid, p_park text, p_total integer, p_run_key text)
+returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  rules jsonb := private.frost_rules();
+  today integer;
+  give integer;
+  bal integer;
+  season public.seasons;
+  sp public.season_pass;
+  raw integer;
+  left_full integer;
+  full_part integer;
+  gain integer;
+  granted jsonb;
+begin
+  if p_run_key is null or length(p_run_key) < 16 then raise exception 'bad_run_key'; end if;
+  insert into public.wallets (user_id) values (p_user) on conflict (user_id) do nothing;
+  perform 1 from public.wallets where user_id = p_user for update; -- one reward at a time per rider
+  season := private.current_season();
+  insert into public.season_pass (user_id, season_id) values (p_user, season.id) on conflict do nothing;
+  if exists (select 1 from private.frost_ledger where user_id = p_user and reason = 'run' and ref = p_run_key) then
+    select * into sp from public.season_pass where user_id = p_user and season_id = season.id;
+    return jsonb_build_object(
+      'frost', jsonb_build_object('awarded', 0, 'duplicate', true, 'balance', (select frost from public.wallets where user_id = p_user),
+        'today', private.run_frost_today(p_user), 'cap', rules -> 'daily_cap'),
+      'xp', jsonb_build_object('gained', 0, 'duplicate', true, 'xp', sp.xp, 'level', private.pass_level(sp.xp), 'premium', sp.premium,
+        'full_left', private.full_xp_left(season, sp.full_xp), 'season', season.id, 'granted', '[]'::jsonb));
+  end if;
+
+  -- FROST: 10 + 1 per 10,000 points, capped per day.
+  today := private.run_frost_today(p_user);
+  give := least((rules ->> 'per_run')::integer + greatest(0, p_total) / (rules ->> 'per_points')::integer,
+                greatest(0, (rules ->> 'daily_cap')::integer - today));
+  bal := private.add_frost(p_user, give, 'run', p_run_key);
+
+  -- XP: 25 + 1 per 3,000 points; full rate while today's (rolled-over) allowance lasts, then 1/5.
+  select * into sp from public.season_pass where user_id = p_user and season_id = season.id for update;
+  raw := 25 + greatest(0, p_total) / 3000;
+  left_full := private.full_xp_left(season, sp.full_xp);
+  full_part := least(raw, left_full);
+  gain := full_part + (raw - full_part) / 5;
+  update public.season_pass set xp = xp + gain, full_xp = full_xp + full_part, updated_at = now()
+  where user_id = p_user and season_id = season.id returning * into sp;
+  granted := private.grant_pass(p_user, season.id);
+  return jsonb_build_object(
+    'frost', jsonb_build_object('awarded', give, 'duplicate', false,
+      'balance', (select frost from public.wallets where user_id = p_user), 'today', today + give, 'cap', rules -> 'daily_cap'),
+    'xp', jsonb_build_object('gained', gain, 'reduced', full_part < raw, 'xp', sp.xp, 'level', private.pass_level(sp.xp),
+      'premium', sp.premium, 'full_left', left_full - full_part, 'season', season.id, 'granted', granted));
+end
+$$;
+
+-- Buy the premium track for this season: 1,500 FROST, and its rewards so far straight away.
+create or replace function public.buy_premium_pass() returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  me uuid := auth.uid();
+  season public.seasons;
+  sp public.season_pass;
+  bal integer;
+begin
+  if me is null or not exists (select 1 from public.profiles where id = me) then
+    return jsonb_build_object('status', 'no_gamertag');
+  end if;
+  season := private.current_season();
+  insert into public.season_pass (user_id, season_id) values (me, season.id) on conflict do nothing;
+  select * into sp from public.season_pass where user_id = me and season_id = season.id for update;
+  if sp.premium then return jsonb_build_object('status', 'owned'); end if;
+  begin
+    bal := private.add_frost(me, -(private.pass_rules() ->> 'premium_price')::integer, 'pass', 'premium:' || season.id);
+  exception when others then
+    if sqlerrm = 'not_enough_frost' then return jsonb_build_object('status', 'not_enough_frost'); end if;
+    raise;
+  end;
+  update public.season_pass set premium = true, updated_at = now() where user_id = me and season_id = season.id;
+  return jsonb_build_object('status', 'ok', 'granted', private.grant_pass(me, season.id),
+    'balance', (select frost from public.wallets where user_id = me));
+end
+$$;
+
+-- My pass this season.
+create or replace function public.my_pass() returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  me uuid := auth.uid();
+  season public.seasons := private.current_season();
+  sp public.season_pass;
+begin
+  select * into sp from public.season_pass where user_id = me and season_id = season.id;
+  return jsonb_build_object(
+    'season', jsonb_build_object('id', season.id, 'name', season.name, 'starts_at', season.starts_at, 'ends_at', season.ends_at),
+    'xp', coalesce(sp.xp, 0), 'level', private.pass_level(coalesce(sp.xp, 0)), 'premium', coalesce(sp.premium, false),
+    'full_left', private.full_xp_left(season, coalesce(sp.full_xp, 0)));
+end
+$$;
+
+-- What I own.
+create or replace function public.my_inventory() returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select coalesce(jsonb_agg(jsonb_build_object('item', i.item_id, 'source', i.source, 'at', i.bought_at, 'paid', i.price_paid) order by i.bought_at), '[]'::jsonb)
+  from public.inventory i where i.user_id = (select auth.uid())
+$$;
+
+revoke all on function private.current_season() from public, anon, authenticated;
+revoke all on function private.grant_pass(uuid, integer) from public, anon, authenticated;
+revoke all on function private.full_xp_left(public.seasons, integer) from public, anon, authenticated;
+revoke all on function public.reward_run(uuid, text, integer, text) from public, anon, authenticated;
+grant execute on function public.reward_run(uuid, text, integer, text) to service_role;
+revoke all on function public.buy_premium_pass() from public, anon;
+grant execute on function public.buy_premium_pass() to authenticated;
+revoke all on function public.my_pass() from public, anon;
+grant execute on function public.my_pass() to authenticated;
+revoke all on function public.my_inventory() from public, anon;
+grant execute on function public.my_inventory() to authenticated;
+
+-- =================================================================== 20261116120100_catalog.sql
+
+-- GENERATED by `npm run build:catalog` from src/economy/catalog.js. Do not edit.
+-- The item catalogue, limited-time sets and Season Pass rewards. Safe to run again.
+
+insert into public.item_sets (id, name, set_group, price, blurb) values
+  ('pumpkin-patch', 'Pumpkin Patch', 1, 1400, 'A spooky-season set: glowing orange, midnight black and a dash of purple.'),
+  ('park-baggy', 'Park Baggy', 1, 1400, 'Oversized tee, wide-leg pants, a bright beanie and white twins.'),
+  ('aurora-night', 'Aurora Night', 2, 1400, 'Deep navy with northern-lights green and violet.'),
+  ('spring-slush', 'Spring Slush', 2, 1400, 'Sunny spring-park pastels.')
+on conflict (id) do update set name = excluded.name, set_group = excluded.set_group, price = excluded.price, blurb = excluded.blurb;
+
+insert into public.items (id, name, kind, slot, rarity, source, price, set_id, look) values
+  ('glacier-shell', 'Glacier Shell', 'jacket', 'top', 'rare', 'shop', 800, null, '{"top":"shell","topColor":8377328,"trimColor":2776186}'::jsonb),
+  ('campfire-hoodie', 'Campfire Hoodie', 'jacket', 'top', 'rare', 'shop', 800, null, '{"top":"hoodie","topColor":13784363,"trimColor":3810328}'::jsonb),
+  ('northern-lights-shell', 'Northern Lights Shell', 'jacket', 'top', 'epic', 'shop', 1000, null, '{"top":"shell","topColor":2872207,"trimColor":6962136}'::jsonb),
+  ('static-pop-hoodie', 'Static Pop Hoodie', 'jacket', 'top', 'epic', 'shop', 1000, null, '{"top":"hoodie","topColor":16727717,"trimColor":2086655}'::jsonb),
+  ('molten-core-shell', 'Molten Core Shell', 'jacket', 'top', 'legendary', 'shop', 1200, null, '{"top":"shell","topColor":1710618,"trimColor":16734720}'::jsonb),
+  ('whiteout-parka', 'Whiteout Parka', 'jacket', 'top', 'legendary', 'shop', 1200, null, '{"top":"shell","topColor":16185595,"trimColor":12568271}'::jsonb),
+  ('slate-cargo', 'Slate Cargo Pants', 'pants', 'pants', 'rare', 'shop', 600, null, '{"pants":5989488}'::jsonb),
+  ('moss-baggies', 'Moss Baggies', 'pants', 'pants', 'rare', 'shop', 600, null, '{"pants":5204794}'::jsonb),
+  ('signal-red-baggies', 'Signal Red Baggies', 'pants', 'pants', 'epic', 'shop', 800, null, '{"pants":14168618}'::jsonb),
+  ('midnight-velvet', 'Midnight Velvet Pants', 'pants', 'pants', 'legendary', 'shop', 1000, null, '{"pants":1777482}'::jsonb),
+  ('pine-twins', 'Pine Twins', 'skis', 'ride', 'rare', 'shop', 600, null, '{"ride":"skis","skiColor":4160842}'::jsonb),
+  ('neon-drift-twins', 'Neon Drift Twins', 'skis', 'ride', 'epic', 'shop', 800, null, '{"ride":"skis","skiColor":13041466}'::jsonb),
+  ('comet-twins', 'Comet Twins', 'skis', 'ride', 'legendary', 'shop', 1000, null, '{"ride":"skis","skiColor":15909198}'::jsonb),
+  ('driftwood-deck', 'Driftwood Deck', 'snowboard', 'ride', 'rare', 'shop', 600, null, '{"ride":"board","boardColor":10976079}'::jsonb),
+  ('prism-deck', 'Prism Deck', 'snowboard', 'ride', 'epic', 'shop', 800, null, '{"ride":"board","boardColor":9329663}'::jsonb),
+  ('solar-flare-deck', 'Solar Flare Deck', 'snowboard', 'ride', 'legendary', 'shop', 1000, null, '{"ride":"board","boardColor":16747546}'::jsonb),
+  ('chalk-lid', 'Chalk Lid', 'helmet', 'head', 'rare', 'shop', 600, null, '{"head":"helmet","helmet":"item","helmetFinish":"matte","helmetColor":15262938}'::jsonb),
+  ('lagoon-gloss', 'Lagoon Gloss Helmet', 'helmet', 'head', 'epic', 'shop', 800, null, '{"head":"helmet","helmet":"item","helmetFinish":"gloss","helmetColor":2078118}'::jsonb),
+  ('chrome-comet', 'Chrome Comet Helmet', 'helmet', 'head', 'legendary', 'shop', 1000, null, '{"head":"helmet","helmet":"item","helmetFinish":"metal","helmetColor":12109008}'::jsonb),
+  ('lime-straps', 'Lime Straps', 'bindings', 'gear', 'rare', 'shop', 200, null, '{"bindings":10215482}'::jsonb),
+  ('coral-straps', 'Coral Straps', 'bindings', 'gear', 'epic', 'shop', 400, null, '{"bindings":16740193}'::jsonb),
+  ('sand-boots', 'Sand Boots', 'boots', 'gear', 'rare', 'shop', 200, null, '{"boots":13218442}'::jsonb),
+  ('ruby-boots', 'Ruby Boots', 'boots', 'gear', 'legendary', 'shop', 600, null, '{"boots":10687020}'::jsonb),
+  ('birch-poles', 'Birch Poles', 'poles', 'poles', 'rare', 'shop', 200, null, '{"poles":14997954}'::jsonb),
+  ('laser-poles', 'Laser Poles', 'poles', 'poles', 'epic', 'shop', 400, null, '{"poles":3145680}'::jsonb),
+  ('mustard-mitts', 'Mustard Mitts', 'gloves', 'gloves', 'rare', 'shop', 200, null, '{"gloves":14263595}'::jsonb),
+  ('ice-crystal-mitts', 'Ice Crystal Mitts', 'gloves', 'gloves', 'legendary', 'shop', 600, null, '{"gloves":12577279}'::jsonb),
+  ('rose-lens', 'Rose Lens', 'goggles', 'goggles', 'rare', 'shop', 200, null, '{"lens":16748464}'::jsonb),
+  ('emerald-lens', 'Emerald Lens', 'goggles', 'goggles', 'epic', 'shop', 400, null, '{"lens":2088042}'::jsonb),
+  ('mirror-gold-lens', 'Mirror Gold Lens', 'goggles', 'goggles', 'legendary', 'shop', 600, null, '{"lens":15251747}'::jsonb),
+  ('pumpkin-patch-hoodie', 'Pumpkin Patch Hoodie', 'jacket', 'top', 'epic', 'set', null, 'pumpkin-patch', '{"top":"hoodie","topColor":16741656,"trimColor":1710618}'::jsonb),
+  ('pumpkin-patch-pants', 'Pumpkin Patch Pants', 'pants', 'pants', 'epic', 'set', null, 'pumpkin-patch', '{"pants":2829099}'::jsonb),
+  ('jack-o-lid', 'Jack-o''-Lid', 'helmet', 'head', 'epic', 'set', null, 'pumpkin-patch', '{"head":"helmet","helmet":"item","helmetFinish":"gloss","helmetColor":16741656}'::jsonb),
+  ('spooky-mitts', 'Spooky Mitts', 'gloves', 'gloves', 'epic', 'set', null, 'pumpkin-patch', '{"gloves":6958225}'::jsonb),
+  ('baggy-tee', 'Baggy Tee', 'jacket', 'top', 'epic', 'set', null, 'park-baggy', '{"top":"tee","topColor":16054267,"trimColor":2764600}'::jsonb),
+  ('baggy-wide-legs', 'Baggy Wide-Legs', 'pants', 'pants', 'epic', 'set', null, 'park-baggy', '{"pants":7043727}'::jsonb),
+  ('baggy-beanie', 'Baggy Beanie', 'beanie', 'head', 'epic', 'set', null, 'park-baggy', '{"head":"beanie","beanieItem":"knit","beanieColor":16765503}'::jsonb),
+  ('jib-twins', 'Jib Twins', 'skis', 'ride', 'epic', 'set', null, 'park-baggy', '{"ride":"skis","skiColor":16054267}'::jsonb),
+  ('aurora-shell', 'Aurora Shell', 'jacket', 'top', 'legendary', 'set', null, 'aurora-night', '{"top":"shell","topColor":728378,"trimColor":2872207}'::jsonb),
+  ('aurora-pants', 'Aurora Pants', 'pants', 'pants', 'epic', 'set', null, 'aurora-night', '{"pants":728378}'::jsonb),
+  ('aurora-lens', 'Aurora Lens', 'goggles', 'goggles', 'epic', 'set', null, 'aurora-night', '{"lens":2872207}'::jsonb),
+  ('aurora-deck', 'Aurora Deck', 'snowboard', 'ride', 'epic', 'set', null, 'aurora-night', '{"ride":"board","boardColor":6962136}'::jsonb),
+  ('slush-long-sleeve', 'Slush Long Sleeve', 'jacket', 'top', 'epic', 'set', null, 'spring-slush', '{"top":"longsleeve","topColor":16765404,"trimColor":8377328}'::jsonb),
+  ('slush-pants', 'Slush Pants', 'pants', 'pants', 'epic', 'set', null, 'spring-slush', '{"pants":11069135}'::jsonb),
+  ('slush-mitts', 'Slush Mitts', 'gloves', 'gloves', 'epic', 'set', null, 'spring-slush', '{"gloves":16769126}'::jsonb),
+  ('slush-poles', 'Slush Poles', 'poles', 'poles', 'epic', 'set', null, 'spring-slush', '{"poles":16748464}'::jsonb),
+  ('pass-3-premium', 'Aspen Shell', 'jacket', 'top', 'rare', 'pass', null, null, '{"top":"shell","topColor":14964526,"trimColor":10011097}'::jsonb),
+  ('pass-5-premium', 'Basalt Lens', 'goggles', 'goggles', 'rare', 'pass', null, null, '{"lens":3065014}'::jsonb),
+  ('pass-8-premium', 'Cinder Pants', 'pants', 'pants', 'rare', 'pass', null, null, '{"pants":15919311}'::jsonb),
+  ('pass-10-free', 'Drift Mitts', 'gloves', 'gloves', 'rare', 'pass', null, null, '{"gloves":8599788}'::jsonb),
+  ('pass-10-premium', 'Ember Twins', 'skis', 'ride', 'rare', 'pass', null, null, '{"ride":"skis","skiColor":6724540}'::jsonb),
+  ('pass-13-premium', 'Flint Lid', 'helmet', 'head', 'rare', 'pass', null, null, '{"head":"helmet","helmet":"item","helmetFinish":"gloss","helmetColor":15625293}'::jsonb),
+  ('pass-15-premium', 'Glint Poles', 'poles', 'poles', 'rare', 'pass', null, null, '{"poles":15817653}'::jsonb),
+  ('pass-18-premium', 'Halo Deck', 'snowboard', 'ride', 'rare', 'pass', null, null, '{"ride":"board","boardColor":3835647}'::jsonb),
+  ('pass-20-free', 'Iris Boots', 'boots', 'gear', 'rare', 'pass', null, null, '{"boots":9338302}'::jsonb),
+  ('pass-20-premium', 'Juniper Beanie', 'beanie', 'head', 'rare', 'pass', null, null, '{"head":"beanie","beanieItem":"knit","beanieColor":12339017}'::jsonb),
+  ('pass-23-premium', 'Lumen Straps', 'bindings', 'gear', 'rare', 'pass', null, null, '{"bindings":62932}'::jsonb),
+  ('pass-25-premium', 'Mica Hoodie', 'jacket', 'top', 'rare', 'pass', null, null, '{"top":"hoodie","topColor":15968018,"trimColor":12339017}'::jsonb),
+  ('pass-28-premium', 'Nimbus Lens', 'goggles', 'goggles', 'rare', 'pass', null, null, '{"lens":4020864}'::jsonb),
+  ('pass-30-free', 'Opal Pants', 'pants', 'pants', 'rare', 'pass', null, null, '{"pants":10182117}'::jsonb),
+  ('pass-30-premium', 'Pebble Mitts', 'gloves', 'gloves', 'rare', 'pass', null, null, '{"gloves":16471559}'::jsonb),
+  ('pass-33-premium', 'Quartz Twins', 'skis', 'ride', 'rare', 'pass', null, null, '{"ride":"skis","skiColor":14373985}'::jsonb),
+  ('pass-35-premium', 'Rime Lid', 'helmet', 'head', 'epic', 'pass', null, null, '{"head":"helmet","helmet":"item","helmetFinish":"gloss","helmetColor":6986062}'::jsonb),
+  ('pass-38-premium', 'Sable Poles', 'poles', 'poles', 'epic', 'pass', null, null, '{"poles":48121}'::jsonb),
+  ('pass-40-free', 'Tundra Deck', 'snowboard', 'ride', 'epic', 'pass', null, null, '{"ride":"board","boardColor":2700124}'::jsonb),
+  ('pass-40-premium', 'Umber Boots', 'boots', 'gear', 'epic', 'pass', null, null, '{"boots":16760681}'::jsonb),
+  ('pass-43-premium', 'Vapor Beanie', 'beanie', 'head', 'epic', 'pass', null, null, '{"head":"beanie","beanieItem":"knit","beanieColor":3696193}'::jsonb),
+  ('pass-45-premium', 'Willow Straps', 'bindings', 'gear', 'epic', 'pass', null, null, '{"bindings":16711790}'::jsonb),
+  ('pass-48-premium', 'Yonder Shell', 'jacket', 'top', 'epic', 'pass', null, null, '{"top":"shell","topColor":11060870,"trimColor":3696193}'::jsonb),
+  ('pass-50-free', 'Zephyr Lens', 'goggles', 'goggles', 'epic', 'pass', null, null, '{"lens":10011097}'::jsonb),
+  ('pass-50-premium', 'Cobalt Pants', 'pants', 'pants', 'epic', 'pass', null, null, '{"pants":16704576}'::jsonb),
+  ('pass-53-premium', 'Fern Mitts', 'gloves', 'gloves', 'epic', 'pass', null, null, '{"gloves":14964526}'::jsonb),
+  ('pass-55-premium', 'Garnet Twins', 'skis', 'ride', 'epic', 'pass', null, null, '{"ride":"skis","skiColor":3065014}'::jsonb),
+  ('pass-58-premium', 'Hazel Lid', 'helmet', 'head', 'epic', 'pass', null, null, '{"head":"helmet","helmet":"item","helmetFinish":"gloss","helmetColor":15919311}'::jsonb),
+  ('pass-60-free', 'Indigo Poles', 'poles', 'poles', 'epic', 'pass', null, null, '{"poles":8599788}'::jsonb),
+  ('pass-60-premium', 'Jade Deck', 'snowboard', 'ride', 'epic', 'pass', null, null, '{"ride":"board","boardColor":6724540}'::jsonb),
+  ('pass-63-premium', 'Kelp Boots', 'boots', 'gear', 'epic', 'pass', null, null, '{"boots":15625293}'::jsonb),
+  ('pass-65-premium', 'Lilac Beanie', 'beanie', 'head', 'epic', 'pass', null, null, '{"head":"beanie","beanieItem":"knit","beanieColor":15817653}'::jsonb),
+  ('pass-68-premium', 'Maple Straps', 'bindings', 'gear', 'legendary', 'pass', null, null, '{"bindings":3835647}'::jsonb),
+  ('pass-70-free', 'Nectar Hoodie', 'jacket', 'top', 'legendary', 'pass', null, null, '{"top":"hoodie","topColor":9338302,"trimColor":15817653}'::jsonb),
+  ('pass-70-premium', 'Ochre Lens', 'goggles', 'goggles', 'legendary', 'pass', null, null, '{"lens":12339017}'::jsonb),
+  ('pass-73-premium', 'Plum Pants', 'pants', 'pants', 'legendary', 'pass', null, null, '{"pants":62932}'::jsonb),
+  ('pass-75-premium', 'Russet Mitts', 'gloves', 'gloves', 'legendary', 'pass', null, null, '{"gloves":15968018}'::jsonb),
+  ('pass-78-premium', 'Saffron Twins', 'skis', 'ride', 'legendary', 'pass', null, null, '{"ride":"skis","skiColor":4020864}'::jsonb),
+  ('pass-80-free', 'Teal Lid', 'helmet', 'head', 'legendary', 'pass', null, null, '{"head":"helmet","helmet":"item","helmetFinish":"metal","helmetColor":10182117}'::jsonb),
+  ('pass-80-premium', 'Verdant Poles', 'poles', 'poles', 'legendary', 'pass', null, null, '{"poles":16471559}'::jsonb),
+  ('pass-83-premium', 'Wisteria Deck', 'snowboard', 'ride', 'legendary', 'pass', null, null, '{"ride":"board","boardColor":14373985}'::jsonb),
+  ('pass-85-premium', 'Amber Boots', 'boots', 'gear', 'legendary', 'pass', null, null, '{"boots":6986062}'::jsonb),
+  ('pass-88-premium', 'Birch Beanie', 'beanie', 'head', 'legendary', 'pass', null, null, '{"head":"beanie","beanieItem":"knit","beanieColor":48121}'::jsonb),
+  ('pass-90-free', 'Cedar Straps', 'bindings', 'gear', 'legendary', 'pass', null, null, '{"bindings":2700124}'::jsonb),
+  ('pass-90-premium', 'Dune Shell', 'jacket', 'top', 'legendary', 'pass', null, null, '{"top":"shell","topColor":16760681,"trimColor":48121}'::jsonb),
+  ('pass-93-premium', 'Echo Lens', 'goggles', 'goggles', 'legendary', 'pass', null, null, '{"lens":3696193}'::jsonb),
+  ('pass-95-premium', 'Frostline Pants', 'pants', 'pants', 'legendary', 'pass', null, null, '{"pants":16711790}'::jsonb),
+  ('pass-98-premium', 'Gale Mitts', 'gloves', 'gloves', 'legendary', 'pass', null, null, '{"gloves":11060870}'::jsonb),
+  ('pass-100-free', 'Harbor Twins', 'skis', 'ride', 'legendary', 'pass', null, null, '{"ride":"skis","skiColor":10011097}'::jsonb),
+  ('pass-100-premium', 'Isle Lid', 'helmet', 'head', 'legendary', 'pass', null, null, '{"head":"helmet","helmet":"item","helmetFinish":"metal","helmetColor":16704576}'::jsonb)
+on conflict (id) do update set name = excluded.name, kind = excluded.kind, slot = excluded.slot, rarity = excluded.rarity,
+  source = excluded.source, price = excluded.price, set_id = excluded.set_id, look = excluded.look;
+
+insert into public.pass_rewards (level, track, item_id, frost) values
+  (1, 'premium', null, 25),
+  (2, 'free', null, 25),
+  (2, 'premium', null, 25),
+  (3, 'premium', 'pass-3-premium', null),
+  (4, 'premium', null, 25),
+  (5, 'premium', 'pass-5-premium', null),
+  (6, 'premium', null, 25),
+  (7, 'free', null, 25),
+  (7, 'premium', null, 25),
+  (8, 'premium', 'pass-8-premium', null),
+  (9, 'premium', null, 25),
+  (10, 'free', 'pass-10-free', null),
+  (10, 'premium', 'pass-10-premium', null),
+  (11, 'premium', null, 25),
+  (12, 'free', null, 25),
+  (12, 'premium', null, 25),
+  (13, 'premium', 'pass-13-premium', null),
+  (14, 'premium', null, 25),
+  (15, 'premium', 'pass-15-premium', null),
+  (16, 'premium', null, 25),
+  (17, 'free', null, 25),
+  (17, 'premium', null, 25),
+  (18, 'premium', 'pass-18-premium', null),
+  (19, 'premium', null, 25),
+  (20, 'free', 'pass-20-free', null),
+  (20, 'premium', 'pass-20-premium', null),
+  (21, 'premium', null, 25),
+  (22, 'free', null, 25),
+  (22, 'premium', null, 25),
+  (23, 'premium', 'pass-23-premium', null),
+  (24, 'premium', null, 25),
+  (25, 'premium', 'pass-25-premium', null),
+  (26, 'premium', null, 25),
+  (27, 'free', null, 25),
+  (27, 'premium', null, 25),
+  (28, 'premium', 'pass-28-premium', null),
+  (29, 'premium', null, 25),
+  (30, 'free', 'pass-30-free', null),
+  (30, 'premium', 'pass-30-premium', null),
+  (31, 'premium', null, 25),
+  (32, 'free', null, 25),
+  (32, 'premium', null, 25),
+  (33, 'premium', 'pass-33-premium', null),
+  (34, 'premium', null, 25),
+  (35, 'premium', 'pass-35-premium', null),
+  (36, 'premium', null, 25),
+  (37, 'free', null, 25),
+  (37, 'premium', null, 25),
+  (38, 'premium', 'pass-38-premium', null),
+  (39, 'premium', null, 25),
+  (40, 'free', 'pass-40-free', null),
+  (40, 'premium', 'pass-40-premium', null),
+  (41, 'premium', null, 25),
+  (42, 'free', null, 25),
+  (42, 'premium', null, 25),
+  (43, 'premium', 'pass-43-premium', null),
+  (44, 'premium', null, 25),
+  (45, 'premium', 'pass-45-premium', null),
+  (46, 'premium', null, 25),
+  (47, 'free', null, 25),
+  (47, 'premium', null, 25),
+  (48, 'premium', 'pass-48-premium', null),
+  (49, 'premium', null, 25),
+  (50, 'free', 'pass-50-free', null),
+  (50, 'premium', 'pass-50-premium', null),
+  (51, 'premium', null, 25),
+  (52, 'free', null, 25),
+  (52, 'premium', null, 25),
+  (53, 'premium', 'pass-53-premium', null),
+  (54, 'premium', null, 25),
+  (55, 'premium', 'pass-55-premium', null),
+  (56, 'premium', null, 25),
+  (57, 'free', null, 25),
+  (57, 'premium', null, 25),
+  (58, 'premium', 'pass-58-premium', null),
+  (59, 'premium', null, 25),
+  (60, 'free', 'pass-60-free', null),
+  (60, 'premium', 'pass-60-premium', null),
+  (61, 'premium', null, 25),
+  (62, 'free', null, 25),
+  (62, 'premium', null, 25),
+  (63, 'premium', 'pass-63-premium', null),
+  (64, 'premium', null, 25),
+  (65, 'premium', 'pass-65-premium', null),
+  (66, 'premium', null, 25),
+  (67, 'free', null, 25),
+  (67, 'premium', null, 25),
+  (68, 'premium', 'pass-68-premium', null),
+  (69, 'premium', null, 25),
+  (70, 'free', 'pass-70-free', null),
+  (70, 'premium', 'pass-70-premium', null),
+  (71, 'premium', null, 25),
+  (72, 'free', null, 25),
+  (72, 'premium', null, 25),
+  (73, 'premium', 'pass-73-premium', null),
+  (74, 'premium', null, 25),
+  (75, 'premium', 'pass-75-premium', null),
+  (76, 'premium', null, 25),
+  (77, 'free', null, 25),
+  (77, 'premium', null, 25),
+  (78, 'premium', 'pass-78-premium', null),
+  (79, 'premium', null, 25),
+  (80, 'free', 'pass-80-free', null),
+  (80, 'premium', 'pass-80-premium', null),
+  (81, 'premium', null, 25),
+  (82, 'free', null, 25),
+  (82, 'premium', null, 25),
+  (83, 'premium', 'pass-83-premium', null),
+  (84, 'premium', null, 25),
+  (85, 'premium', 'pass-85-premium', null),
+  (86, 'premium', null, 25),
+  (87, 'free', null, 25),
+  (87, 'premium', null, 25),
+  (88, 'premium', 'pass-88-premium', null),
+  (89, 'premium', null, 25),
+  (90, 'free', 'pass-90-free', null),
+  (90, 'premium', 'pass-90-premium', null),
+  (91, 'premium', null, 25),
+  (92, 'free', null, 25),
+  (92, 'premium', null, 25),
+  (93, 'premium', 'pass-93-premium', null),
+  (94, 'premium', null, 25),
+  (95, 'premium', 'pass-95-premium', null),
+  (96, 'premium', null, 25),
+  (97, 'free', null, 25),
+  (97, 'premium', null, 25),
+  (98, 'premium', 'pass-98-premium', null),
+  (99, 'premium', null, 25),
+  (100, 'free', 'pass-100-free', null),
+  (100, 'premium', 'pass-100-premium', null)
+on conflict (level, track) do update set item_id = excluded.item_id, frost = excluded.frost;

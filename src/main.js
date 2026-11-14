@@ -35,7 +35,11 @@ import { mountAccount, addAccountSection, esc } from './ui/accountUI.js';
 import { cloud, cloudStatusText } from './online/cloud.js';
 import { friends, onFriends, setLocation } from './online/friends.js';
 import { mountFriends } from './ui/friendsUI.js';
-import { canPost, submitRun } from './online/leaderboard.js';
+import { canPost, canSubmit, submitRun, submitPacked } from './online/leaderboard.js';
+import { wallet, frostText } from './online/wallet.js';
+import { economy } from './online/economy.js';
+import { mountPass } from './ui/passUI.js';
+import { itemById } from './economy/catalog.js';
 import { mountBoard } from './ui/boardUI.js';
 import { LiveRoom } from './online/rooms.js';
 import { LOCAL } from './online/net.js';
@@ -46,6 +50,11 @@ import { IdleWatch } from './ui/idle.js';
 import { ChatChannel, mutedRiders, setMuted, REPORT_REASONS } from './online/chat.js';
 import { ChatUI } from './ui/chatUI.js';
 import { party } from './online/party.js';
+import { ranked, ServerMatch, RANKED_PARK } from './online/ranked.js';
+import { mountRanked } from './ui/rankedUI.js';
+import { PartyMatch, cleanConfig, cleanRoster, describe, CUP_RUN_LIMIT, JOIN_WAIT } from './online/partyMatch.js';
+import { mountPartyMatch } from './ui/partyMatchUI.js';
+import { sideScore } from './online/scoring.js';
 import { DuelSession, DUEL_PARKS, CHALLENGE_TIMEOUT, validPose } from './online/duel.js';
 import { Snapshots } from './online/rooms.js';
 import { Reel } from './render/reel.js';
@@ -218,6 +227,7 @@ function boot() {
       else if (tab === 'replays') openReplays();
       else if (tab === 'locker') openLocker();
       else if (tab === 'leaderboard') openBoard();
+      else if (tab === 'pass') openPass();
       else openPage('online');
     },
     onPage: (p) => openPage(p),
@@ -251,6 +261,7 @@ function boot() {
     $('ghosttag').classList.add('hidden');
     if (loaded) loaded.hud.show(false);
     if (duel) leaveDuel();
+    if (cup) leaveCup(false);
     if (live) live.leaveRoom();
     remotes.clear();
     roster.hide();
@@ -344,10 +355,10 @@ function boot() {
   function reportLocation() {
     const park = loaded ? loaded.id : parkId;
     if (state === 'lift') setLocation('lift', parkId);
-    else if (state === 'riding' || state === 'paused' || state === 'finish' || state === 'results') setLocation('riding', park);
+    else if (['riding', 'paused', 'finish', 'results', 'cupgate', 'cupwait', 'cupover'].includes(state)) setLocation('riding', park);
     else if (state === 'replay') setLocation('replay', park);
     else if (state !== 'loading' && state !== 'boot') setLocation('basecamp');
-    const where = { lift: 'lift', riding: 'riding', paused: 'paused', finish: 'results', results: 'results', replay: 'replay', duel: 'duel', duelover: 'duel', reel: 'duel' }[state] || 'basecamp';
+    const where = { lift: 'lift', riding: 'riding', paused: 'paused', finish: 'results', results: 'results', replay: 'replay', duel: 'duel', duelover: 'duel', reel: 'duel', cupgate: 'duel', cupwait: 'duel', cupover: 'duel' }[state] || 'basecamp';
     if (state !== 'loading' && state !== 'boot') party.setWhere(where, where === 'basecamp' ? null : park);
   }
 
@@ -376,6 +387,14 @@ function boot() {
     live: 'Ride with up to 30 riders. Hold Tab for the roster.',
   };
   async function setPlayMode(m) {
+    if (m === 'ranked') {
+      openRanked();
+      return;
+    }
+    if (m === 'party') {
+      openPartyMatch();
+      return;
+    }
     if (m === playMode) return;
     if (m === 'live') {
       const me = identity();
@@ -518,7 +537,7 @@ function boot() {
   const duelFrameBuf = new Float32Array(STRIDE);
   const duelView = {};
   const cards = {}; // kind -> { big, small, buttons, count }
-  const CARD_ORDER = ['conn', 'opp', 'challenge', 'partygo', 'leave', 'still', 'count'];
+  const CARD_ORDER = ['conn', 'opp', 'challenge', 'partygo', 'rankask', 'pminv', 'leave', 'pmwait', 'cup', 'still', 'count'];
   function setCard(kind, card) {
     if (card) cards[kind] = card;
     else delete cards[kind];
@@ -625,31 +644,31 @@ function boot() {
     return r.results ? r.results.total : 0;
   }
 
-  async function startDuel({ id, opp, host, park }) {
+  async function startDuel({ id, opp, host, park, session = null }) {
     const me = identity();
     if (!me || duel) return;
     try {
       if (!verifyMod) verifyMod = await import('./sim/verify.js');
       const lk = live?.remotes.get(opp.uid)?.look;
-      duel = new DuelSession({
-        id,
-        me,
-        opp,
-        host,
-        park,
-        verify: verifyRecord,
-        hooks: {
+      const hooks = {
           onTurn: (uid, run) => duelTurn(uid, run),
           onCountdown: (uid) => {
-            countdown = { until: performance.now() + 3600, mine: uid === me.uid };
-            if (uid !== me.uid && duelOpp) duelOpp.snaps = new Snapshots();
+            countdown = { until: performance.now() + 3600, mine: uid === me.uid, uid };
+            if (uid !== me.uid && duelOpp) {
+              duelOpp.snaps = new Snapshots();
+              dressOpp(uid);
+            }
           },
           onOppPose: (m) => {
             if (!duelOpp || !validPose(m)) return;
             duelOpp.snaps.push(m.t, m.f, performance.now());
             duelOpp.score = Number(m.sc) || 0;
           },
-          onOppDone: (total, run) => toast(`${opp.tag}: run ${Math.floor(run / 2) + 1} scored ${fmt(total)}`, 4000),
+          onOppDone: (total, run, uid = opp.uid) => {
+            const n = duelRiders().length;
+            const each = duel ? duel.order.length / n : 2;
+            toast(each > 1 ? `${duelTag(uid)}: run ${Math.floor(run / n) + 1} scored ${fmt(total)}` : `${duelTag(uid)} scored ${fmt(total)}`, 4000);
+          },
           onOver: (res) => duelOver(res),
           onRestart: (p) => duelRestart(p),
           onOppLeft: () => duelOppLeft(),
@@ -659,8 +678,15 @@ function boot() {
           },
           onConnection: (ok) => setCard('conn', ok ? null : { big: 'RECONNECTING…', small: 'Lost the connection to the duel. Trying again.' }),
           onProposal: (p) => duelProposal(p),
-        },
-      });
+          onError: (msg) => toast(msg, 6000),
+          onRiderLeft: (u) => toast(`${duelTag(u)} left the match. Their runs score 0.`, 5000),
+          onSkipped: (u) => toast(`${duelTag(u)} isn't here, so their run was skipped.`, 4000),
+      };
+      if (session) {
+        // Ranked: the server is the referee.
+        duel = session;
+        duel.h = hooks;
+      } else duel = new DuelSession({ id, me, opp, host, park, verify: verifyRecord, hooks });
       await duel.connect();
       const model = new RiderModel({ ...DEFAULT_LOOK, ...(lk || {}) });
       if (ASSETS.ready) {
@@ -669,12 +695,47 @@ function boot() {
       }
       model.root.visible = false;
       duelOpp = { model, snaps: new Snapshots(), score: 0, camPos: null, prev: new THREE.Vector3() };
-      toast(`Duel with ${opp.tag} on ${PARK_NAME(park)}!`, 4000);
+      if (session?.party) toast(describe(session.cfg), 5000);
+      else if (session?.teamPlay) {
+        const mine = duelRiders().filter((p) => p.team === duel.myTeam && p.uid !== me.uid).map((p) => p.tag);
+        const them = duelRiders().filter((p) => p.team !== duel.myTeam).map((p) => p.tag);
+        toast(`Ranked ${duel.mode} on ${PARK_NAME(park)}: you and ${mine.join(', ')} vs ${them.join(' and ')}!`, 5000);
+      } else toast(session ? `Ranked ${duel.mode} on ${PARK_NAME(park)} vs ${opp.tag}!` : `Duel with ${opp.tag} on ${PARK_NAME(park)}!`, 4000);
       enterDuelLobby();
     } catch (e) {
       console.warn(e);
       toast("Couldn't start the duel.");
       duel = null;
+    }
+  }
+
+  // Everyone in the duel or ranked match: [{ uid, tag, team }].
+  function duelRiders() {
+    if (!duel) return [];
+    return duel.players || [
+      { uid: duel.me.uid, tag: duel.me.tag, team: 0 },
+      { uid: duel.opp.uid, tag: duel.opp.tag, team: 1 },
+    ];
+  }
+  function duelTag(uid) {
+    if (duel && uid === duel.me.uid) return duel.me.tag;
+    return duelRiders().find((p) => p.uid === uid)?.tag || 'Rider';
+  }
+  const duelBest = (u) => Math.max(0, ...((duel && duel.scores[u]) || []));
+  // Teams: each rider's run added up per team.
+  function teamTotals() {
+    const t = [0, 0];
+    for (const p of duelRiders()) t[p.team] += duelBest(p.uid);
+    return t;
+  }
+  // Put the rider we're about to watch in their own Locker look.
+  function dressOpp(uid) {
+    if (!duelOpp) return;
+    const lk = duel?.looks?.[uid] || live?.remotes.get(uid)?.look;
+    try {
+      duelOpp.model.applyLook({ ...DEFAULT_LOOK, ...(lk || {}) });
+    } catch {
+      duelOpp.model.applyLook(DEFAULT_LOOK);
     }
   }
 
@@ -714,20 +775,29 @@ function boot() {
     updateDuelHud();
   }
 
+  // A finished run's recorded inputs, for others to re-ride.
+  function runRecord(L) {
+    const data = recorder.data();
+    return { version: SIM_VERSION, park: L.id, steps: data.steps, inputs: packRuns(data.runs), marks: data.marks, grabSlots: L.run.rider.grabSlots.slice(), board: L.run.rider.board };
+  }
+
   function endDuelRun(reason) {
     const L = loaded;
     if (!duel || !duelRun) return;
     duelRun = false;
     const res = L.run.results();
-    const data = recorder.data();
-    const record = { version: SIM_VERSION, park: L.id, steps: data.steps, inputs: packRuns(data.runs), marks: data.marks, grabSlots: L.run.rider.grabSlots.slice(), board: L.run.rider.board };
+    const record = runRecord(L);
     setCard('still', null);
     if (state === 'paused') showOverlay(null);
     state = 'duel';
     L.hud.show(false);
-    const n = Math.floor(duel.run / 2) + 1;
-    toast(`Your run ${n}: ${fmt(res.total)}${reason === 'cap' ? ' (out of pause time)' : ''}`, 4000);
+    const n = (duel.scores[duel.me.uid]?.length || 0) + 1;
+    const each = duel.order.length / Math.max(1, duelRiders().length);
+    toast(`Your run${each > 1 ? ` ${n}` : ''}: ${fmt(res.total)}${reason === 'cap' ? ' (out of pause time)' : ''}`, 4000);
     duel.finishRun(res.total, record);
+    // Friendly duels and party matches: a finished run still earns FROST.
+    if (!duel.ranked && reason === 'finish' && account.ready && canSubmit(record))
+      submitPacked(record, res.total).then((r) => r.ok && r.frost && toast([frostText(r.frost), xpText(r.xp)].filter(Boolean).join(' · '), 4000));
   }
 
   // During my duel run: stream my pose; pausing or standing still uses up the 30 s.
@@ -754,9 +824,12 @@ function boot() {
     el.classList.remove('hidden');
     const total = duel.order.length;
     const runTxt = duel.over ? 'FINAL' : `RUN ${duel.run + 1}/${total}`;
-    $('dh-title').textContent = `DUEL · ${PARK_NAME(duel.park)} · ${runTxt}`;
-    const best = (u) => Math.max(0, ...(duel.scores[u] || []));
-    $('dh-score').innerHTML = `${esc(duel.me.tag)} <b>${fmt(best(duel.me.uid))}</b> · ${esc(duel.opp.tag)} <b>${fmt(best(duel.opp.uid))}</b>`;
+    $('dh-title').textContent = `${duel.label || (duel.ranked ? `RANKED ${duel.mode.toUpperCase()}` : 'DUEL')} · ${PARK_NAME(duel.park)} · ${runTxt}`;
+    if (duel.party) $('dh-score').innerHTML = standingsLine(duel);
+    else if (duel.teamPlay) {
+      const t = teamTotals();
+      $('dh-score').innerHTML = `Your team <b>${fmt(t[duel.myTeam])}</b> · Them <b>${fmt(t[1 - duel.myTeam])}</b>`;
+    } else $('dh-score').innerHTML = `${esc(duel.me.tag)} <b>${fmt(duelBest(duel.me.uid))}</b> · ${esc(duel.opp.tag)} <b>${fmt(duelBest(duel.opp.uid))}</b>`;
   }
 
   function duelOver(res) {
@@ -765,17 +838,51 @@ function boot() {
     setCard('count', null);
     state = 'duelover';
     updateDuelHud();
+    if (duel.party) {
+      partyResults(duel, res);
+      return;
+    }
     const me = duel.me;
     const opp = duel.opp;
-    $('do-title').textContent = res.winner === null ? 'DRAW' : res.winner === me.uid ? 'YOU WIN!' : `${opp.tag.toUpperCase()} WINS`;
-    const row = (u, tag) => `<tr><td><b>${esc(tag)}</b></td>${[0, 1].map((i) => `<td>${duel.scores[u][i] !== undefined ? fmt(duel.scores[u][i]) : '—'}</td>`).join('')}<td><b>${fmt(res.best[u])}</b></td></tr>`;
-    $('do-table').innerHTML = `<tr><td></td><td class="muted">Run 1</td><td class="muted">Run 2</td><td class="muted">Best</td></tr>${row(me.uid, me.tag)}${row(opp.uid, opp.tag)}`;
+    if (duel.teamPlay) {
+      const myTeam = duel.myTeam;
+      $('do-title').textContent = res.winnerTeam === null || res.winnerTeam === undefined ? 'DRAW' : res.winnerTeam === myTeam ? 'YOUR TEAM WINS!' : 'THEY WIN';
+      const t = teamTotals();
+      const side = (team, label) =>
+        duelRiders()
+          .filter((p) => p.team === team)
+          .map((p) => `<tr${p.uid === me.uid ? ' class="me"' : ''}><td><b>${esc(p.tag)}</b></td><td class="muted">${label}</td><td>${duel.scores[p.uid]?.length ? fmt(duelBest(p.uid)) : '—'}</td></tr>`)
+          .join('') + `<tr><td></td><td class="muted">Total</td><td><b>${fmt(t[team])}</b></td></tr>`;
+      $('do-table').innerHTML = `<tr><td></td><td class="muted">Team</td><td class="muted">Run</td></tr>${side(myTeam, 'Yours')}${side(1 - myTeam, 'Theirs')}`;
+    } else {
+      $('do-title').textContent = res.winner === null ? 'DRAW' : res.winner === me.uid ? 'YOU WIN!' : `${opp.tag.toUpperCase()} WINS`;
+      const row = (u, tag) => `<tr><td><b>${esc(tag)}</b></td>${[0, 1].map((i) => `<td>${duel.scores[u][i] !== undefined ? fmt(duel.scores[u][i]) : '—'}</td>`).join('')}<td><b>${fmt(res.best[u] ?? duelBest(u))}</b></td></tr>`;
+      $('do-table').innerHTML = `<tr><td></td><td class="muted">Run 1</td><td class="muted">Run 2</td><td class="muted">Best</td></tr>${row(me.uid, me.tag)}${row(opp.uid, opp.tag)}`;
+    }
     $('do-msg').textContent = '';
     $('do-msg').className = 'acct-msg';
     $('do-parks').classList.add('hidden');
     $('duelover').classList.remove('hidden');
     $('duelover').querySelector('[data-dact=rematch]').disabled = false;
     $('duelover').querySelector('[data-dact=map]').disabled = false;
+    // Ranked: rating change, and look for another match instead of a rematch.
+    const rk = !!duel.ranked;
+    $('duelover').querySelector('[data-dact=rematch]').textContent = rk ? 'Find another match' : 'Rematch';
+    $('duelover').querySelector('[data-dact=map]').classList.toggle('hidden', rk);
+    $('duelover').querySelector('[data-dact=rematch]').classList.remove('hidden');
+    $('duelover').querySelector('[data-dact=reel]').classList.remove('hidden');
+    $('duelover').querySelector('[data-dact=leave]').textContent = rk ? 'Back to Basecamp' : 'Leave duel';
+    if (rk) {
+      const c = res.changes?.[me.uid];
+      if (res.reason === 'no_show' || duel.view?.status === 'cancelled') $('do-msg').textContent = 'Match called off.';
+      else if (c) {
+        const d = c.after - c.before;
+        const lost = res.reason === 'left' || res.reason === 'timeout';
+        const why = lost ? (res.winnerTeam === duel.myTeam ? ' · the other side left' : ' · your side left') : '';
+        $('do-msg').textContent = `Rating ${c.before} → ${c.after} (${d >= 0 ? '+' : ''}${d})${c.placements < 5 ? ` · placement ${c.placements}/5` : ` · ${c.tier}`}${why}`;
+        $('do-msg').className = `acct-msg ${d >= 0 ? 'good' : 'bad'}`;
+      }
+    }
   }
 
   function duelProposal(park) {
@@ -831,15 +938,25 @@ function boot() {
 
   // The other rider has dropped out: their pause time runs down.
   function watchOpponent(dt) {
-    if (!duel || !oppGone || duel.over) {
-      if (cards.opp && (!oppGone || !duel)) setCard('opp', null);
+    let gone = null;
+    if (duel && !duel.over) gone = duel.absent ? (duel.absent.has(duel.turn) ? duel.turn : null) : oppGone ? duel.opp.uid : null;
+    if (!gone) {
+      if (cards.opp) setCard('opp', null);
       return;
     }
-    duel.pauseUsed[duel.opp.uid] += dt;
-    const left = duel.pauseLeft(duel.opp.uid);
-    setCard('opp', { big: 'NOT RESPONDING', small: `${duel.opp.tag} has dropped out · ${Math.ceil(left)} s of their pause time left` });
+    if (duel.ranked) {
+      // The server's clock decides: the side whose rider is gone forfeits after 4 minutes on one turn.
+      const left = Math.max(0, 240 - duel.turnAge);
+      const mate = duel.teamPlay && duelRiders().find((p) => p.uid === gone)?.team === duel.myTeam;
+      setCard('opp', { big: 'NOT RESPONDING', small: `${duelTag(gone)} has dropped out · ${mate ? 'your team forfeits' : 'their side forfeits'} in ${Math.floor(left / 60)}:${String(Math.ceil(left % 60)).padStart(2, '0')} unless they're back` });
+      if (left <= 0 && !mate) duel.forfeitTurn();
+      return;
+    }
+    duel.pauseUsed[gone] += dt;
+    const left = duel.pauseLeft(gone);
+    setCard('opp', { big: 'NOT RESPONDING', small: `${duelTag(gone)} has dropped out · ${Math.ceil(left)} s of their pause time left` });
     if (left <= 0) {
-      if (duel.turn === duel.opp.uid) duel.forfeitTurn();
+      if (duel.turn === gone) duel.forfeitTurn();
       if (state === 'duel' || state === 'duelover') updateDuelHud();
     }
   }
@@ -867,7 +984,28 @@ function boot() {
 
   $('duelover').addEventListener('click', (e) => {
     const act = e.target.closest('[data-dact]')?.dataset.dact;
+    const ps = duel?.party ? duel : cup && state === 'cupover' ? cup.s : null;
+    if (act && ps) {
+      if (act === 'rematch' && party.isLeader) {
+        const cfg = ps.cfg;
+        const players = ps.players;
+        (duel ? leaveDuel() : leaveCup(false)).then(() => startPartyMatch(cfg, players));
+      } else if (act === 'reel' && duel) startReel();
+      else if (act === 'leave') {
+        if (duel) leaveDuel();
+        else leaveCup(false);
+        toBasecamp();
+      }
+      return;
+    }
     if (!act || !duel) return;
+    if (duel.ranked && (act === 'rematch' || act === 'leave')) {
+      const mode = duel.mode;
+      leaveDuel();
+      toBasecamp();
+      if (act === 'rematch') findMatch(mode);
+      return;
+    }
     if (act === 'rematch') {
       duel.proposeAgain(duel.park);
       $('do-msg').textContent = `Waiting for ${duel.opp.tag} to accept…`;
@@ -900,7 +1038,9 @@ function boot() {
       return i >= 0 ? duel.records[u][i] : null;
     };
     const mine = bestRec(duel.me.uid);
-    const theirs = bestRec(duel.opp.uid);
+    const myTeam = duelRiders().find((p) => p.uid === duel.me.uid)?.team ?? 0;
+    const rival = duelRiders().filter((p) => p.team !== myTeam).sort((a, b) => duelBest(b.uid) - duelBest(a.uid))[0] || duel.opp;
+    const theirs = bestRec(rival.uid);
     if (!mine && !theirs) {
       toast('No runs to show.');
       return;
@@ -916,7 +1056,7 @@ function boot() {
         terrain: L.terrain,
         sides: [
           { record: mine, look: look(), tag: duel.me.tag },
-          { record: theirs, look: live?.remotes.get(duel.opp.uid)?.look, tag: duel.opp.tag },
+          { record: theirs, look: duel.looks?.[rival.uid] || live?.remotes.get(rival.uid)?.look, tag: rival.tag },
         ],
       });
       state = 'reel';
@@ -949,7 +1089,7 @@ function boot() {
     }
     if (countdown) {
       const left = (countdown.until - now) / 1000;
-      if (left > 0.6) setCard('count', { big: String(Math.ceil(left - 0.6)), small: countdown.mine ? 'Your run' : `${duel?.opp.tag}'s run` });
+      if (left > 0.6) setCard('count', { big: String(Math.ceil(left - 0.6)), small: countdown.mine ? 'Your run' : `${duelTag(countdown.uid || duel?.opp.uid)}'s run` });
       else if (left > 0) setCard('count', { big: 'GO!', small: '' });
       else {
         const mine = countdown.mine;
@@ -989,7 +1129,9 @@ function boot() {
         spectateLook.copy(focus);
         spectateLook.y += 0.4;
         camera.lookAt(spectateLook);
-        $('dh-score').innerHTML = `Watching ${esc(duel.opp.tag)} · <b>${fmt(duelOpp.score)}</b>`;
+        const who = duelRiders().find((p) => p.uid === duel.turn);
+        const side = duel.teamPlay && who ? (who.team === duel.myTeam ? ' (your team)' : ' (other team)') : '';
+        $('dh-score').innerHTML = `Watching ${esc(duelTag(duel.turn))}${side} · <b>${fmt(duelOpp.score)}</b>`;
       } else {
         // Not started yet: look at the start gate.
         if (duelOpp.model) duelOpp.model.root.visible = false;
@@ -1011,6 +1153,534 @@ function boot() {
     renderer.render(L.world.scene, camera);
   }
 
+  // ------------------------------------------------------------ ranked (Phase 5)
+  const rq = { mode: null, waited: 0, timer: 0, matchId: null, checkingIn: false, partner: null };
+  function openRanked() {
+    openModal('Ranked', '<div class="acct" id="ranked-panel"></div>');
+    mountRanked($('ranked-panel'), {
+      queue: () => (rq.mode ? { mode: rq.mode, waited: rq.waited, partnerTag: rq.partner ? partnerTag(rq.partner) : null, partnerReady: rq.partnerReady } : null),
+      onFind: (mode, partner) => findMatch(mode, partner),
+      onCancel: () => cancelSearch(),
+      onAccount: () => openAccount(),
+      partnerOptions: () => (party.info ? party.members.filter((m) => m.id !== account.user?.id) : []),
+    });
+  }
+  const partnerTag = (uid) => party.members.find((m) => m.id === uid)?.gamertag || 'your partner';
+  function updateQueueBar() {
+    const el = $('queuebar');
+    if (!rq.mode || duel) {
+      el.classList.add('hidden');
+      return;
+    }
+    const t = rq.waited || 0;
+    const clock = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+    $('qb-text').textContent = rq.matchId
+      ? `Ranked ${rq.mode} · match found, getting ready…`
+      : rq.partner && !rq.partnerReady
+        ? `Ranked ${rq.mode} · waiting for ${partnerTag(rq.partner)} to queue with you · ${clock}`
+        : `Searching ranked ${rq.mode}${rq.partner ? ` with ${partnerTag(rq.partner)}` : ''} · ${clock}`;
+    $('qb-cancel').classList.toggle('hidden', !!rq.matchId);
+    el.classList.remove('hidden');
+  }
+  $('qb-cancel').addEventListener('click', () => cancelSearch());
+  async function findMatch(mode, partner = null) {
+    if (!account.ready) {
+      openAccount();
+      return;
+    }
+    if (duel) {
+      toast('Finish your duel first.');
+      return;
+    }
+    try {
+      const r = await ranked.join(mode, partner || null);
+      if (r?.status === 'penalty') {
+        const s = Math.max(0, Math.ceil((Date.parse(r.until) - Date.now()) / 1000));
+        toast(`You left a ranked match recently. You can queue again in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}.`, 6000);
+        return;
+      }
+      if (r?.status !== 'queued' && r?.status !== 'in_match') {
+        const why = {
+          no_gamertag: 'Pick a gamertag first.',
+          partner_too_far: 'Teammates need to be within 500 rating of each other. Queue solo instead.',
+          bad_partner: "Couldn't queue with that rider.",
+        };
+        toast(why[r?.status] || "Couldn't join the queue.", 6000);
+        return;
+      }
+      setCard('rankask', null);
+      // Ask my partner (in my party) to queue with me, unless they already have.
+      if (mode === '2v2' && partner && rq.askedBy !== partner) party.askRanked(partner, mode);
+      rq.askedBy = null;
+      rq.mode = mode;
+      rq.partner = partner;
+      rq.partnerReady = false;
+      rq.waited = 0;
+      clearInterval(rq.timer);
+      rq.timer = setInterval(queueTick, 2000);
+      queueTick();
+      updateQueueBar();
+    } catch (e) {
+      toast(e.message);
+    }
+  }
+  async function cancelSearch() {
+    clearInterval(rq.timer);
+    rq.mode = null;
+    rq.matchId = null;
+    updateQueueBar();
+    await ranked.leaveQueue().catch(() => {});
+  }
+  async function queueTick() {
+    if (!rq.mode) return;
+    let r;
+    try {
+      r = await ranked.poll();
+    } catch {
+      return;
+    }
+    if (r.status === 'queued') {
+      if (rq.matchId) {
+        // Called off: someone didn't show. We're back at the front of the queue.
+        toast("Your opponent didn't show up. You're back in the queue.", 5000);
+        rq.matchId = null;
+        setCard('count', null);
+        if (state === 'duel' && !duel) toBasecamp();
+      }
+      rq.waited = r.waited || 0;
+      rq.partnerReady = !!r.partner_ready;
+    } else if (r.status === 'match') await onMatchView(r.match);
+    else if (r.status === 'idle' || r.status === 'ended') {
+      if (rq.matchId && r.match?.status === 'cancelled') {
+        toast("The match was called off: you didn't check in in time.", 6000);
+        if (state === 'duel' && !duel) toBasecamp();
+      }
+      clearInterval(rq.timer);
+      rq.mode = null;
+      rq.matchId = null;
+    }
+    updateQueueBar();
+  }
+  async function onMatchView(v) {
+    if (v.status === 'checkin') {
+      if (rq.matchId !== v.id) {
+        rq.matchId = v.id;
+        closeModal();
+        toast(`Match found! Ranked ${v.mode} on ${PARK_NAME(v.park)}. ${v.mode === '2v2' ? 'Your opponents are' : 'Your opponent is'} revealed at the start.`, 6000);
+        await checkInFor(v);
+      }
+      setCard('count', { big: 'MATCH FOUND', small: `Waiting for everyone to arrive · ${Math.ceil(v.checkin_left)} s` });
+    } else if (v.status === 'live' && !duel) {
+      clearInterval(rq.timer);
+      setCard('count', null);
+      rq.mode = null;
+      rq.matchId = null;
+      updateQueueBar();
+      const me = { ...identity(), look: look() };
+      const session = new ServerMatch({
+        view: v,
+        me,
+        submit: async (rec, total, matchId) => {
+          const r = await submitPacked(rec, total, matchId);
+          if (r.ok && r.frost) setTimeout(() => toast([frostText(r.frost), xpText(r.xp)].filter(Boolean).join(' · '), 4000), 4200);
+          return r;
+        },
+      });
+      await startDuel({ id: v.id, opp: session.opp, host: session.host, park: v.park, session });
+    }
+  }
+  // Load APEX, stand at the gate, and tell the server I'm here.
+  async function checkInFor(v) {
+    if (rq.checkingIn) return;
+    rq.checkingIn = true;
+    try {
+      await loadForMatch(v.park);
+      state = 'duel';
+      await ranked.checkin(v.id);
+    } catch (e) {
+      console.warn(e);
+      toast("Couldn't get to the match.");
+    } finally {
+      rq.checkingIn = false;
+    }
+  }
+
+
+  // Load a match's park and stand at the gate (leaving any live room unless asked not to).
+  async function loadForMatch(park, { keepRoom = false } = {}) {
+    closeModal();
+    blurMenus();
+    endLift();
+    if (live && live.room && !keepRoom) await live.leaveRoom();
+    $('finishcard').classList.add('hidden');
+    $('duelover').classList.add('hidden');
+    $('liftbar').classList.add('hidden');
+    basecamp.hide();
+    showOverlay(null);
+    if (!loaded || loaded.id !== park) {
+      state = 'loading';
+      loadingScreen.show(music.track.name);
+      parkId = park;
+      await loadPark(park, (p, t) => loadingScreen.set(p, t));
+      loadingScreen.hide();
+    }
+    parkId = park;
+    profile.park = park;
+    placeModel(loaded.world.scene);
+    loaded.run.reset();
+    loaded.hud.show(false);
+  }
+
+  // ------------------------------------------------------------ party matches and the CRANSKI CUP (Phase 5)
+  let pm = null; // the party match I've joined, until it begins (the Cup: until it ends)
+  let cup = null; // { s, k, run, limitAt }: the CRANSKI CUP in progress
+  let pmInviteTimer = 0;
+  function openPartyMatch() {
+    openModal('Party match', '<div class="acct" id="pm-panel"></div>');
+    mountPartyMatch($('pm-panel'), {
+      state: () => ({
+        signedIn: account.ready,
+        inParty: !!party.info,
+        leader: party.isLeader,
+        members: party.members.map((m) => ({ id: m.id, gamertag: m.gamertag, online: m.online })),
+        meId: account.user?.id,
+        busy: !!(pm || cup),
+      }),
+      onStart: (cfg, roster) => startPartyMatch(cfg, roster),
+      onFriends: () => openFriends(),
+    });
+  }
+  // Leader: open the match, then invite the party.
+  async function startPartyMatch(cfg, roster) {
+    if (!party.isLeader || !party.id || !account.ready) return;
+    const id = crypto.randomUUID();
+    closeModal();
+    await joinPartyMatch({ id, cfg, roster, leader: account.user.id, partyId: party.id });
+    party.inviteMatch({ id, cfg, roster });
+  }
+  party.h.onMatchInvite = (m) => {
+    const cfg = cleanConfig(m.cfg);
+    const roster = cfg && cleanRoster(m.roster, cfg.teams);
+    if (!roster || typeof m.id !== 'string' || !roster.some((r) => r.uid === account.user?.id) || pm?.id === m.id) return;
+    const tag = String(m.tag || 'Your leader').slice(0, 18);
+    const answer = (yes) => {
+      clearTimeout(pmInviteTimer);
+      setCard('pminv', null);
+      if (yes) joinPartyMatch({ id: m.id, cfg, roster, leader: m.u, partyId: party.id });
+      else party.replyMatch(m.id, 'out');
+    };
+    setCard('pminv', {
+      big: `${tag} started a ${cfg.kind === 'cup' ? 'CRANSKI CUP' : 'party match'}`,
+      small: describe(cfg),
+      buttons: [
+        { label: 'JOIN', fn: () => answer(true) },
+        { label: 'Skip', fn: () => answer(false) },
+      ],
+      rebuild: true,
+    });
+    clearTimeout(pmInviteTimer);
+    pmInviteTimer = setTimeout(() => cards.pminv && answer(false), JOIN_WAIT * 1000);
+  };
+  party.h.onMatchReply = (m) => {
+    if (pm && m.id === pm.id) pm.answer(m.u, m.answer);
+  };
+  async function joinPartyMatch({ id, cfg, roster, leader, partyId }) {
+    if (pm) await leavePartyMatch();
+    if (cup) await leaveCup(false);
+    if (duel) await leaveDuel();
+    if (rq.mode) await cancelSearch();
+    if (!verifyMod) verifyMod = await import('./sim/verify.js').catch(() => null);
+    const s = new PartyMatch({ id, partyId, cfg, roster, me: { ...identity(), look: look() }, leader, verify: verifyRecord });
+    pm = s;
+    s.h = {
+      onBegin: () => partyMatchBegin(s),
+      onCancel: (why) => partyMatchCancelled(s, why),
+      onChange: () => pmWaitCard(s),
+    };
+    try {
+      await s.connect();
+    } catch (e) {
+      console.warn(e);
+      if (pm === s) pm = null;
+      toast("Couldn't join the party match.");
+      return;
+    }
+    pmWaitCard(s);
+  }
+  function pmWaitCard(s) {
+    if (s !== pm || s.status !== 'joining') return;
+    const inn = s.invited.filter((r) => s.answers.get(r.uid) === 'in').map((r) => r.tag);
+    setCard('pmwait', {
+      big: s.cup ? 'CRANSKI CUP' : 'PARTY MATCH',
+      small: `Waiting for everyone to join · in: ${inn.join(', ')}`,
+      buttons: [{ label: 'Leave', fn: () => leavePartyMatch() }],
+    });
+  }
+  async function leavePartyMatch() {
+    const s = pm;
+    pm = null;
+    setCard('pmwait', null);
+    if (s) await s.leave();
+  }
+  function partyMatchCancelled(s, why) {
+    setCard('pmwait', null);
+    toast(why, 6000);
+    if (pm === s) pm = null;
+    if (cup && cup.s === s) leaveCup(true);
+  }
+  async function partyMatchBegin(s) {
+    setCard('pmwait', null);
+    if (s.cup) {
+      await cupBegin(s);
+      return;
+    }
+    // A private match: the duel screens run it (turns, watching, results).
+    if (pm === s) pm = null;
+    try {
+      await loadForMatch(s.park);
+      state = 'duel';
+      await startDuel({ id: s.id, opp: s.opp, host: s.host, park: s.park, session: s });
+    } catch (e) {
+      console.warn(e);
+      toast("Couldn't start the party match.");
+      s.leave();
+      toBasecamp();
+    }
+  }
+
+  // Standings in one line: "You 12,345 · Bo 9,870 · …" or "Your team 2 rounds · Them 1 round".
+  function sideName(s, side) {
+    if (s.teamPlay) return side.team === s.myTeam ? 'Your team' : 'Them';
+    return side.members[0].uid === s.me.uid ? 'You' : side.members[0].tag;
+  }
+  function standingsLine(s) {
+    const st = s.standings();
+    return st.sides
+      .slice(0, 4)
+      .map((side) => `${esc(sideName(s, side))} <b>${sideScore(side, st.scoring)}</b>`)
+      .join(' · ');
+  }
+  function standingsText(s) {
+    const st = s.standings();
+    return st.sides.map((side) => `${side.place}. ${sideName(s, side)} ${sideScore(side, st.scoring)}`).join(' · ');
+  }
+
+  // Results for a private match or the Cup: every run, then each side's score.
+  function partyResults(s, res) {
+    const st = res.standings || s.standings();
+    const meId = s.me.uid;
+    const w = st.winner;
+    $('do-title').textContent = !w ? 'DRAW' : s.teamPlay ? (w.team === s.myTeam ? 'YOUR TEAM WINS!' : 'THEY WIN') : w.members[0].uid === meId ? 'YOU WIN!' : `${w.members[0].tag.toUpperCase()} WINS`;
+    const heads = s.cup ? s.cfg.maps.map((m) => PARK_NAME(m)) : Array.from({ length: s.rounds }, (_, i) => `Run ${i + 1}`);
+    const scoreHead = st.scoring === 'rounds' ? 'Rounds' : st.scoring === 'best' ? 'Best' : 'Total';
+    const cell = (v) => `<td>${v === undefined || v === null ? '—' : fmt(v)}</td>`;
+    let rows = '';
+    for (const side of st.sides) {
+      for (const m of side.members) {
+        const runs = s.scores[m.uid] || [];
+        const own = st.scoring === 'best' ? fmt(Math.max(0, ...runs)) : st.scoring === 'total' ? fmt(runs.reduce((a, b) => a + (b || 0), 0)) : '';
+        const tagCell = `${s.teamPlay ? '' : `${side.place}. `}<b>${esc(m.tag)}</b>${s.left.has(m.uid) ? ' <span class="muted">(left)</span>' : ''}`;
+        rows += `<tr${m.uid === meId ? ' class="me"' : ''}><td>${tagCell}</td>${heads.map((_, i) => cell(runs[i])).join('')}<td><b>${s.teamPlay ? own : sideScore(side, st.scoring)}</b></td></tr>`;
+      }
+      if (s.teamPlay) rows += `<tr><td class="muted">${side.place}. ${side.team === s.myTeam ? 'Your team' : 'Their team'}</td>${heads.map(() => '<td></td>').join('')}<td><b>${sideScore(side, st.scoring)}</b></td></tr>`;
+    }
+    $('do-table').innerHTML = `<tr><td></td>${heads.map((h) => `<td class="muted">${h}</td>`).join('')}<td class="muted">${scoreHead}</td></tr>${rows}`;
+    const leader = party.isLeader && party.info?.leader === meId;
+    const notes = [];
+    if (st.scoring === 'rounds') notes.push('Most rounds wins; ties broken on total points.');
+    if (!leader) notes.push(`${s.tagOf(party.info?.leader || s.leader)} can start another.`);
+    $('do-msg').textContent = notes.join(' ');
+    $('do-msg').className = 'acct-msg';
+    $('do-parks').classList.add('hidden');
+    const btn = (a) => $('duelover').querySelector(`[data-dact=${a}]`);
+    btn('rematch').textContent = 'Play again';
+    btn('rematch').disabled = false;
+    btn('rematch').classList.toggle('hidden', !leader);
+    btn('map').classList.add('hidden');
+    btn('reel').classList.toggle('hidden', s.cup);
+    btn('leave').textContent = 'Back to Basecamp';
+    $('duelover').classList.remove('hidden');
+  }
+
+  // ---- the CRANSKI CUP: everyone drops in together on each map, in the party's private room
+  async function cupBegin(s) {
+    pm = s;
+    cup = { s, k: 0, run: false, limitAt: 0, hudAt: 0 };
+    s.h = {
+      onCountdown: () => {
+        if (cup?.s !== s) return;
+        setCard('cup', null);
+        countdown = { until: performance.now() + 3600, mine: true, uid: s.me.uid };
+      },
+      onRiderDone: (u, k, total) => {
+        if (u !== s.me.uid) toast(`${s.tagOf(u)}: ${fmt(total)} on ${PARK_NAME(s.cfg.maps[k])}`, 3500);
+        cupCard();
+      },
+      onMap: (k) => cupLoad(k),
+      onOver: () => cupOver(),
+      onRiderLeft: (u) => {
+        toast(`${s.tagOf(u)} left the Cup.`, 4000);
+        cupCard();
+      },
+      onChange: () => cupCard(),
+      onCancel: (why) => partyMatchCancelled(s, why),
+      onConnection: (ok) => setCard('conn', ok ? null : { big: 'RECONNECTING…', small: 'Lost the connection to the Cup. Trying again.' }),
+    };
+    toast(describe(s.cfg), 5000);
+    await cupLoad(0);
+  }
+  async function cupLoad(k) {
+    if (!cup) return;
+    const s = cup.s;
+    if (state === 'finish') showResultsScreen(); // keep the finished run's bests and replay
+    cup.k = k;
+    cup.run = false;
+    countdown = null;
+    setCard('cup', null);
+    setCard('count', null);
+    const park = s.cfg.maps[k];
+    try {
+      if (playMode !== 'live') await setPlayMode('live');
+      await loadForMatch(park, { keepRoom: true });
+      if (live) await live.join(park, { privateKey: s.partyId }).catch((e) => console.warn(e));
+    } catch (e) {
+      console.warn(e);
+      toast("Couldn't load the next map.");
+    }
+    if (!cup || cup.s !== s || !loaded) return;
+    loaded.chase.snap();
+    state = 'cupgate';
+    cupHud();
+    s.ready();
+    cupCard();
+  }
+  function cupFrame(L, dt) {
+    placeModel(L.world.scene);
+    if (countdown) {
+      const left = (countdown.until - performance.now()) / 1000;
+      if (left > 0.6) setCard('count', { big: String(Math.ceil(left - 0.6)), small: 'Everyone drops in together' });
+      else if (left > 0) setCard('count', { big: 'GO!', small: '' });
+      else {
+        countdown = null;
+        setCard('count', null);
+        cupStartRun();
+        return;
+      }
+    }
+    const r = L.run.rider;
+    model.root.visible = true;
+    placeRider(r, L.terrain, r.pos, r.q, model.root.position, model.root.quaternion);
+    model.update({ ...IDLE, crouch: 0.05 + 0.04 * Math.sin(L.time * 1.6) }, dt);
+    pivot.copy(model.root.position);
+    L.chase.update(r, pivot, dt);
+    L.world.update(L.time, pivot, camera);
+    liveFrame(L, dt);
+    renderer.render(L.world.scene, camera);
+  }
+  function cupStartRun() {
+    if (!cup) return;
+    setCard('cup', null);
+    startRun();
+    cup.run = true;
+    cup.limitAt = performance.now() + CUP_RUN_LIMIT * 1000;
+    cup.s.startRun();
+  }
+  function cupTick() {
+    if (!cup) return;
+    const now = performance.now();
+    if (cup.run && now > cup.limitAt && (state === 'riding' || state === 'paused')) endCupRun('time');
+    if (now - cup.hudAt > 250) {
+      cup.hudAt = now;
+      cupHud();
+    }
+  }
+  function endCupRun(reason) {
+    const L = loaded;
+    if (!cup || !cup.run || !L) return;
+    cup.run = false;
+    const res = L.run.results();
+    cup.s.finishRun(res.total, runRecord(L));
+    if (reason === 'time') {
+      if (state === 'paused') showOverlay(null);
+      L.hud.show(false);
+      toast(`Time's up! ${fmt(res.total)}`, 4000);
+      cupWait();
+    }
+  }
+  function cupWait() {
+    if (!cup) return;
+    state = 'cupwait';
+    cupCard();
+  }
+  function cupHud() {
+    if (!cup) return;
+    const s = cup.s;
+    const n = s.cfg.maps.length;
+    const k = Math.min(cup.k, n - 1);
+    let t = '';
+    if (cup.run) {
+      const left = Math.max(0, (cup.limitAt - performance.now()) / 1000);
+      t = ` · ${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')}`;
+    }
+    $('duelhud').classList.remove('hidden');
+    $('dh-title').textContent = `CRANSKI CUP · ${s.over ? 'FINAL' : `MAP ${k + 1}/${n} · ${PARK_NAME(s.cfg.maps[k])}`}${t}`;
+    $('dh-score').innerHTML = standingsLine(s);
+  }
+  function cupCard() {
+    if (!cup) return;
+    const s = cup.s;
+    const leave = [{ label: 'Leave Cup', fn: () => confirmLeaveCup() }];
+    if (state === 'cupgate' && !countdown && s.phase === 'lobby') {
+      const waiting = s.players.filter((p) => p.uid !== s.me.uid && !s.readyFor.has(p.uid) && !s.left.has(p.uid)).map((p) => p.tag);
+      setCard('cup', { big: `MAP ${cup.k + 1} · ${PARK_NAME(s.park)}`, small: waiting.length ? `Waiting for ${waiting.join(', ')} to reach the gate…` : 'Everyone is here. Get ready…', buttons: leave });
+    } else if (state === 'cupwait' && !s.over) {
+      const riding = s.players.filter((p) => !s.done.has(p.uid) && !s.left.has(p.uid) && !s.absent.has(p.uid)).map((p) => p.tag);
+      setCard('cup', { big: riding.length ? 'WAITING FOR THE OTHERS' : 'NEXT MAP…', small: `${riding.length ? `Still riding: ${riding.join(', ')} · ` : ''}${standingsText(s)}`, buttons: leave });
+    } else setCard('cup', null);
+  }
+  function confirmLeaveCup() {
+    setCard('leave', {
+      big: 'Leave the Cup?',
+      small: 'Your remaining maps score 0.',
+      buttons: [
+        { label: 'Stay', fn: () => setCard('leave', null) },
+        {
+          label: 'Leave',
+          fn: () => {
+            setCard('leave', null);
+            leaveCup(true);
+          },
+        },
+      ],
+      rebuild: true,
+    });
+  }
+  function cupOver() {
+    if (!cup) return;
+    if (state === 'finish') showResultsScreen();
+    const s = cup.s;
+    cup.run = false;
+    countdown = null;
+    setCard('cup', null);
+    setCard('count', null);
+    showOverlay(null);
+    state = 'cupover';
+    cupHud();
+    partyResults(s, s.result());
+  }
+  async function leaveCup(goHome = true) {
+    const c = cup;
+    if (!c) return;
+    cup = null;
+    if (pm === c.s) pm = null;
+    countdown = null;
+    for (const k of ['cup', 'count', 'leave', 'conn']) setCard(k, null);
+    $('duelhud').classList.add('hidden');
+    $('duelover').classList.add('hidden');
+    await c.s.leave();
+    if (goHome) toBasecamp();
+  }
+
   // ------------------------------------------------------------ parties (Phase 4 step 5)
   // Leader: head to the party's park (in its private room if switched on),
   // then tell everyone, who get a GO / STAY prompt.
@@ -1026,6 +1696,29 @@ function boot() {
     profile.park = park;
     goRide({ privateKey: party.info.private_room ? party.info.id : null, announce: true, force: true });
   }
+  party.h.onRankedAsk = (m) => {
+    if (duel || (rq.mode === m.mode && rq.partner === m.u)) return;
+    const tag = String(m.tag || 'A party member').slice(0, 18);
+    setCard('rankask', {
+      big: `${tag} wants to play ranked 2v2 with you`,
+      small: 'You queue together as a team on APEX.',
+      buttons: [
+        {
+          label: 'QUEUE',
+          fn: () => {
+            setCard('rankask', null);
+            rq.askedBy = m.u;
+            if (rq.mode) cancelSearch().then(() => findMatch('2v2', m.u));
+            else findMatch('2v2', m.u);
+          },
+        },
+        { label: 'No thanks', fn: () => setCard('rankask', null) },
+      ],
+      rebuild: true,
+    });
+    clearTimeout(rq.askTimer);
+    rq.askTimer = setTimeout(() => setCard('rankask', null), 45000);
+  };
   party.h.onGo = (m) => {
     if (!m || !m.park) return;
     const priv = m.priv ? ' (private room)' : '';
@@ -1104,9 +1797,10 @@ function boot() {
       toast(e.message && /full/i.test(e.message) ? e.message : "Couldn't join a live room. Riding solo for now.");
     }
   }
-  const STATUS_OF = { lift: 'lift', riding: 'riding', paused: 'paused', finish: 'results', results: 'results', replay: 'replay', duel: 'duel', duelover: 'duel', reel: 'duel' };
+  const STATUS_OF = { lift: 'lift', riding: 'riding', paused: 'paused', finish: 'results', results: 'results', replay: 'replay', duel: 'duel', duelover: 'duel', reel: 'duel', cupgate: 'lift', cupwait: 'results', cupover: 'results' };
   // Send your state and place everyone else, every frame you're in a park.
   function liveFrame(L, dt) {
+    cupTick();
     if (!live || !live.room || live.park !== L.id) {
       if (remotes.entries.size) remotes.clear();
       L.hud.others = null;
@@ -1157,12 +1851,14 @@ function boot() {
   async function postRun(rec) {
     const el = $('res-board');
     const name = parkMeta(rec.park).name;
-    if (!canPost(rec)) {
+    const board = canPost(rec);
+    if (!canSubmit(rec)) {
       el.textContent = '';
+      $('res-frost').textContent = '';
       return;
     }
     if (!account.ready) {
-      el.innerHTML = `<button class="btn sm" data-post="signin">${account.signedIn ? 'Pick a gamertag' : 'Sign in'}</button> to post this run to the ${name} leaderboard`;
+      el.innerHTML = `<button class="btn sm" data-post="signin">${account.signedIn ? 'Pick a gamertag' : 'Sign in'}</button> to ${board ? `post this run to the ${name} leaderboard and ` : ''}earn FROST`;
       el.querySelector('[data-post]').addEventListener('click', () => openAccount());
       return;
     }
@@ -1171,11 +1867,17 @@ function boot() {
     el.textContent = 'Checking your run on the server…';
     const r = await submitRun(rec);
     rec.posting = false;
+    if (r.ok && r.frost && state !== 'results' && state !== 'finish') toast([frostText(r.frost), xpText(r.xp)].filter(Boolean).join(' · '), 5000);
     if (lastReplay !== rec) return;
     if (r.ok) {
       rec.posted = true;
-      el.innerHTML = `✓ Checked by the server · <b>#${r.rank}</b> on ${name}${r.improved ? ' · new leaderboard best' : ` · your board best is ${fmtN(r.best)}`}`;
+      $('res-frost').textContent = frostText(r.frost) || 'FROST: the server is not set up yet';
+      $('res-xp').textContent = xpText(r.xp);
+      el.innerHTML = board
+        ? `✓ Checked by the server · <b>#${r.rank}</b> on ${name}${r.improved ? ' · new leaderboard best' : ` · your board best is ${fmtN(r.best)}`}`
+        : '✓ Checked by the server';
     } else {
+      $('res-frost').textContent = 'No FROST for this run';
       el.textContent = r.message + (r.error === 'mismatch' && r.serverTotal != null ? ` (Server got ${fmtN(r.serverTotal)}.)` : '');
       if (r.error === 'network' || r.error === 'server_error') {
         el.insertAdjacentHTML('beforeend', ' <button class="btn sm" data-post="retry">Try again</button>');
@@ -1185,7 +1887,20 @@ function boot() {
   }
   account.onChange(() => {
     if (state === 'results' && lastReplay && account.ready && !lastReplay.posted && !lastReplay.posting) postRun(lastReplay);
+    basecamp.refresh();
   });
+  wallet.onChange(() => basecamp.visible && basecamp.refresh());
+  economy.onChange(() => basecamp.visible && basecamp.refresh());
+  function openPass() {
+    openModal('Season Pass', '<div class="acct pass" id="pass-panel"></div>');
+    mountPass($('pass-panel'), { onAccount: () => openAccount() });
+  }
+  // "+35 XP · Level 4 (120/500)" and anything that unlocked.
+  function xpText(x) {
+    if (!x || x.duplicate) return '';
+    const unlocked = (x.granted || []).map((g) => (g.item ? itemById(g.item)?.name || 'an item' : `${g.frost} FROST`));
+    return `+${x.gained} XP${x.reduced ? ' (past today’s full-XP levels: 1/5 XP)' : ''} · Pass level ${x.level}${unlocked.length ? ` · Unlocked: ${unlocked.join(', ')}` : ''}`;
+  }
 
   // Cloud saves (Phase 3 step 2): show the status, and apply what arrives.
   addAccountSection(() => `<h3>CLOUD SAVE</h3><p class="muted">${esc(cloudStatusText())}</p>`);
@@ -1504,6 +2219,7 @@ function boot() {
       endDuelRun('finish');
       return;
     }
+    if (cup && cup.run) endCupRun('finish');
     const L = loaded;
     const res = L.run.results();
     finish = { t: 0, res, face: 0, dir: null };
@@ -1539,13 +2255,17 @@ function boot() {
     const best = profile.best(L.id);
     const isNew = res.total > best;
     if (isNew) profile.setBest(L.id, res.total);
-    const frost = profile.awardFrost(res.total);
     profile.addRun({ park: L.id, total: res.total, date: Date.now(), best: res.bestTrick?.name || null });
     showResults(res, Math.max(best, res.total), isNew);
-    $('res-frost').textContent = frost > 0 ? `+${frost} FROST earned` : 'Daily FROST cap reached (100 a day)';
+    $('res-frost').textContent = account.ready ? 'Checking your run for FROST…' : 'Sign in to earn FROST and Season Pass XP';
+    $('res-xp').textContent = '';
     if (lastReplay) postRun(lastReplay);
     else $('res-board').textContent = '';
     $('finishcard').classList.add('hidden');
+    if (cup) {
+      cupWait();
+      return;
+    }
     state = 'results';
     showOverlay('results');
   }
@@ -1561,8 +2281,8 @@ function boot() {
       loaded.chase.snap();
       pause(false);
     }
-    if ((act === 'restart' || act === 'map') && duel) {
-      toast("Not during a duel. Use Back to Basecamp to leave it.");
+    if ((act === 'restart' || act === 'map') && (duel || cup)) {
+      toast(cup ? 'Not during the Cup. Use Back to Basecamp to leave it.' : "Not during a duel. Use Back to Basecamp to leave it.");
       return;
     }
     if (act === 'restart') startRun();
@@ -1595,20 +2315,31 @@ function boot() {
       endReel();
       return;
     }
+    if (cup && (state === 'cupgate' || state === 'cupwait')) {
+      if (cards.leave) setCard('leave', null);
+      else confirmLeaveCup();
+      return;
+    }
+    if (cup && state === 'cupover') {
+      leaveCup(true);
+      return;
+    }
     if (state === 'duel' && duel) {
       if (cards.leave) setCard('leave', null);
       else
         setCard('leave', {
-          big: 'Leave the duel?',
-          small: `${duel.opp.tag} will win the runs you don't ride.`,
+          big: duel.ranked ? 'Leave the match?' : 'Leave the duel?',
+          small: duel.party ? 'Your remaining runs score 0.' : duel.ranked ? 'Leaving a ranked match loses it, and you get a cooldown before you can queue again.' : `${duel.opp.tag} will win the runs you don't ride.`,
           buttons: [
             { label: 'Stay', fn: () => setCard('leave', null) },
             {
               label: 'Leave',
               fn: () => {
+                const rk = !!duel?.ranked || !!duel?.party;
                 setCard('leave', null);
                 leaveDuel();
-                startLift();
+                if (rk) toBasecamp();
+                else startLift();
               },
             },
           ],
@@ -1674,7 +2405,7 @@ function boot() {
     time += dt;
     input.pollFrame();
     stats.update(dt);
-    idle.update(dt, { active: !!(live && live.room) && !duel, state });
+    idle.update(dt, { active: !!(live && live.room) && !duel && !cup, state });
     if (state !== reportedState) {
       reportedState = state;
       reportLocation();
@@ -1763,6 +2494,11 @@ function boot() {
       input.endFrame();
       return;
     }
+    if (state === 'cupgate') {
+      cupFrame(L, dt);
+      input.endFrame();
+      return;
+    }
 
     // -------------------------------------------- replay viewer
     if (state === 'replay') {
@@ -1834,7 +2570,7 @@ function boot() {
     // -------------------------------------------- simulation
     if (state === 'riding' || state === 'finish') {
       if (state === 'riding') {
-        if (input.restartHeld() && !duelRun) {
+        if (input.restartHeld() && !duelRun && !cup?.run) {
           restartHold += dt;
           if (restartHold >= 2) {
             restartHold = 0;
@@ -2025,6 +2761,10 @@ function boot() {
     get state() {
       return state;
     },
+    get cup() {
+      return cup;
+    },
+    party,
     get lastReplay() {
       return lastReplay;
     },

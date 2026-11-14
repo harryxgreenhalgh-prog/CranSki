@@ -287,7 +287,9 @@ export class RiderModel {
     M.skin.color.setHex(L.skin);
     M.face.color.setHex(L.head === 'balaclava' ? 0x1a1a1a : L.skin);
     M.hair.color.setHex(L.hairColor);
-    const h = HELMETS[L.helmet] || HELMETS.matte;
+    // A Shop / Season Pass helmet carries its own finish and colour in the look.
+    const FINISHES = ['matte', 'gloss', 'metal'];
+    const h = L.helmet === 'item' ? { finish: FINISHES.includes(L.helmetFinish) ? L.helmetFinish : 'gloss' } : HELMETS[L.helmet] || HELMETS.matte;
     M.helmet.color.setHex(h.color ?? L.helmetColor);
     M.helmet.roughness = h.finish === 'matte' ? 0.85 : h.finish === 'gloss' ? 0.25 : 0.3;
     M.helmet.metalness = h.finish === 'metal' ? 0.85 : 0;

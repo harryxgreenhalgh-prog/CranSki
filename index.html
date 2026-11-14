@@ -83,7 +83,7 @@
         <aside class="leftcol">
           <div class="card news"><h4>LATEST UPDATE</h4><div id="news-body"></div></div>
           <div class="card event"><h4>CHALLENGE</h4><div id="event-body"></div></div>
-          <div class="card season"><h4>SEASON PASS</h4><p class="muted">Seasons, tiers and rewards arrive with online play.</p><div class="tierbar"><span style="width: 0%"></span></div></div>
+          <div class="card season" id="season-card" role="button" tabindex="0" title="Open the Season Pass"><h4>SEASON PASS</h4><p class="muted">Sign in to level up the Season Pass by riding.</p><div class="tierbar"><span style="width: 0%"></span></div></div>
           <div class="card podium"><h4>YOUR PODIUM</h4><ol id="podium"></ol></div>
         </aside>
         <div id="passcard" class="passcard">
@@ -95,6 +95,8 @@
         <div class="modes">
           <button class="mode on" data-mode="solo">Solo <span class="picked">PICKED</span></button>
           <button class="mode" data-mode="multi" title="Live rooms: ride with up to 30 riders">Live rooms <span class="picked">PICKED</span></button>
+          <button class="mode" data-mode="ranked" title="Ranked 1v1 and 2v2 on APEX">Ranked <small>APEX</small></button>
+          <button class="mode" data-mode="party" title="Private 2v2, free-for-all and the CRANSKI CUP for parties of 3-4">Party match <small>3–4</small></button>
           <div class="party muted" id="mode-note">Ride alone, race your ghost, never timed out.</div>
         </div>
         <button id="ride" class="btn primary ride-big">RIDE <kbd>Enter</kbd></button>
@@ -156,6 +158,9 @@
         <div id="chat-hint" class="muted small"></div>
       </div>
 
+      <!-- Ranked: searching for a match -->
+      <div id="queuebar" class="hidden"><span id="qb-text"></span><button class="btn sm" id="qb-cancel">Cancel</button></div>
+
       <!-- Duels: score strip, big cards (challenge, 3-2-1, connection), results, highlight reel -->
       <div id="duelhud" class="hidden"><span id="dh-title"></span><span id="dh-score"></span></div>
       <div id="duelcard" class="hidden"><div id="dc-big"></div><div id="dc-small"></div><div id="dc-buttons"></div></div>
@@ -212,6 +217,7 @@
           <div id="res-total" class="big-score">0</div>
           <div id="res-best" class="muted"></div>
           <div id="res-frost" class="frostline"></div>
+          <div id="res-xp" class="xpline"></div>
           <div id="res-board" class="boardline"></div>
           <table class="breakdown">
             <tbody>

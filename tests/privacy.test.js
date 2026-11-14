@@ -33,7 +33,13 @@ test('every table that stores rider data is removed with the account', () => {
   const tables = [...sql.matchAll(/create table if not exists ([\w.]+) \(([\s\S]*?)\n\);/g)];
   assert.ok(tables.length >= 7);
   for (const [, name, body] of tables) {
-    if (name === 'private.blocked_name_terms') continue; // no rider data
+    // No rider data: word lists, seasons and the item catalogue.
+    if (['private.blocked_name_terms', 'public.seasons', 'public.item_sets', 'public.items', 'public.pass_rewards'].includes(name)) continue;
+    // Tables that list players in an array are cleared by a delete trigger.
+    if (name === 'public.matches') {
+      assert.match(sql, /create trigger forget_matches after delete on public\.profiles/);
+      continue;
+    }
     assert.match(body, /on delete cascade/, `${name} must be deleted along with the account`);
   }
 });
