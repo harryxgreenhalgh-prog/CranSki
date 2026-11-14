@@ -8,6 +8,7 @@ import { SkiTracks } from './tracks.js';
 import { pineSet } from './trees.js';
 import { ASSETS, partMaterials, sceneCopy, modelBounds } from './assets.js';
 import { textTexture } from './textTexture.js';
+import { propsReady, prop, props, chalet, houseMaterials, lampMaterial, startArea, finishArea } from './props.js';
 
 export { textTexture };
 
@@ -586,6 +587,7 @@ function buildGates(terrain, group) {
     hut.castShadow = true;
     group.add(hut);
   }
+  if (propsReady()) startArea(terrain, group, s0, c0, rot0);
 
   // Finish line: blue line, tall side markers, netting and a banner.
   const sf = park.finishS;
@@ -618,6 +620,7 @@ function buildGates(terrain, group) {
     arch(cf, yf, -sf, (hw * 2) / 10, 1.35, rotF);
     banner(group, 'FINISH', cf, yf + 6.4, -sf, Math.min(hw * 1.2, 16), 1.8, undefined, rotF);
   } else banner(group, 'FINISH', cf, yf + 8, -sf, hw * 2 - 1, 2.4, undefined, rotF);
+  if (propsReady()) finishArea(terrain, group, sf, hw);
 }
 
 function buildObstacles(terrain, group, sky) {
@@ -630,6 +633,11 @@ function buildObstacles(terrain, group, sky) {
       m.position.set(o.x, o.y, o.z);
       m.castShadow = true;
       group.add(m);
+    } else if (o.type === 'house' && propsReady()) {
+      // A chalet in the house's own colours, sized to its footprint.
+      const hm = houseMaterials(o.color, o.roof);
+      const m = chalet(o, night ? { wall: hm.wall, roof: hm.roof, glass: hm.lit } : { wall: hm.wall, roof: hm.roof });
+      if (m) group.add(m);
     } else if (o.type === 'house') {
       const body = new THREE.Mesh(new THREE.BoxGeometry(o.w, o.h, o.l), new THREE.MeshLambertMaterial({ color: o.color }));
       body.position.set(o.x, o.y + o.h / 2 - 0.5, o.z);
@@ -717,24 +725,40 @@ function buildRails(terrain, group) {
   const blueMat = new THREE.MeshLambertMaterial({ color: BLUE });
   const boxMat = new THREE.MeshLambertMaterial({ color: 0x2b3440 });
   const rainbowMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+  const whiteTop = new THREE.MeshStandardMaterial({ color: 0xf4f6f9, roughness: 0.35 });
+  const legs = [];
+  const pads = [];
+  const _q = { x: 0, y: 0, z: 0 };
   for (const rail of terrain.rails) {
     const r = rail.radius;
     const pts = rail.pts.map((p) => new THREE.Vector3(p.x, p.y - r, p.z));
     if (rail.kind === 'box') {
+      // A park box: dark steel body, a white slide top with blue edges, and
+      // branded side panels.
       for (let k = 1; k < pts.length; k++) {
         const a = pts[k - 1];
         const b = pts[k];
         const len = a.distanceTo(b);
-        const box = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.36, len), boxMat);
-        box.position.copy(a).add(b).multiplyScalar(0.5);
-        box.lookAt(b);
-        box.castShadow = true;
-        group.add(box);
-        const top = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.04, len), blueMat);
-        top.position.copy(box.position);
-        top.position.y += 0.19;
-        top.quaternion.copy(box.quaternion);
-        group.add(top);
+        const seg = new THREE.Group();
+        seg.position.copy(a).add(b).multiplyScalar(0.5);
+        seg.lookAt(b);
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.34, len), boxMat);
+        body.castShadow = true;
+        seg.add(body);
+        const top = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.045, len + 0.02), whiteTop);
+        top.position.y = 0.19;
+        seg.add(top);
+        for (const sx of [-1, 1]) {
+          const edge = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.05, len + 0.02), blueMat);
+          edge.position.set(sx * 0.28, 0.19, 0);
+          seg.add(edge);
+          const panel = new THREE.Mesh(new THREE.PlaneGeometry(len * 0.94, 0.24), boxPanel(len));
+          panel.position.set(sx * 0.232, 0, 0);
+          panel.userData.sharedMaterial = true; // cached per length, kept between parks
+          panel.rotation.y = (sx * Math.PI) / 2;
+          seg.add(panel);
+        }
+        group.add(seg);
       }
     } else {
       let curve;
@@ -764,7 +788,7 @@ function buildRails(terrain, group) {
       tube.castShadow = true;
       group.add(tube);
     }
-    // Supports down to the snow.
+    // Supports down to the snow (posts with base plates), and pads where the rail starts.
     const step = rail.kind === 'pipe' ? 5 : 2.5;
     const _p = { x: 0, y: 0, z: 0 };
     for (let d = 0.6; d < rail.length; d += step) {
@@ -772,14 +796,65 @@ function buildRails(terrain, group) {
       const g = terrain.height(_p.x, _p.z);
       const h = _p.y - r - g;
       if (h < 0.15) continue;
-      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, h, 6), legMat);
-      leg.position.set(_p.x, g + h / 2, _p.z);
-      group.add(leg);
+      if (propsReady()) legs.push({ x: _p.x, y: g - 0.02, z: _p.z, sy: h + 0.02 });
+      else {
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, h, 6), legMat);
+        leg.position.set(_p.x, g + h / 2, _p.z);
+        group.add(leg);
+      }
+    }
+    if (propsReady() && rail.kind !== 'box') {
+      terrain.railPoint(rail, 0, _p);
+      const g = terrain.height(_p.x, _p.z);
+      if (_p.y - r - g > 0.25) {
+        terrain.railPoint(rail, 0.6, _q);
+        pads.push({ x: _p.x, y: g, z: _p.z, ry: Math.atan2(_q.x - _p.x, _q.z - _p.z) });
+      }
     }
   }
+  const legMesh = props('railLeg', legs);
+  if (legMesh) group.add(legMesh);
+  const padMesh = props('railPad', pads);
+  if (padMesh) group.add(padMesh);
+}
+
+// The side panels of a box: CRANSKI along a blue band (one texture per length).
+const _panels = new Map();
+function boxPanel(len) {
+  const key = Math.max(1, Math.round(len));
+  if (!_panels.has(key)) {
+    const c = document.createElement('canvas');
+    c.width = 64 * key;
+    c.height = 32;
+    const g = c.getContext('2d');
+    g.fillStyle = '#1e7bff';
+    g.fillRect(0, 0, c.width, 32);
+    g.fillStyle = '#ffffff';
+    g.font = 'italic 900 20px Impact, "Arial Black", sans-serif';
+    g.textBaseline = 'middle';
+    for (let x = 6; x < c.width - 40; x += 128) g.fillText('CRANSKI', x, 17);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    const m = new THREE.MeshLambertMaterial({ map: t });
+    _panels.set(key, m);
+  }
+  return _panels.get(key);
 }
 
 function buildFloodlights(terrain, group) {
+  if (propsReady()) {
+    // Lattice masts with a bank of four lamps facing the run.
+    const list = [];
+    for (let s = 40; s < terrain.park.endS; s += 90) {
+      for (const side of [-1, 1]) {
+        const x = terrain.center(s) + side * (terrain.cross.hw + 3);
+        list.push({ x, y: terrain.height(x, -s), z: -s, ry: side > 0 ? 0 : Math.PI });
+      }
+    }
+    const im = props('floodlight', list);
+    if (im) group.add(im);
+    return lampMaterial();
+  }
   const poles = [];
   const lampMat = new THREE.MeshBasicMaterial({ color: 0x555555 });
   for (let s = 40; s < terrain.park.endS; s += 90) {

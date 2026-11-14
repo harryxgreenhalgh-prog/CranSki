@@ -1,9 +1,18 @@
 # Model credits
 
-Made for CranSki (built by `tools/blender/build_assets.py`):
-`rider.glb`, `trees.glb`, `lift.glb`.
+## Made for CranSki
 
-Used under Creative Commons Attribution 4.0 (https://creativecommons.org/licenses/by/4.0/).
+Original work, generated from code in Blender. No outside assets.
+
+| File | Built by | Contents |
+| --- | --- | --- |
+| `rider-body.glb` | `tools/blender/build_rider_body.py` | the rider's skinned body (jacket builds, sleeves, tee arms, hoods, pocket, pants) on one skeleton |
+| `rider.glb`, `trees.glb`, `lift.glb` | `tools/blender/build_assets.py` | rider head gear, mittens, boots, skis, poles, snowboard; pine trees; gondola, lift tower, arches |
+| `props.glb` | `tools/blender/build_props.py` | chalets, floodlights, snow groomer, ski rack, speakers, tent, flags, fence, rail legs and pads, snowman |
+
+## Creative Commons Attribution 4.0
+
+Used under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
 Changes: textures resized and meshes simplified for the web by `tools/blender/import_user_models.py`.
 
 - `hut.glb`: "Snowy Wooden Hut" by gecko0307 (https://sketchfab.com/gecko0307),

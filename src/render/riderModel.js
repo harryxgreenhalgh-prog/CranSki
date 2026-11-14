@@ -3,7 +3,8 @@
 // applied with applyLook().
 import * as THREE from 'three';
 import { textTexture } from './textTexture.js';
-import { unitAlongY } from './assets.js';
+import { unitAlongY, ASSETS } from './assets.js';
+import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { makeCrown } from './crown.js';
 
 const COM_HEIGHT = 0.9; // pivot for tricks, metres above the feet
@@ -76,6 +77,36 @@ function solveJoint(a, target, l1, l2, hint, out) {
   const h = Math.sqrt(Math.max(0, l1 * l1 - x * x));
   _perp.copy(hint).addScaledVector(_dir, -hint.dot(_dir)).normalize();
   return out.copy(a).addScaledVector(_dir, x).addScaledVector(_perp, h);
+}
+
+// Skinned body helpers. A limb bone's frame: y along the bone, x = the normal
+// of its chain's bend plane (so knees and elbows bend the right way round).
+const _bx = new THREE.Vector3();
+const _by = new THREE.Vector3();
+const _bz = new THREE.Vector3();
+function basis(dir, n, out = new THREE.Matrix4()) {
+  _by.copy(dir);
+  _bx.copy(n).addScaledVector(_by, -n.dot(_by)).normalize();
+  _bz.crossVectors(_bx, _by);
+  return out.makeBasis(_bx, _by, _bz);
+}
+const _n1 = new THREE.Vector3();
+const _n2 = new THREE.Vector3();
+const _c = new THREE.Vector3();
+const _p = new THREE.Vector3();
+function planeNormal(a, end, hint, out) {
+  _c.subVectors(end, a).normalize();
+  _p.copy(hint).addScaledVector(_c, -hint.dot(_c)).normalize();
+  return out.crossVectors(_c, _p).normalize();
+}
+const _d2 = new THREE.Vector3();
+const _qc = new THREE.Quaternion();
+const _xAxis = new THREE.Vector3(1, 0, 0);
+function limbMatrix(out, a, b, n, restInv, F) {
+  _d2.subVectors(b, a).normalize();
+  basis(_d2, n, F);
+  out.multiplyMatrices(F, restInv);
+  return out.setPosition(a);
 }
 
 // Grab poses: which hand(s) reach where. 'cross' = hand to the other ski,
@@ -273,6 +304,9 @@ export class RiderModel {
       tip: new THREE.Vector3(),
       tmp: new THREE.Vector3(),
     };
+    // Joint positions per side, for the skinned body.
+    const jointSet = () => ({ sh: new THREE.Vector3(), elbow: new THREE.Vector3(), hand: new THREE.Vector3(), elbowHint: new THREE.Vector3(), hip: new THREE.Vector3(), knee: new THREE.Vector3(), ankle: new THREE.Vector3(), kneeHint: new THREE.Vector3() });
+    this._joints = { L: jointSet(), R: jointSet() };
     this.applyLook(look);
   }
 
@@ -345,6 +379,7 @@ export class RiderModel {
     this.zip.visible = L.top === 'shell';
     this.bigHood.visible = L.top === 'hoodie';
     this.pocket.visible = L.top === 'hoodie';
+    this._dress(L);
   }
 
   // Swap the placeholder shapes for the Blender-built parts (src/render/assets.js).
@@ -426,8 +461,148 @@ export class RiderModel {
       bb.castShadow = true;
       this.board.add(bb);
     }
+    if (ASSETS.body) this._attachBody(ASSETS.body);
     this.upgraded = true;
     this.applyLook(this.look);
+  }
+
+  // The skinned body (one mesh over a skeleton): replaces the separate limb,
+  // torso and pelvis pieces. Its bones follow the same joints as before.
+  _attachBody(scene) {
+    const M = this.mats;
+    const root = cloneSkinned(scene);
+    const byName = { top: M.top, trim: M.trim, pants: M.pants, skin: M.skin };
+    const bones = {};
+    const parts = {};
+    root.traverse((o) => {
+      if (o.isBone) bones[o.name] = o;
+      if (o.isSkinnedMesh) {
+        o.material = byName[o.material.name] || M.top;
+        o.castShadow = true;
+        o.frustumCulled = false; // bones move it outside its rest bounds
+        const group = o.parent && !o.parent.isBone && o.parent.name !== 'riderBody' && o.parent !== root;
+        parts[group ? o.parent.name : o.name] = group ? o.parent : o;
+      }
+    });
+    if (!bones.hips || !parts.pants) return;
+    this.body.add(root);
+    this.root.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(this.body.matrixWorld).invert();
+    const rest = {};
+    for (const [n, b] of Object.entries(bones)) rest[n] = inv.clone().multiply(b.matrixWorld);
+    const pos = (n) => new THREE.Vector3().setFromMatrixPosition(rest[n]);
+    // Rest frames for the limbs: bone direction and the bend-plane normal.
+    const frames = {};
+    const restFrame = (bone, a, b, chainEnd, hint) => {
+      const dir = b.clone().sub(a).normalize();
+      const chain = chainEnd.clone().sub(a).normalize();
+      const perp = hint.clone().addScaledVector(chain, -hint.dot(chain)).normalize();
+      const n = new THREE.Vector3().crossVectors(chain, perp).normalize();
+      const F = basis(dir, n);
+      const R = new THREE.Matrix4().extractRotation(rest[bone]);
+      frames[bone] = new THREE.Matrix4().copy(F).transpose().multiply(R); // F_rest^-1 * R_rest
+    };
+    for (const s of ['L', 'R']) {
+      const sh = pos('upperArm' + s);
+      const el = pos('foreArm' + s);
+      const wr = el.clone().multiplyScalar(2).sub(sh);
+      restFrame('upperArm' + s, sh, el, wr, new THREE.Vector3(0, -0.3, 1));
+      const hp = pos('thigh' + s);
+      const kn = pos('shin' + s);
+      const an = kn.clone().multiplyScalar(2).sub(hp);
+      restFrame('thigh' + s, hp, kn, an, new THREE.Vector3(0, 0.2, -1));
+    }
+    // The forearm and shin share their chain's bend plane (worked out from the whole chain).
+    for (const s of ['L', 'R']) {
+      const sh = pos('upperArm' + s);
+      const el = pos('foreArm' + s);
+      const wr = el.clone().multiplyScalar(2).sub(sh);
+      const chain = wr.clone().sub(sh).normalize();
+      const hint = new THREE.Vector3(0, -0.3, 1);
+      const perp = hint.clone().addScaledVector(chain, -hint.dot(chain)).normalize();
+      const n = new THREE.Vector3().crossVectors(chain, perp).normalize();
+      frames['foreArm' + s] = new THREE.Matrix4().copy(basis(wr.clone().sub(el).normalize(), n)).transpose().multiply(new THREE.Matrix4().extractRotation(rest['foreArm' + s]));
+      const hp = pos('thigh' + s);
+      const kn = pos('shin' + s);
+      const an = kn.clone().multiplyScalar(2).sub(hp);
+      const lchain = an.clone().sub(hp).normalize();
+      const khint = new THREE.Vector3(0, 0.2, -1);
+      const kperp = khint.clone().addScaledVector(lchain, -khint.dot(lchain)).normalize();
+      const kn2 = new THREE.Vector3().crossVectors(lchain, kperp).normalize();
+      frames['shin' + s] = new THREE.Matrix4().copy(basis(an.clone().sub(kn).normalize(), kn2)).transpose().multiply(new THREE.Matrix4().extractRotation(rest['shin' + s]));
+    }
+    const restLocal = {};
+    for (const n of ['spine', 'chest']) restLocal[n] = { p: bones[n].position.clone(), q: bones[n].quaternion.clone() };
+    this.skin = {
+      root,
+      bones,
+      parts,
+      rest,
+      frames,
+      armBase: inv.clone().multiply(bones.hips.parent.matrixWorld),
+      // chest relative to the hips (rigid): for parenting the arms
+      restLocal,
+      m: { hips: new THREE.Matrix4(), chest: new THREE.Matrix4(), tmp: new THREE.Matrix4(), inv: new THREE.Matrix4(), F: new THREE.Matrix4() },
+      limb: {},
+    };
+    for (const n of Object.keys(frames)) this.skin.limb[n] = new THREE.Matrix4();
+  }
+
+  // Which skinned pieces show for this look.
+  _dress(L) {
+    const P = this.skin?.parts;
+    if (!P) return;
+    const vis = (name, on) => P[name] && (P[name].visible = on);
+    const w = L.body === 'woman';
+    vis('torso_man', !w);
+    vis('torso_woman', w);
+    const tee = L.top === 'tee';
+    vis('sleeves', !tee);
+    vis('sleevesTee', tee);
+    vis('arms', tee);
+    vis('shellBits', L.top === 'shell');
+    vis('hoodBunch', L.top === 'shell');
+    vis('bigHood', L.top === 'hoodie');
+    vis('pocket', L.top === 'hoodie');
+    vis('pants', true);
+    for (const m of [...this.thigh, ...this.shin, ...this.upperArm, ...this.foreArm, ...this.knees, ...this.elbows, this.torso, this.pelvis, this.hood, this.bigHood, this.pocket, this.zip]) m.visible = false;
+  }
+
+  // Pose the skinned body's bones from the joints worked out in _layout (body space).
+  _poseSkin(joints) {
+    const S = this.skin;
+    const { bones, rest, frames, m } = S;
+    const set = (name, desired, parentBody) => {
+      m.inv.copy(parentBody).invert().multiply(desired);
+      m.inv.decompose(bones[name].position, bones[name].quaternion, bones[name].scale);
+    };
+    // Hips: follow the hips group (its rest sits at the hips centre too).
+    m.hips.copy(this.hips.matrix);
+    set('hips', m.hips, S.armBase);
+    // The curl: lower back and chest each take half, about their own joints.
+    const half = (this._curl || 0) / 2;
+    for (const n of ['spine', 'chest']) {
+      const b = bones[n];
+      b.position.copy(S.restLocal[n].p);
+      b.quaternion.copy(S.restLocal[n].q).multiply(_qc.setFromAxisAngle(_xAxis, -half));
+      b.scale.set(1, 1, 1);
+      b.updateMatrix();
+    }
+    m.chest.copy(m.hips).multiply(bones.spine.matrix).multiply(bones.chest.matrix);
+    for (const s of ['L', 'R']) {
+      const j = joints[s];
+      // Arm: both bones share the bend plane of shoulder -> hand.
+      const n = planeNormal(j.sh, j.hand, j.elbowHint, _n1);
+      limbMatrix(S.limb['upperArm' + s], j.sh, j.elbow, n, frames['upperArm' + s], m.F);
+      set('upperArm' + s, S.limb['upperArm' + s], m.chest);
+      limbMatrix(S.limb['foreArm' + s], j.elbow, j.hand, n, frames['foreArm' + s], m.F);
+      set('foreArm' + s, S.limb['foreArm' + s], S.limb['upperArm' + s]);
+      const kn = planeNormal(j.hip, j.ankle, j.kneeHint, _n2);
+      limbMatrix(S.limb['thigh' + s], j.hip, j.knee, kn, frames['thigh' + s], m.F);
+      set('thigh' + s, S.limb['thigh' + s], m.hips);
+      limbMatrix(S.limb['shin' + s], j.knee, j.ankle, kn, frames['shin' + s], m.F);
+      set('shin' + s, S.limb['shin' + s], S.limb['thigh' + s]);
+    }
   }
 
   // Ghost: see-through and pale blue.
@@ -447,6 +622,7 @@ export class RiderModel {
       for (const s of this.skis) s.visible = !board;
       this.board.visible = board;
       for (const p of this.poles) p.visible = !board && this.look.poles !== 'none';
+      this._dress(this.look);
     };
     this.applyLook(this.look);
   }
@@ -469,7 +645,48 @@ export class RiderModel {
       this.grabName = target.grab;
       this.grabSide = target.grabSide;
     }
+    // Gestures on top of the pose: 'cheer' (finish), 'idle' (Basecamp), 'flail' (crash).
+    this._t = (this._t || 0) + dt;
+    if (target.gesture) this.gesture = target.gesture;
+    p.gest = (p.gest || 0) + ((target.gesture ? 1 : 0) - (p.gest || 0)) * (1 - Math.exp(-dt * 7));
     this._layout();
+  }
+
+  // Where a hand goes for the current gesture (and how strongly), or 0.
+  _gestureHand(i, sh, out) {
+    const p = this.pose;
+    if (p.gest < 0.01) return 0;
+    const t = this._t;
+    const sx = i === 0 ? -1 : 1;
+    const g = this.gesture;
+    if (g === 'cheer') {
+      // Fists up, pumping in turn.
+      out.set(sh.x + sx * 0.14, sh.y + 0.48 + 0.07 * Math.sin(t * 9 + i * Math.PI), sh.z - 0.06);
+      return p.gest;
+    }
+    if (g === 'flail') {
+      out.set(sh.x + sx * 0.42, sh.y + 0.08 + 0.26 * Math.sin(t * 10 + i * 2.1), sh.z + 0.18 * Math.cos(t * 10 + i * 2.1));
+      return p.gest;
+    }
+    if (g === 'idle') {
+      const phase = t % 16;
+      if (i === 1 && phase > 9 && phase < 11.5) {
+        // A wave with the right hand.
+        const k = Math.min(1, (phase - 9) * 3, (11.5 - phase) * 3);
+        out.set(sh.x + 0.22 + 0.1 * Math.sin(t * 11), sh.y + 0.42, sh.z - 0.1);
+        return p.gest * k;
+      }
+      if (i === 0 && phase > 3 && phase < 4.6) {
+        // Push the goggles up a little with the left hand.
+        const k = Math.min(1, (phase - 3) * 4, (4.6 - phase) * 4);
+        out.copy(this.head.position).applyMatrix4(this.hips.matrix);
+        out.x -= 0.09;
+        out.y += 0.04;
+        out.z -= 0.13;
+        return p.gest * k;
+      }
+    }
+    return 0;
   }
 
   _layout() {
@@ -542,6 +759,16 @@ export class RiderModel {
     this.hips.rotateZ(-p.lean * 0.15);
     this.head.rotation.set(-pitch * 0.6, p.look * 1.6, 0);
     this.hips.updateMatrix();
+    // With the skinned body the back curls forward in a tuck, a crouch or a grab
+    // (lower back at 0.2 m, chest at 0.42 m above the hips centre); the shoulders
+    // and head ride on the curled chest.
+    const breathe = this.gesture === 'idle' ? (p.gest || 0) * 0.03 * Math.sin((this._t || 0) * 1.7) : 0;
+    const curl = this.skin ? 0.34 * p.tuck + 0.16 * p.crouch + 0.3 * g + 0.12 * p.press + breathe : 0;
+    this._curl = curl;
+    const C = v.curlM || (v.curlM = new THREE.Matrix4());
+    const T = v.curlT || (v.curlT = new THREE.Matrix4());
+    C.makeTranslation(0, 0.2, 0).multiply(T.makeRotationX(-curl / 2)).multiply(T.makeTranslation(0, 0.22, 0)).multiply(T.makeRotationX(-curl / 2)).multiply(T.makeTranslation(0, -0.42, 0));
+    if (this.skin) this.head.position.set(0, 0.76, 0).applyMatrix4(C);
 
     // Legs.
     const kneeHint = rot(new THREE.Vector3(0, 0.2, -1));
@@ -551,6 +778,11 @@ export class RiderModel {
       const ankle = v.foot[i].clone();
       ankle.y += board ? 0.22 : 0.18;
       solveJoint(v.hip[i], ankle, 0.46, 0.46, kneeHint, v.knee);
+      const J = this._joints[i === 0 ? 'L' : 'R'];
+      J.hip.copy(v.hip[i]);
+      J.knee.copy(v.knee);
+      J.ankle.copy(ankle);
+      J.kneeHint.copy(kneeHint);
       placeLimb(this.thigh[i], v.hip[i], v.knee);
       this.knees[i].position.copy(v.knee);
       placeLimb(this.shin[i], v.knee, ankle);
@@ -561,11 +793,13 @@ export class RiderModel {
     const elbowHint = rot(new THREE.Vector3(0, -0.3, 1));
     for (let i = 0; i < 2; i++) {
       const sx = i === 0 ? -1 : 1;
-      v.sh.set(sx * this.shoulder, 0.56, 0).applyMatrix4(m);
+      v.sh.set(sx * this.shoulder, 0.56, 0).applyMatrix4(C).applyMatrix4(m);
       // Default: hands forward and out, holding poles. Tuck: hands in front of the knees.
       const out = 0.38 + 0.25 * p.armsOut;
       const hand = rot(v.hand.set(sx * out, hipY + 0.1 + 0.2 * p.armsOut, -0.32));
       hand.lerp(rot(new THREE.Vector3(sx * 0.18, hipY + 0.05, -0.55)), p.tuck);
+      const gw = this._gestureHand(i, v.sh, v.gest || (v.gest = new THREE.Vector3()));
+      if (gw > 0) hand.lerp(v.gest, gw);
 
       // Grabbing hand(s) reach for the skis.
       const mine = (side > 0 && i === 1) || (side < 0 && i === 0);
@@ -580,6 +814,11 @@ export class RiderModel {
       const dir = hand.clone().sub(v.sh).normalize();
       hand.copy(v.sh).addScaledVector(dir, Math.max(reach, 0.15));
       solveJoint(v.sh, hand, 0.3, 0.3, elbowHint, v.elbow);
+      const JA = this._joints[i === 0 ? 'L' : 'R'];
+      JA.sh.copy(v.sh);
+      JA.elbow.copy(v.elbow);
+      JA.hand.copy(hand);
+      JA.elbowHint.copy(elbowHint);
       placeLimb(this.upperArm[i], v.sh, v.elbow);
       this.elbows[i].position.copy(v.elbow);
       placeLimb(this.foreArm[i], v.elbow, hand);
@@ -589,6 +828,7 @@ export class RiderModel {
       v.tip.copy(hand).add(new THREE.Vector3(sx * 0.12, -1.05 + 0.4 * p.tuck, 0.45 + 0.4 * p.tuck));
       placeLimb(this.poles[i], hand, v.tip);
     }
+    if (this.skin) this._poseSkin(this._joints);
   }
 }
 

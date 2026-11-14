@@ -9,6 +9,13 @@ export const DISCLAIMER =
 
 export const UPDATES = [
   {
+    title: 'Launch polish',
+    items: [
+      'A new rider: one smooth low-poly body on a skeleton, so knees, elbows and shoulders bend naturally. Your back rounds in a tuck, you cheer at the finish, wave and fix your goggles in Basecamp, and flail when you crash.',
+      'Parks dressed for launch: chalets in BELLEVUE, floodlight masts, rail legs with base plates and pads, branded boxes, and a snow groomer, ski rack, snowman, event tent, speakers, flags and safety fencing at the start and finish.',
+    ],
+  },
+  {
     title: 'Phase 5 · Ranked and progression',
     items: [
       'Ranked 1v1 on APEX: FIND MATCH pairs you with a rider near your rating. You see who it is only when the match starts. Play 5 placement matches to get your tier: Bronze, Silver, Gold, Platinum or Diamond. Top 25 board in the Ranked panel.',
@@ -145,15 +152,28 @@ export const PAGES = {
       <ol>${TRACKS.map((t) => `<li>${t.name}</li>`).join('')}</ol>
       <h3>SOUND EFFECTS</h3>
       <p>Snow, wind, rail grind, landings, the lift and the ringing ball are all synthesised in the browser for CranSki.</p>
+      <h3>3D MODELS MADE FOR CRANSKI</h3>
+      <p>Original work, built from code in Blender (the scripts are in <code>tools/blender/</code>) or in the game itself. No outside assets.</p>
+      <table class="ptable">
+        <thead><tr><th>Asset</th><th>What it is</th></tr></thead>
+        <tbody>
+          <tr><td><code>rider-body.glb</code></td><td>The rider's skinned body on one skeleton: jacket (two builds), sleeves, tee arms, hoods, pocket, baggy pants. Posed and animated live by the game (tucks, grabs, landings, cheering, waving, crashing).</td></tr>
+          <tr><td><code>rider.glb</code></td><td>Head, helmet, goggles, beanie, mittens, ski boots, twin-tip skis, poles, snowboard and board boots</td></tr>
+          <tr><td><code>props.glb</code></td><td>Chalets, floodlight masts, snow groomer, ski rack, speaker stack, event tent, feather flags, safety fence, rail legs and pads, snowman</td></tr>
+          <tr><td><code>trees.glb</code></td><td>Pine trees (snowy, dark and far)</td></tr>
+          <tr><td><code>lift.glb</code></td><td>Gondola cabin, lift tower and the inflatable arches</td></tr>
+          <tr><td>Built in the game's code</td><td>Every park's snow, kickers, pipes and paint; rails, boxes and stairs; signs and banners; the sky, clouds and stars; the crown; Basecamp</td></tr>
+        </tbody>
+      </table>
       <h3>3D MODELS (CC BY 4.0)</h3>
-      <p>Used under the <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">Creative Commons Attribution 4.0</a> licence, resized for the web:</p>
+      <p>Used under the <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">Creative Commons Attribution 4.0</a> licence. Changes: textures resized and meshes simplified for the web.</p>
       <ul>
-        <li><a href="https://sketchfab.com/3d-models/snowy-wooden-hut-857c02ab61834df8a8d125ccce6fec2a" target="_blank" rel="noopener">“Snowy Wooden Hut”</a> by <a href="https://sketchfab.com/gecko0307" target="_blank" rel="noopener">gecko0307</a>: the Basecamp lodge and start huts</li>
-        <li><a href="https://sketchfab.com/3d-models/finish-line-70aecb6bac234266bdebd22322396caa" target="_blank" rel="noopener">“Finish Line”</a> by <a href="https://sketchfab.com/kemalcolak" target="_blank" rel="noopener">Kemal Çolak</a>: the finish line</li>
-        <li><a href="https://sketchfab.com/3d-models/snowy-mountain-terrain-9fa3c56fd32746bcb0e06cd2c4229ca0" target="_blank" rel="noopener">“Snowy Mountain - Terrain”</a> by <a href="https://sketchfab.com/artfromheath" target="_blank" rel="noopener">artfromheath</a>: the mountains around every park</li>
+        <li><a href="https://sketchfab.com/3d-models/snowy-wooden-hut-857c02ab61834df8a8d125ccce6fec2a" target="_blank" rel="noopener">“Snowy Wooden Hut”</a> by <a href="https://sketchfab.com/gecko0307" target="_blank" rel="noopener">gecko0307</a> (<code>hut.glb</code>): the Basecamp lodge and start huts</li>
+        <li><a href="https://sketchfab.com/3d-models/finish-line-70aecb6bac234266bdebd22322396caa" target="_blank" rel="noopener">“Finish Line”</a> by <a href="https://sketchfab.com/kemalcolak" target="_blank" rel="noopener">Kemal Çolak</a> (<code>finish.glb</code>): the finish line</li>
+        <li><a href="https://sketchfab.com/3d-models/snowy-mountain-terrain-9fa3c56fd32746bcb0e06cd2c4229ca0" target="_blank" rel="noopener">“Snowy Mountain - Terrain”</a> by <a href="https://sketchfab.com/artfromheath" target="_blank" rel="noopener">artfromheath</a> (<code>mountain.glb</code>): the mountains around every park</li>
       </ul>
-      <h3>ART</h3>
-      <p>The rider, trees, lifts and other models are built in code and in Blender for CranSki. Loading scenes: ${SCENES.map((s) => s.name).join(', ')}.</p>
+      <h3>TEXTURES, IMAGES AND FONTS</h3>
+      <p>Snow, corduroy, ski top sheets, box panels, signs and the goggle strap are drawn in code. The loading scenes (${SCENES.map((s) => s.name).join(', ')}) are drawn for CranSki as SVG. Text uses your device's own fonts; no font files are downloaded.</p>
       <h3>DISCLAIMER</h3>
       <p>${DISCLAIMER}</p>`,
   },

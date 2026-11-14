@@ -2492,6 +2492,7 @@ function boot() {
   const IDLE = { crouch: 0.05, tuck: 0, legsUp: 0, lean: 0, look: 0, armsOut: 0, grab: null, grabSide: 1 };
 
   let lastDraw = 0;
+  let debugCam = null;
   let reportedState = null;
   let lastVy = 0;
   let slowFrames = 0;
@@ -2570,7 +2571,7 @@ function boot() {
       model.root.position.set(0, COM_HEIGHT, 0);
       const dressing = state === 'locker' || state === 'shop';
       model.root.quaternion.setFromAxisAngle(tmp.set(0, 1, 0), Math.PI - 0.35 + (dressing ? lockerYaw + 0.35 : 0));
-      model.update({ ...IDLE, crouch: 0.05 + 0.05 * Math.sin(time * 1.6) }, dt);
+      model.update({ ...IDLE, crouch: 0.05 + 0.05 * Math.sin(time * 1.6), gesture: state === 'basecamp' ? 'idle' : null }, dt);
       basecampScene.frameCamera(camera, camera.aspect, state === 'locker' ? (locker.focus === 'full' ? 'locker' : locker.focus) : state === 'shop' ? shop.focus : 'full', dt);
       basecampScene.update(time, camera);
       if (camera.fov !== 50) {
@@ -2778,6 +2779,8 @@ function boot() {
     absorb = Math.max(0, absorb - dt);
     const pose = poseFor(r, { absorb, riding: state === 'riding' });
     if (state === 'finish') pose.look = 0;
+    // Stopped at the finish (or on the results screen): celebrate.
+    if ((state === 'finish' && r.speed < 1.5) || state === 'results' || state === 'cupwait') pose.gesture = 'cheer';
     model.update(pose, dt);
 
     // Ghost: your best run on this park.
@@ -2810,7 +2813,12 @@ function boot() {
     } else {
       L.chase.update(r, pivot, dt);
     }
-    L.world.update(L.time, pivot, camera, state === 'riding' ? r : null);
+    if (debugCam) {
+      // Tests and screenshots: a fixed camera.
+      camera.position.copy(debugCam.pos);
+      camera.lookAt(debugCam.look);
+    }
+    L.world.update(L.time, debugCam ? debugCam.look : pivot, camera, state === 'riding' ? r : null);
     liveFrame(L, dt);
     renderer.render(L.world.scene, camera);
     input.endFrame();
@@ -2869,6 +2877,11 @@ function boot() {
     },
     party,
     seasons,
+    model,
+    // Screenshots: hold the camera at pos looking at look ({x,y,z}), or null to release.
+    setDebugCam(pos, look) {
+      debugCam = pos ? { pos: new THREE.Vector3(pos.x, pos.y, pos.z), look: new THREE.Vector3(look.x, look.y, look.z) } : null;
+    },
     get lastReplay() {
       return lastReplay;
     },

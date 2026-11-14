@@ -110,5 +110,6 @@ export function poseFor(v, { absorb = 0, riding = true } = {}) {
     armsOut: mode === 'air' && omega > 120 ? 1 : mode === 'air' ? 0.4 : 0,
     grab: v.activeGrab,
     grabSide: v.air ? (v.air.spin < 0 ? 1 : -1) : v.grabSide || 1,
+    gesture: mode === 'crash' ? 'flail' : null,
   };
 }

@@ -5,9 +5,9 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
-export const ASSETS = { ready: false, parts: {} };
+export const ASSETS = { ready: false, parts: {}, body: null };
 
-const FILES = ['rider', 'trees', 'lift'];
+const FILES = ['rider', 'trees', 'lift', 'props'];
 
 function collect(root) {
   const parts = {};
@@ -52,14 +52,24 @@ export async function loadAssets(onProgress = () => {}) {
   const loader = new GLTFLoader();
   const base = import.meta.env?.BASE_URL ?? './';
   let done = 0;
-  await Promise.all(
-    FILES.map(async (f) => {
+  const total = FILES.length + 1;
+  await Promise.all([
+    ...FILES.map(async (f) => {
       const gltf = await loader.loadAsync(`${base}models/${f}.glb`);
       Object.assign(ASSETS.parts, collect(gltf.scene));
       done++;
-      onProgress(done / FILES.length);
-    })
-  );
+      onProgress(done / total);
+    }),
+    // The skinned body (tools/blender/build_rider_body.py): kept whole, with its skeleton.
+    loader.loadAsync(`${base}models/rider-body.glb`).then(
+      (gltf) => {
+        ASSETS.body = gltf.scene;
+        done++;
+        onProgress(done / total);
+      },
+      (e) => console.warn('rider body', e)
+    ),
+  ]);
   ASSETS.ready = true;
   return ASSETS;
 }
