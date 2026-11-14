@@ -2,6 +2,8 @@
 import { settings, saveSettings, resetSection } from '../settings.js';
 import { BINDINGS } from '../input.js';
 import { touchSettings } from './touch.js';
+import { account } from '../online/account.js';
+import { gifts } from '../online/gifts.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -66,6 +68,10 @@ const PAD_SVG = `
 
 export class SettingsUI {
   constructor({ onClose, onTouchEditor }) {
+    account.onChange(() => {
+      this.giftAccept = undefined; // a different rider: ask the server again
+      this.giftMsg = '';
+    });
     this.onClose = onClose;
     this.onTouchEditor = onTouchEditor;
     this.tab = 'controls';
@@ -126,7 +132,10 @@ export class SettingsUI {
     else if (t === 'graphics') body.innerHTML = this._graphics();
     else if (t === 'camera') body.innerHTML = this._camera();
     else if (t === 'sound') body.innerHTML = this._sound();
-    else if (t === 'chat') body.innerHTML = this._chat();
+    else if (t === 'chat') {
+      if (account.ready && this.giftAccept === undefined) this._loadGiftSetting();
+      body.innerHTML = this._chat();
+    }
     else body.innerHTML = this._stats();
     this._wire(body);
   }
@@ -207,7 +216,29 @@ export class SettingsUI {
     const o = (id, name, desc) =>
       `<label class="choice ${settings.chat === id ? 'on' : ''}"><input type="radio" name="chat" value="${id}" ${settings.chat === id ? 'checked' : ''}/><b>${name}</b><span>${desc}</span></label>`;
     return `${o('full', 'Full chat', 'Type messages and use quick phrases. Every message is filtered before anyone sees it.')}${o('quick', 'Quick phrases only', "Send and see only preset phrases like \"Nice one!\" and \"GG\". Nobody's typed messages are shown.")}${o('off', 'Off', 'No chat at all.')}
-      <p class="muted small">Chat only reaches your room or party and isn't stored. Mute or report any rider from the roster (hold Tab).</p>`;
+      <p class="muted small">Chat only reaches your room or party and isn't stored. Mute or report any rider from the roster (hold Tab).</p>
+      <h4>GIFTS</h4>${
+        !account.ready
+          ? '<p class="muted small">Sign in to choose whether friends can send you gifts.</p>'
+          : this.giftAccept === undefined
+            ? '<p class="muted small">Loading…</p>'
+            : `<label class="choice ${this.giftAccept ? 'on' : ''}"><input type="checkbox" name="gifts" ${this.giftAccept ? 'checked' : ''}/><b>Accept gifts from friends</b><span>Friends of 2+ days can buy you Shop items with their FROST. Turn this off and nobody can send you gifts.</span></label>${this.giftMsg ? `<p class="acct-msg">${this.giftMsg}</p>` : ''}`
+      }`;
+  }
+
+  // The gift opt-out lives on the server (so senders are stopped there too).
+  async _loadGiftSetting() {
+    if (!account.ready || this._giftLoading) return;
+    this._giftLoading = true;
+    try {
+      this.giftAccept = await gifts.getAccept();
+      this.giftMsg = '';
+    } catch (e) {
+      this.giftAccept = null;
+      this.giftMsg = e.message;
+    }
+    this._giftLoading = false;
+    if (this.tab === 'chat') this.render();
   }
 
   _stats() {
@@ -261,6 +292,16 @@ export class SettingsUI {
         this.render();
       })
     );
+    body.querySelector('input[name=gifts]')?.addEventListener('change', async (e) => {
+      const want = e.target.checked;
+      try {
+        this.giftAccept = await gifts.setAccept(want);
+        this.giftMsg = want ? 'Friends can send you gifts.' : 'Gifts are off: nobody can send you any.';
+      } catch (err) {
+        this.giftMsg = err.message;
+      }
+      this.render();
+    });
     body.querySelectorAll('input[name=chat]').forEach((i) =>
       i.addEventListener('change', () => {
         settings.chat = i.value;

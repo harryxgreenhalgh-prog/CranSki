@@ -7,6 +7,7 @@ import { economy } from '../online/economy.js';
 import { wallet } from '../online/wallet.js';
 import { itemById, setById, wear, KINDS, itemColor, hex } from '../economy/catalog.js';
 import { esc } from './accountUI.js';
+import { gifts, GIFT_STATUS } from '../online/gifts.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
@@ -27,14 +28,16 @@ const STATUS = {
 };
 
 export class Shop {
-  /** model: the Basecamp rider; look(): your saved look; onSaveLook(look); onClose(); onAccount(); onGift?(itemId) */
-  constructor({ model, look, onSaveLook, onClose, onAccount, onGift = null }) {
+  /** model: the Basecamp rider; look(): your saved look; onSaveLook(look); onClose(); onAccount(); gifting: show Gift buttons */
+  constructor({ model, look, onSaveLook, onClose, onAccount, gifting = true }) {
     this.model = model;
     this.look = look;
     this.onSaveLook = onSaveLook;
     this.onClose = onClose;
     this.onAccount = onAccount;
-    this.onGift = onGift;
+    this.gifting = gifting;
+    this.giftItem = null; // the item being gifted (the friend picker is open)
+    this.giftInfo = null;
     this.tab = 'daily';
     this.stock = null;
     this.purchases = null;
@@ -116,7 +119,7 @@ export class Shop {
     if (!inSet) {
       if (owned) action = `<span class="owned">Owned ✓</span><button class="btn sm" data-wear="${it.id}">Wear</button>`;
       else if (buy) action = `<button class="btn sm ${this.confirm === key ? 'primary' : ''}" data-buy="${key}">${this.confirm === key ? `Confirm ${fmt(price)} FROST` : `Buy · ${fmt(price)}`}</button>`;
-      if (this.onGift && !inSet && it.source === 'shop' && account.ready) action += `<button class="btn sm" data-gift="${it.id}" title="Buy it for a friend">Gift</button>`;
+      if (this.gifting && !inSet && it.source === 'shop' && account.ready) action += `<button class="btn sm" data-gift="${it.id}" title="Buy it for a friend">Gift</button>`;
     } else if (owned) action = '<span class="owned">Owned ✓</span>';
     return `<div class="shop-card ${it.rarity} ${on ? 'on' : ''}">
       <button class="shop-sw" data-preview="${it.id}" title="Preview on your rider" style="background:${hex(itemColor(it))}"></button>
@@ -137,6 +140,7 @@ export class Shop {
       b.addEventListener('click', () => {
         this.tab = b.dataset.tab;
         this.confirm = null;
+        this.giftItem = null;
         this.render();
       })
     );
@@ -144,7 +148,10 @@ export class Shop {
     const body = $('shop-body');
     $('shop-msg').textContent = this.msg || '';
     const signIn = account.ready ? '' : `<p class="muted">Browse and preview freely. <button class="btn sm" data-a="account">${account.signedIn ? 'Pick a gamertag' : 'Sign in'}</button> to buy with FROST.</p>`;
-    if (this.err) {
+    if (this.giftItem) {
+      $('shop-title').textContent = 'SEND A GIFT';
+      body.innerHTML = this._giftView();
+    } else if (this.err) {
       $('shop-title').textContent = 'ITEM SHOP';
       body.innerHTML = `<p class="acct-msg bad">${esc(this.err)}</p>`;
     } else if (!this.stock) {
@@ -203,9 +210,81 @@ export class Shop {
         this.render();
       })
     );
-    body.querySelectorAll('[data-gift]').forEach((b) => b.addEventListener('click', () => this.onGift?.(b.dataset.gift)));
+    body.querySelectorAll('[data-gift]').forEach((b) => b.addEventListener('click', () => this._openGift(b.dataset.gift)));
+    body.querySelector('[data-a="gift-back"]')?.addEventListener('click', () => {
+      this.giftItem = null;
+      this.render();
+    });
+    body.querySelectorAll('[data-send]').forEach((b) => b.addEventListener('click', () => this._sendGift(b.dataset.send)));
     body.querySelectorAll('[data-buy]').forEach((b) => b.addEventListener('click', () => this._buy(b.dataset.buy)));
     body.querySelectorAll('[data-return]').forEach((b) => b.addEventListener('click', () => this._return(Number(b.dataset.return))));
+  }
+
+  // ---- gifting: pick a friend for one of today's items
+  async _openGift(id) {
+    this.giftItem = id;
+    this.giftInfo = null;
+    this.confirm = null;
+    this.msg = '';
+    this.preview([id]);
+    try {
+      this.giftInfo = await gifts.status();
+    } catch (e) {
+      this.giftInfo = { status: 'error', message: e.message };
+    }
+    this.render();
+  }
+
+  _giftView() {
+    const it = itemById(this.giftItem);
+    const g = this.giftInfo;
+    const head = `<p><b>${esc(it.name)}</b> · ${KINDS[it.kind].label} · ${fmt(it.price)} FROST, from your balance.</p>`;
+    const back = '<p><button class="btn sm" data-a="gift-back">← Back to the Shop</button></p>';
+    if (!g) return `${head}<p class="muted">Loading…</p>${back}`;
+    if (g.status === 'error') return `${head}<p class="acct-msg bad">${esc(g.message)}</p>${back}`;
+    if (g.status !== 'ok') return `${head}<p class="acct-msg bad">${esc(GIFT_STATUS[g.status] || 'Gifting is unavailable.')}</p>${back}`;
+    const r = g.rules;
+    const why = [];
+    if (g.account_days < r.account_days) why.push(`your account is ${g.account_days} day${g.account_days === 1 ? '' : 's'} old (needs ${r.account_days})`);
+    if (g.runs < r.runs_needed) why.push(`you've finished ${g.runs} of ${r.runs_needed} runs`);
+    const rows = (g.friends || []).map((f) => {
+      let btn;
+      if (!g.can_send || g.gifts_left <= 0) btn = '';
+      else if (f.friends_days < r.friend_days) btn = `<span class="muted small">Friends for ${r.friend_days}+ days only</span>`;
+      else if (!f.accepts) btn = '<span class="muted small">Gifts turned off</span>';
+      else {
+        const key = `${f.id}`;
+        btn = `<button class="btn sm ${this.confirm === `gift:${key}` ? 'primary' : ''}" data-send="${key}">${this.confirm === `gift:${key}` ? `Confirm · ${fmt(it.price)} FROST` : 'Send'}</button>`;
+      }
+      return `<tr><td><b>${esc(f.gamertag)}</b><br><small class="muted">friends for ${f.friends_days} day${f.friends_days === 1 ? '' : 's'}</small></td><td>${btn}</td></tr>`;
+    });
+    return `${head}
+      <p class="muted small"><b>${g.gifts_left} of ${r.per_day}</b> gifts left today. Gifts go to friends of ${r.friend_days}+ days, can't be returned, and are only possible once your account is ${r.account_days} days old with ${r.runs_needed} finished runs.</p>
+      ${why.length ? `<p class="acct-msg bad">Not yet: ${esc(why.join(' and '))}.</p>` : ''}
+      ${rows.length ? `<table class="rlist">${rows.join('')}</table>` : '<p class="muted">Add friends in Friends to send them gifts.</p>'}
+      ${back}`;
+  }
+
+  async _sendGift(friend) {
+    const key = `gift:${friend}`;
+    if (this.confirm !== key) {
+      this.confirm = key;
+      this.render();
+      return;
+    }
+    this.confirm = null;
+    const it = itemById(this.giftItem);
+    const f = this.giftInfo?.friends?.find((x) => x.id === friend);
+    this.msg = 'Sending…';
+    this.render();
+    try {
+      const r = await gifts.send(friend, it.id);
+      this.msg = r?.status === 'ok' ? `Sent ${it.name} to ${f?.gamertag || 'your friend'}! ${r.gifts_left} gift${r.gifts_left === 1 ? '' : 's'} left today.` : GIFT_STATUS[r?.status] || 'Something went wrong. Try again.';
+      this.giftInfo = await gifts.status().catch(() => this.giftInfo);
+    } catch (e) {
+      this.msg = e.message;
+    }
+    this.render();
   }
 
   async _buy(key) {

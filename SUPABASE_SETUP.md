@@ -575,3 +575,40 @@ How it works:
 3. **Limited sets → Preview set**, then buy a set. All its items appear in the Locker.
 4. **Purchases → Return**: your FROST comes back, and the count of returns left goes down. A fourth return on the same account is refused.
 5. Check the lock: in the SQL Editor, `set role authenticated; insert into public.inventory (user_id, item_id, source) values (gen_random_uuid(), 'comet-twins', 'shop');` fails with "permission denied". Afterwards, run `reset role;`.
+
+## 17. Gifting (Phase 5, step 7)
+
+1. **SQL Editor**: run `supabase/setup.sql` again, or `supabase/migrations/20261118120000_gifts.sql`. It adds:
+   - `gifts`: the sender and the recipient can read a gift, and nobody can write one directly;
+   - `gift_settings`: the opt-out, readable only by its owner;
+   - `gift_status`, `send_gift`, `my_gifts`, `mark_gifts_seen`, `set_accept_gifts` and `my_gift_setting`.
+2. Nothing to deploy.
+
+The rules, all checked by `send_gift` in the database:
+
+- You buy one of **today's daily Shop items** for a friend, with your own FROST.
+- **5 gifts a day** per sender (the day resets at midnight UTC).
+- Only to **friends of 2+ days**, counted from when the request was accepted.
+- **Your account must be a week old** (counted from when you picked your gamertag) **with 20 finished runs**. These are runs the server re-rode, so this only counts runs since FROST went live.
+- Not if they **turned gifts off** (Settings → **Chat & gifts** → **Accept gifts from friends**), and not if they already own the item.
+- Gifts can't be returned by either side. If the sender deletes their account, the gift stays with the friend, shown as "from a former rider".
+
+### Test it
+
+You need two accounts that have been friends for 2+ days, a sender account at least 7 days old, and 20 finished runs on the sender. To try it sooner, you can back-date things in the **SQL Editor** while testing. Replace the email addresses with your test accounts'.
+
+```sql
+-- Make the sender's account and the friendship look old enough (testing only):
+alter table public.profiles disable trigger profiles_before_write;
+update public.profiles set created_at = now() - interval '8 days' where id = (select id from auth.users where email = 'sender@example.com');
+alter table public.profiles enable trigger profiles_before_write;
+update public.friendships set accepted_at = now() - interval '3 days' where status = 'accepted';
+```
+
+1. As the sender: **Shop → Daily → Gift** on an item. You'll see your friends:
+   - friends of 2+ days have **Send**;
+   - newer friends show "Friends for 2+ days only";
+   - friends who turned gifts off show "Gifts turned off".
+2. Press **Send**, then **Confirm**. The FROST is taken and the counter says "4 gifts left today".
+3. As the friend: within a minute, or on next sign-in, a toast says "🎁 … sent you …", and the item is in the Locker.
+4. As the friend: **Settings → Chat & gifts** → untick **Accept gifts from friends**. The sender now sees "Gifts turned off".

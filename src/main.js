@@ -40,6 +40,7 @@ import { wallet, frostText } from './online/wallet.js';
 import { economy } from './online/economy.js';
 import { mountPass } from './ui/passUI.js';
 import { Shop } from './ui/shopUI.js';
+import { gifts } from './online/gifts.js';
 import { itemById } from './economy/catalog.js';
 import { DEFAULT_LOOK as BASE_LOOK } from './render/riderModel.js';
 import { mountBoard } from './ui/boardUI.js';
@@ -2007,6 +2008,11 @@ function boot() {
     onClose: () => toBasecamp(),
     onAccount: () => openAccount(),
   });
+  // A friend sent you something.
+  gifts.onReceived = (list) => {
+    for (const g of list.slice(0, 3)) toast(`🎁 ${g.from} sent you ${itemById(g.item)?.name || 'a gift'}! It's in your Locker.`, 6000);
+    if (list.length > 3) toast(`…and ${list.length - 3} more gifts.`, 6000);
+  };
   function openShop() {
     blurMenus();
     basecamp.hide();
