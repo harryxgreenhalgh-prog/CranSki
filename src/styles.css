@@ -2910,3 +2910,254 @@ body.touching #roombadge {
 .hall td:first-child {
   white-space: nowrap;
 }
+
+/* ---------------------------------------------------------------- tutorial (src/ui/tutorial.js) */
+#tutorial {
+  position: absolute;
+  inset: 0 0 30px 0;
+  pointer-events: none;
+  z-index: 3;
+}
+#tutorial.hidden,
+#tutorial .hidden {
+  display: none;
+}
+.tut-card {
+  position: absolute;
+  left: 16px;
+  top: 16px;
+  width: min(340px, calc(100vw - 32px));
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
+  border-left: 4px solid var(--blue);
+  border-radius: 12px;
+  padding: 10px 12px 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+.tut-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.tut-skip {
+  pointer-events: auto;
+  background: none;
+  border: 1px solid var(--panel-line);
+  border-radius: 999px;
+  color: var(--muted);
+  font: inherit;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.tut-skip:hover,
+.tut-skip:focus-visible {
+  color: var(--paper);
+  border-color: var(--muted);
+}
+.tut-steps {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 10px;
+  padding: 0;
+}
+.tut-steps li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  padding: 3px 9px 3px 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+.tut-steps li i {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+}
+.tut-steps li.ok {
+  background: rgba(56, 224, 140, 0.18);
+  color: var(--paper);
+}
+.tut-steps li.ok i {
+  border-color: var(--green);
+  background: var(--green) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='%230d1b2a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px no-repeat;
+}
+.tut-steps li.flash {
+  animation: tut-pop 0.9s ease-out;
+}
+@keyframes tut-pop {
+  0% {
+    transform: scale(1.35);
+    box-shadow: 0 0 0 0 rgba(56, 224, 140, 0.7);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 14px rgba(56, 224, 140, 0);
+  }
+}
+.tut-prompt {
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+.tut-prompt.urgent {
+  color: #ffd23f;
+  font-family: var(--brush);
+  font-style: italic;
+  font-size: 24px;
+  animation: tut-blink 0.5s ease-in-out infinite alternate;
+}
+.tut-prompt.good {
+  color: var(--green);
+}
+.tut-prompt.bad {
+  color: #ffb4a0;
+}
+@keyframes tut-blink {
+  to {
+    opacity: 0.6;
+  }
+}
+.tut-note {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.tut-note:empty {
+  display: none;
+}
+/* Button pictures: keys, controller buttons (Xbox colours) and touch buttons. */
+.tut-prompt kbd.tk {
+  margin: 0 2px;
+  font-size: 0.85em;
+  padding: 2px 8px;
+  border-bottom-width: 3px;
+}
+.pb {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.6em;
+  height: 1.6em;
+  padding: 0 0.4em;
+  border-radius: 999px;
+  background: #2b3647;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  font-size: 0.8em;
+  font-weight: 900;
+  vertical-align: middle;
+  margin: 0 2px;
+}
+.pb-A {
+  background: #2f9e44;
+}
+.pb-B {
+  background: #d9363e;
+}
+.pb-X {
+  background: #1c6fd9;
+}
+.pb-Y {
+  background: #d6a800;
+  color: var(--ink);
+}
+.pb-LB,
+.pb-RB,
+.pb-LT,
+.pb-RT {
+  border-radius: 6px;
+}
+.pb-stick {
+  font-weight: 700;
+}
+.tb {
+  display: inline-grid;
+  place-items: center;
+  padding: 0 0.6em;
+  height: 1.7em;
+  border-radius: 999px;
+  background: rgba(255, 122, 47, 0.8);
+  border: 2px solid #fff;
+  font-size: 0.78em;
+  font-weight: 900;
+  vertical-align: middle;
+  margin: 0 2px;
+}
+/* The touch control a prompt mentions pulses. */
+.tbtn.tut,
+#stick-base.tut {
+  animation: tut-ring 1s ease-out infinite;
+  border-color: #ffd23f;
+}
+@keyframes tut-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 210, 63, 0.8);
+  }
+  100% {
+    box-shadow: 0 0 0 18px rgba(255, 210, 63, 0);
+  }
+}
+.tut-done {
+  position: absolute;
+  left: 50%;
+  top: 52px;
+  transform: translateX(-50%);
+  width: min(420px, calc(100vw - 32px));
+  text-align: center;
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
+  border-top: 4px solid var(--green);
+  border-radius: 14px;
+  padding: 16px 18px;
+  pointer-events: auto;
+}
+.tut-done b {
+  font-family: var(--brush);
+  font-style: italic;
+  font-size: 30px;
+  color: var(--green);
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.35);
+}
+.tut-done p {
+  margin: 8px 0 12px;
+  color: var(--muted);
+}
+.tut-done div {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+.tut-start {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+@media (max-width: 640px), (max-height: 420px) {
+  .tut-card {
+    left: 8px;
+    top: 8px;
+    width: min(270px, calc(100vw - 16px));
+    padding: 7px 9px 9px;
+  }
+  .tut-prompt {
+    font-size: 14px;
+  }
+  .tut-prompt.urgent {
+    font-size: 18px;
+  }
+  .tut-steps {
+    margin: 6px 0 7px;
+  }
+}

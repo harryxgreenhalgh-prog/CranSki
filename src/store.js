@@ -71,6 +71,13 @@ export const profile = {
   set look(v) {
     save('look', v);
   },
+  // The BIG AIR tutorial: null (never seen), 'skipped' or 'done'.
+  get tutorial() {
+    return load('tutorial', null);
+  },
+  set tutorial(v) {
+    save('tutorial', v);
+  },
   // (FROST lives on the server only: see online/wallet.js.)
   // Recent finished runs (for the podium and stats).
   get runs() {

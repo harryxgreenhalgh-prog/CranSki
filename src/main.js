@@ -9,7 +9,7 @@ import { buildBasecamp } from './render/basecampScene.js';
 import { RiderModel, COM_HEIGHT } from './render/riderModel.js';
 import { ChaseCam } from './render/camera.js';
 import { Spray } from './render/spray.js';
-import { Hud, showResults, CONTROLS_HTML } from './ui/hud.js';
+import { Hud, showResults, CONTROLS_HTML, TUTORIAL_BTN } from './ui/hud.js';
 import { Basecamp } from './ui/basecamp.js';
 import { ParkMap } from './ui/map.js';
 import { PAGES, pageHtml } from './ui/pages.js';
@@ -64,6 +64,7 @@ import { Snapshots } from './online/rooms.js';
 import { Reel } from './render/reel.js';
 import { packRuns } from './replay/record.js';
 import { frameRider, STRIDE, writeFrame } from './render/pose.js';
+import { Tutorial } from './ui/tutorial.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -77,7 +78,7 @@ function hasWebGL2() {
 }
 
 function boot() {
-  $('pause-help').innerHTML = CONTROLS_HTML;
+  $('pause-help').innerHTML = TUTORIAL_BTN + CONTROLS_HTML;
   if (!hasWebGL2()) {
     $('nogl').classList.remove('hidden');
     $('loading').classList.add('hidden');
@@ -134,6 +135,7 @@ function boot() {
   let ghost = null;
   let lastReplay = null;
   const input = new Input(window);
+  if (isTouchDevice()) input.lastDevice = 'touch';
   const music = new Music();
   const sfx = new Sfx();
   const loadingScreen = new LoadingScreen();
@@ -277,6 +279,7 @@ function boot() {
   function toBasecamp() {
     blurMenus();
     endLift();
+    tutorial.stop();
     state = 'basecamp';
     showOverlay(null);
     $('finishcard').classList.add('hidden');
@@ -573,7 +576,7 @@ function boot() {
   const duelFrameBuf = new Float32Array(STRIDE);
   const duelView = {};
   const cards = {}; // kind -> { big, small, buttons, count }
-  const CARD_ORDER = ['conn', 'opp', 'challenge', 'partygo', 'rankask', 'pminv', 'leave', 'pmwait', 'cup', 'still', 'count'];
+  const CARD_ORDER = ['conn', 'opp', 'challenge', 'partygo', 'rankask', 'pminv', 'leave', 'pmwait', 'cup', 'still', 'count', 'tutorial'];
   function setCard(kind, card) {
     if (card) cards[kind] = card;
     else delete cards[kind];
@@ -2227,9 +2230,11 @@ function boot() {
   }
   $('modal-close').addEventListener('click', closeModal);
 
-  // opts: { room, privateKey, announce, force } for parties.
+  // opts: { room, privateKey, announce, force } for parties; { tutorial } drops
+  // straight in at the gate (no lift, no live room).
   async function goRide(opts = {}) {
     blurMenus();
+    if (!opts.tutorial) tutorial.stop();
     $('musicpop').classList.add('hidden');
     $('music-btn').classList.remove('on');
     basecamp.hide();
@@ -2249,11 +2254,68 @@ function boot() {
       return;
     }
     loadingScreen.hide();
+    if (opts.tutorial) {
+      startRun();
+      return;
+    }
     if (live && (opts.force || live.park !== parkId || !live.room)) joinRoomFor(parkId, opts);
     startLift();
   }
 
+  // ------------------------------------------------------------ tutorial
+  const tutorial = new Tutorial($('tutorial'), {
+    onDone: () => {
+      profile.tutorial = 'done';
+      sfx.ring?.(20);
+    },
+    onSkip: () => {
+      if (profile.tutorial !== 'done') profile.tutorial = 'skipped';
+      tutorial.stop();
+      touch.highlight([]);
+      toast('Tutorial skipped. Start it again any time from How to play.');
+    },
+    onBasecamp: () => toBasecamp(),
+  });
+  let tutTouch = '';
+  $('modal').addEventListener('click', (e) => {
+    if (e.target.closest('[data-act="tutorial"]')) startTutorial();
+  });
+
+  function startTutorial() {
+    if (duel || cup) {
+      toast(cup ? 'Not during the Cup.' : 'Not during a match.');
+      return;
+    }
+    if (!$('modal').classList.contains('hidden')) closeModal();
+    setCard('tutorial', null);
+    parkId = 'bigair';
+    profile.park = 'bigair';
+    tutorial.start();
+    goRide({ tutorial: true });
+  }
+
+  // First visit: offer the tutorial in Basecamp (once).
+  function offerTutorial() {
+    if (profile.tutorial || profile.runs.length || state !== 'basecamp') return;
+    setCard('tutorial', {
+      big: 'New to CranSki?',
+      small: 'Learn the basics on BIG AIR in about two minutes: pop, spin, grab and land clean.',
+      buttons: [
+        { label: 'Start the tutorial', fn: () => startTutorial() },
+        {
+          label: 'Not now',
+          fn: () => {
+            setCard('tutorial', null);
+            profile.tutorial = 'skipped';
+            toast('You can start the tutorial any time from How to play.');
+          },
+        },
+      ],
+    });
+  }
+
   function startLift() {
+    tutorial.stop();
     const L = loaded;
     placeModel(L.world.scene);
     L.run.reset();
@@ -2297,7 +2359,8 @@ function boot() {
     acc = 0;
     restartHold = 0;
     finish = null;
-    L.hud.hint(`${L.meta.name} · W tuck · Space pop`, 3);
+    if (tutorial.active) tutorial.newRun();
+    else L.hud.hint(`${L.meta.name} · W tuck · Space pop`, 3);
     recorder.reset();
     ghost = null;
     $('ghosttag').classList.add('hidden');
@@ -2305,7 +2368,7 @@ function boot() {
     if (ghostModel.root.parent !== L.world.scene) L.world.scene.add(ghostModel.root);
     ghostModel.root.visible = false;
     const runId = L.run;
-    if (playMode !== 'live') replayDB.ghost(L.id).then((g) => {
+    if (playMode !== 'live' && !tutorial.active) replayDB.ghost(L.id).then((g) => {
       if (!g || g.version !== SIM_VERSION || loaded !== L || L.run !== runId || state !== 'riding') return;
       if (seasons.id && g.season && g.season !== seasons.id) return; // last season's ghost
       // Catch the ghost up to where you are now, so it starts with you.
@@ -2319,6 +2382,7 @@ function boot() {
   function pause(on) {
     if (on && state === 'riding') {
       state = 'paused';
+      tutorial.show(false);
       $('pause-roster').classList.toggle('hidden', !(live && live.room));
       showOverlay('pause');
     } else if (!on && state === 'paused') {
@@ -2406,6 +2470,7 @@ function boot() {
     if (act === 'roster' && live && live.room) roster.show(live, true);
     if (act === 'settings') openSettings();
     if (act === 'help') $('pause-help').classList.toggle('hidden');
+    if (act === 'tutorial') startTutorial();
     if (act === 'basecamp') toBasecamp();
     if (act === 'mplay') music.toggle();
     if (act === 'mskip') music.skip();
@@ -2590,6 +2655,7 @@ function boot() {
         dt
       );
     }
+    tutorial.show(state === 'riding');
     const wantTouch = state === 'riding' && isTouchDevice() && !touchEditor.isOpen;
     if (wantTouch !== touch.enabled) {
       touch.show(wantTouch);
@@ -2768,6 +2834,21 @@ function boot() {
       }
       if (steps >= 12) acc = 0;
 
+      // The tutorial watches this frame's landings (and restarts instead of finishing).
+      let tutRestart = false;
+      if (tutorial.active && state === 'riding') {
+        const device = input.lastDevice;
+        tutRestart = tutorial.update(dt, run, inp, device, run.messages) === 'restart';
+        if (!tutorial.finished && run.messages.some((m) => m.type === 'finish')) {
+          tutRestart = true;
+          run.messages = run.messages.filter((m) => m.type !== 'finish');
+        }
+      }
+      const ids = tutorial.active && state === 'riding' && touch.enabled ? tutorial.touchIds.join() : '';
+      if (ids !== tutTouch) {
+        tutTouch = ids;
+        touch.highlight(ids ? ids.split(',') : []);
+      }
       for (const m of run.messages) {
         if (m.type === 'finish') startFinish();
         else if (m.type === 'ring') sfx.ring(m.speed);
@@ -2779,6 +2860,7 @@ function boot() {
         }
       }
       run.messages.length = 0;
+      if (tutRestart) startRun();
       if (state === 'riding') L.hud.update(run, dt);
       if (state === 'finish') {
         finish.t += dt;
@@ -2901,6 +2983,7 @@ function boot() {
       music.play();
       toBasecamp();
       setTimeout(() => prefetchPark(parkId), 1200);
+      setTimeout(offerTutorial, 900);
     });
   })();
   requestAnimationFrame((t) => {
@@ -2916,6 +2999,7 @@ function boot() {
     get terrain() {
       return loaded?.terrain;
     },
+    tutorial,
     camera,
     pivot,
     get state() {

@@ -1,6 +1,6 @@
 // Text pages shown in the modal: About, How to play, Privacy, Credits, Updates,
 // and the tabs that need online play.
-import { CONTROLS_HTML } from './hud.js';
+import { CONTROLS_HTML, TUTORIAL_BTN } from './hud.js';
 import { TRACKS } from '../audio/music.js';
 import { SCENES } from './loading.js';
 
@@ -13,6 +13,7 @@ export const UPDATES = [
     items: [
       'A new rider: one smooth low-poly body on a skeleton, so knees, elbows and shoulders bend naturally. Your back rounds in a tuck, you cheer at the finish, wave and fix your goggles in Basecamp, and flail when you crash.',
       'Parks dressed for launch: chalets in BELLEVUE, floodlight masts, rail legs with base plates and pads, branded boxes, and a snow groomer, ski rack, snowman, event tent, speakers, flags and safety fencing at the start and finish.',
+      'A first-time tutorial on BIG AIR: pop, spin, grab and land clean, one prompt at a time with the right buttons for your keyboard, controller or touch screen. New riders are offered it in Basecamp, and anyone can start it from How to play.',
       'Faster on school laptops: Performance mode draws far less (BELLEVUE went from over 900 draw calls to under 200), uses a lighter mountain skyline and simpler distant trees, and scales the resolution in a few steady steps to hold 30 fps. Full rooms are smoother too, and Basecamp opens after a much smaller download, with each park\'s scenery fetched only when you ride it.',
     ],
   },
@@ -82,7 +83,7 @@ export const PAGES = {
       <h3>DISCLAIMER</h3>
       <p>${DISCLAIMER}</p>`,
   },
-  howto: { title: 'How to play', html: `<div class="howto">${CONTROLS_HTML}</div>` },
+  howto: { title: 'How to play', html: `<div class="howto">${TUTORIAL_BTN}${CONTROLS_HTML}</div>` },
   privacy: {
     title: 'Privacy',
     html: `

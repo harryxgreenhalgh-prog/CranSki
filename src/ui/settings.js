@@ -1,6 +1,7 @@
 // Settings panel: Controls (rebinding), Graphics, Camera, Sound, Stats.
 import { settings, saveSettings, resetSection } from '../settings.js';
 import { BINDINGS } from '../input.js';
+import { PAD_NAMES, keyName } from './keynames.js';
 import { touchSettings } from './touch.js';
 import { account } from '../online/account.js';
 import { gifts } from '../online/gifts.js';
@@ -41,14 +42,7 @@ const PAD_LABELS = {
   pause: 'Pause',
 };
 
-// Standard Gamepad button names (Xbox labels).
-export const PAD_NAMES = ['A', 'B', 'X', 'Y', 'LB', 'RB', 'LT', 'RT', 'View', 'Menu', 'L-stick', 'R-stick', 'D-up', 'D-down', 'D-left', 'D-right', 'Home'];
-
-const NICE = { ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', ShiftLeft: 'Shift', ShiftRight: 'R Shift', ControlLeft: 'Ctrl', ControlRight: 'R Ctrl', AltLeft: 'Alt', AltRight: 'R Alt', Escape: 'Esc', Space: 'Space', Enter: 'Enter' };
-function keyName(code) {
-  if (!code) return '—';
-  return NICE[code] || code.replace(/^Key/, '').replace(/^Digit/, '').replace(/^Numpad/, 'Num ');
-}
+export { PAD_NAMES, keyName };
 
 // A controller drawn in SVG; buttons light up as you press them.
 const PAD_SVG = `
