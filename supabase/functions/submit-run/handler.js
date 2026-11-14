@@ -104,7 +104,7 @@ export async function handle(req, db) {
       p_grab_slots: sub.grabSlots,
       p_board: sub.board,
     });
-    Object.assign(out, { best: saved.best, improved: saved.improved, rank: saved.rank });
+    Object.assign(out, { best: saved.best, improved: saved.improved, rank: saved.rank, record: !!saved.record });
   }
 
   // FROST (and later Season Pass XP) for every finished run, on any park.

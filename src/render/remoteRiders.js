@@ -7,6 +7,7 @@ import { RiderModel, DEFAULT_LOOK, COM_HEIGHT } from './riderModel.js';
 import { ASSETS } from './assets.js';
 import { STRIDE, frameRider, placeRider, poseFor } from './pose.js';
 import { textTexture } from './textTexture.js';
+import { makeCrown } from './crown.js';
 
 const FULL_MAX = 6; // full models at once
 const FULL_DIST = 70; // metres
@@ -58,6 +59,7 @@ function makeLabel(text, { bg = 'rgba(9,22,44,0.72)', fg = '#ffffff', w = 512, h
 export class RemoteRiders {
   constructor() {
     this.entries = new Map(); // uid -> entry
+    this.crowned = new Set(); // season leaders here
     this.scene = null;
     this.frame = new Float32Array(STRIDE);
     this.view = {};
@@ -104,7 +106,7 @@ export class RemoteRiders {
       const cheap = makeCheap(look);
       const tag = makeLabel(r.tag);
       group.add(cheap, tag);
-      e = { group, cheap, full: null, look, lookKey, tag, tagText: r.tag, trick: null, trickAt: 0, visible: false, dist: Infinity };
+      e = { uid: r.uid, group, cheap, full: null, look, lookKey, tag, tagText: r.tag, trick: null, trickAt: 0, visible: false, dist: Infinity, crown: null };
       this.entries.set(r.uid, e);
       this.scene?.add(group);
     }
@@ -160,6 +162,16 @@ export class RemoteRiders {
       placeRider(e.v, terrain, e.v.pos, e.v.q, target.position, target.quaternion);
       if (full) e.full.update(poseFor(e.v), dt);
       e.tag.visible = e.dist < TAG_DIST;
+      const crowned = this.crowned.has(e.uid);
+      if (crowned && !e.crown) {
+        e.crown = makeCrown(1.6);
+        e.group.add(e.crown);
+      }
+      if (e.crown) {
+        e.crown.visible = crowned;
+        e.crown.position.set(target.position.x, target.position.y + 1.08, target.position.z);
+        e.crown.rotation.y += dt * 1.2;
+      }
       e.tag.position.set(target.position.x, target.position.y + 1.35, target.position.z);
       const k = Math.max(1, e.dist / 25);
       e.tag.scale.set(0.95 * k * (512 / 96) * 0.32, 0.95 * k * 0.32, 1);
@@ -171,6 +183,11 @@ export class RemoteRiders {
         e.trick.scale.set(1.1 * k * (768 / 96) * 0.32, 1.1 * k * 0.32, 1);
       }
     });
+  }
+
+  // Season leaders on this park wear a crown.
+  setCrowned(uids) {
+    this.crowned = new Set(uids.filter(Boolean));
   }
 
   // A rider landed a trick: pop its name over them.

@@ -535,8 +535,150 @@ The rules, all enforced in the database:
 3. To try premium straight away, give yourself FROST as the database owner. Run this in the **SQL Editor**, replacing the email address with your account's:
 
    ```sql
-   select private.add_frost((select id from auth.users where email = 'you@example.com'), 1500, 'prize', 'test');
+   select private.add_frost((select id from auth.users where email = 'you@example.com'), 1500, 'admin', 'test');
    ```
 
    Then press **Get premium**. The FROST is taken, and any premium rewards up to your level arrive.
 4. Pass items appear in the **Locker** under **YOUR ITEMS** in their slot (jacket, gloves, boots and so on). Tap one to wear it, then **Save**.
+
+## 16. Item Shop (Phase 5, step 6)
+
+1. **SQL Editor**: run `supabase/setup.sql` again, or `supabase/migrations/20261117120000_shop.sql`. It adds:
+   - `purchases`: each rider can read only their own;
+   - `shop_today`: anyone can see the daily items and the sets on sale;
+   - `buy_item`, `buy_set`, `return_purchase` and `my_purchases`.
+2. Nothing to deploy.
+
+How it works:
+
+- **Basecamp → Shop**. Everything is priced in FROST, which is earned only by riding. Nothing in the game costs real money.
+- **Daily**: 6 Shop items, a different 6 every day at midnight UTC. The database picks them, so everyone sees the same ones, and you can only buy what's in today's 6.
+- **Limited sets**: whole themed sets at 1,400 FROST each, on sale for one season (Pumpkin Patch and Park Baggy in Season 1; Aurora Night and Spring Slush in Season 2; then they take turns).
+- **Preview** puts an item, or a whole set, on your rider. Drag to turn them round. Nothing is saved until you buy and press **Wear**, or pick the item in the Locker.
+- **Buy** asks you to confirm with a second tap. The database checks the item is on sale today, that you don't already own it, and that you have enough FROST. It then takes the FROST and gives you the item in one go.
+- **Purchases**: return anything within 24 hours for all its FROST back, up to 3 returns per account, ever. A returned item comes off your rider.
+- Prices follow the design's table:
+  - Jacket: 800 / 1,000 / 1,200 (rare / epic / legendary).
+  - Pants, skis, snowboard and helmet: 600 / 800 / 1,000.
+  - Bindings, poles, gloves, boots and goggles: 200 / 400 / 600.
+- All item names are CranSki's own. The catalogue is `src/economy/catalog.js`. After changing it, run `npm run build:sql` and run `setup.sql` again.
+
+### Test it
+
+1. Give yourself some FROST to shop with, or ride for a while. To give it, run this in the **SQL Editor**, replacing the email address with your account's:
+
+   ```sql
+   select private.add_frost((select id from auth.users where email = 'you@example.com'), 3000, 'admin', 'test');
+   ```
+
+2. **Shop → Daily**: press **Preview** on a few items and watch your rider change. Press **Buy**, then **Confirm**. Your balance drops, and the item shows **Owned ✓** with a **Wear** button.
+3. **Limited sets → Preview set**, then buy a set. All its items appear in the Locker.
+4. **Purchases → Return**: your FROST comes back, and the count of returns left goes down. A fourth return on the same account is refused.
+5. Check the lock: in the SQL Editor, `set role authenticated; insert into public.inventory (user_id, item_id, source) values (gen_random_uuid(), 'comet-twins', 'shop');` fails with "permission denied". Afterwards, run `reset role;`.
+
+## 17. Gifting (Phase 5, step 7)
+
+1. **SQL Editor**: run `supabase/setup.sql` again, or `supabase/migrations/20261118120000_gifts.sql`. It adds:
+   - `gifts`: the sender and the recipient can read a gift, and nobody can write one directly;
+   - `gift_settings`: the opt-out, readable only by its owner;
+   - `gift_status`, `send_gift`, `my_gifts`, `mark_gifts_seen`, `set_accept_gifts` and `my_gift_setting`.
+2. Nothing to deploy.
+
+The rules, all checked by `send_gift` in the database:
+
+- You buy one of **today's daily Shop items** for a friend, with your own FROST.
+- **5 gifts a day** per sender (the day resets at midnight UTC).
+- Only to **friends of 2+ days**, counted from when the request was accepted.
+- **Your account must be a week old** (counted from when you picked your gamertag) **with 20 finished runs**. These are runs the server re-rode, so this only counts runs since FROST went live.
+- Not if they **turned gifts off** (Settings → **Chat & gifts** → **Accept gifts from friends**), and not if they already own the item.
+- Gifts can't be returned by either side. If the sender deletes their account, the gift stays with the friend, shown as "from a former rider".
+
+### Test it
+
+You need two accounts that have been friends for 2+ days, a sender account at least 7 days old, and 20 finished runs on the sender. To try it sooner, you can back-date things in the **SQL Editor** while testing. Replace the email addresses with your test accounts'.
+
+```sql
+-- Make the sender's account and the friendship look old enough (testing only):
+alter table public.profiles disable trigger profiles_before_write;
+update public.profiles set created_at = now() - interval '8 days' where id = (select id from auth.users where email = 'sender@example.com');
+alter table public.profiles enable trigger profiles_before_write;
+update public.friendships set accepted_at = now() - interval '3 days' where status = 'accepted';
+```
+
+1. As the sender: **Shop → Daily → Gift** on an item. You'll see your friends:
+   - friends of 2+ days have **Send**;
+   - newer friends show "Friends for 2+ days only";
+   - friends who turned gifts off show "Gifts turned off".
+2. Press **Send**, then **Confirm**. The FROST is taken and the counter says "4 gifts left today".
+3. As the friend: within a minute, or on next sign-in, a toast says "🎁 … sent you …", and the item is in the Locker.
+4. As the friend: **Settings → Chat & gifts** → untick **Accept gifts from friends**. The sender now sees "Gifts turned off".
+
+## 18. Seasons and the scheduled job (Phase 5, step 8)
+
+### 1. Run the SQL
+
+**SQL Editor**: run `supabase/setup.sql` again, or `supabase/migrations/20261119120000_seasons.sql`. It adds:
+
+- `season_podiums`: each board's top 10 when a season ends;
+- `season_records`: every time a season best fell;
+- a new `record_score` that spots records and broadcasts them on the `records` channel;
+- `end_season` and `season_tick`, which do the season change;
+- `season_info`, `season_leaders` and `recent_records`, for the game to read.
+
+### 2. Turn on scheduled jobs (pg_cron)
+
+1. In the Supabase dashboard, open your project.
+2. Go to **Integrations** in the left sidebar, then **Cron**. (In older dashboards: **Database → Extensions**.)
+3. Click **Enable pg_cron**. With Extensions, search for `pg_cron` and turn it on, leaving the default schema.
+4. Go back to the **SQL Editor** and run `supabase/setup.sql` again. Its last part sees that pg_cron is on and schedules the job.
+5. Check it: **Integrations → Cron → Jobs** should list **cranski-season-end**, scheduled `7 * * * *` (at 7 minutes past every hour). You can also run this in the SQL Editor:
+
+   ```sql
+   select jobname, schedule, command, active from cron.job;
+   ```
+
+Every hour the job runs `select public.season_tick()`. That does nothing until the season's end date. Then, in one go, it:
+
+- saves each board's **top 10** as the season's hall of fame;
+- pays the **prize boards** (THE YARD, APEX, BIG AIR): **2,500 / 1,500 / 750** FROST, then **250** for 4th–10th. Only accounts **7+ days old** (since picking a gamertag) **with 20+ finished runs** can win. Places are counted among those riders, so if a brand-new account tops a board, the next eligible rider gets the 2,500. Each prize is paid once.
+- **clears every leaderboard**, and the stored runs behind them;
+- starts the next season (30 days, starting at midnight UTC).
+
+It never touches items, FROST, Season Pass purchases, ranked ratings or friends. Each season has its own Season Pass progress, and the game drops ghosts from earlier seasons the first time it sees the new one.
+
+You can see past runs of the job under **Integrations → Cron → Jobs → cranski-season-end → History**, or by running `select * from cron.job_run_details order by start_time desc limit 10;`.
+
+### 3. Redeploy submit-run
+
+It now tells the rider when their run set a **new season record**. After merging to `main`, GitHub Actions deploys it automatically. To deploy it by hand: **Actions → Deploy Supabase functions → Run workflow**.
+
+### RECORD alerts and Realtime
+
+When a board's season best falls, the database broadcasts it on the private `records` channel. Anyone can listen and only the database can send. Everyone online sees **RECORD** flash with the rider, park and score. The game also checks `recent_records` once a minute, so nobody misses one if the broadcast doesn't arrive.
+
+Nothing to set up: "Allow public access" can stay off. If broadcasting from the database isn't available on your project, records still show up through that once-a-minute check.
+
+### Test it
+
+1. **Crown**: post the top score on a board. In that park, and in Basecamp, your rider wears a gold crown. Other riders in your live room see one floating above you. The board shows 👑 next to #1.
+2. **RECORD**: with two accounts, beat the other account's #1 score on a board. Both see **RECORD · <name> · <park> · <score> (beat <old score>)**, the second account within a minute at most.
+3. **End a season early** (testing only; it really ends it). Run this in the **SQL Editor**:
+
+   ```sql
+   select private.end_season(true);
+   ```
+
+   It returns who won what. Then reload the game:
+   - a toast says **Season 2 has started**;
+   - prize winners get a **🏆 Season 1 prize** toast and the FROST;
+   - the boards are empty;
+   - **Leaderboard → Last season** shows Season 1's top 3 and their prizes.
+
+## Quick checklist for Phase 5
+
+- [ ] Run `supabase/setup.sql` in the SQL Editor. It includes every step, and it's safe to run again.
+- [ ] **Integrations → Cron**: enable pg_cron, then run `setup.sql` once more so the season job is scheduled.
+- [ ] Merge to `main`. GitHub Actions then:
+  - redeploys **submit-run**, which now handles ranked runs, FROST, XP and records;
+  - publishes the game.
+- [ ] Optional: give a test account FROST with `select private.add_frost((select id from auth.users where email = 'you@example.com'), 3000, 'admin', 'test');`

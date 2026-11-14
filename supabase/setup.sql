@@ -2543,3 +2543,652 @@ insert into public.pass_rewards (level, track, item_id, frost) values
   (100, 'free', 'pass-100-free', null),
   (100, 'premium', 'pass-100-premium', null)
 on conflict (level, track) do update set item_id = excluded.item_id, frost = excluded.frost;
+
+-- =================================================================== 20261117120000_shop.sql
+
+-- CranSki · Phase 5 · Step 6: the Item Shop.
+--
+-- Everything is priced in FROST, which is earned only by riding: there is
+-- nothing to buy with real money anywhere. The daily section shows 6 Shop
+-- items, a different 6 every UTC day (the database picks them, so every
+-- player sees the same ones). Limited-time themed sets are on sale for one
+-- season at a time, their groups taking turns. Anything bought can be
+-- returned within 24 hours for a full refund, up to 3 returns per account.
+--
+-- Buying and returning only happen through these functions, which check the
+-- day's stock, take or refund the FROST and change what you own in one go.
+
+create table if not exists public.purchases (
+  id bigserial primary key,
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  kind text not null check (kind in ('item', 'set')),
+  ref text not null, -- item id or set id
+  price integer not null check (price > 0),
+  bought_at timestamptz not null default now(),
+  returned_at timestamptz
+);
+create index if not exists purchases_user on public.purchases (user_id, bought_at desc);
+alter table public.purchases enable row level security;
+revoke all on public.purchases from public, anon, authenticated;
+grant select on public.purchases to authenticated;
+drop policy if exists "Riders see their own purchases" on public.purchases;
+create policy "Riders see their own purchases" on public.purchases
+  for select to authenticated using (user_id = (select auth.uid()));
+
+create or replace function private.shop_rules() returns jsonb
+language sql immutable set search_path = '' as $$
+  select '{"daily_count": 6, "return_hours": 24, "max_returns": 3}'::jsonb
+$$;
+
+create or replace function private.shop_day() returns date
+language sql stable set search_path = '' as $$
+  select (now() at time zone 'utc')::date
+$$;
+
+-- Today's daily section (stable for the whole UTC day).
+create or replace function private.daily_items(p_day date) returns setof text
+language sql stable security definer set search_path = '' as $$
+  select id from public.items where source = 'shop'
+  order by md5(p_day::text || ':' || id) limit 6
+$$;
+
+-- Sets on sale this season.
+create or replace function private.sets_on_sale() returns setof text
+language sql security definer set search_path = '' as $$
+  select s.id from public.item_sets s
+  where s.set_group = ((greatest(1, (select (private.current_season()).id)) - 1) % 2) + 1
+  order by s.id
+$$;
+
+-- What's in the Shop right now (anyone can look).
+create or replace function public.shop_today() returns jsonb
+language sql security definer set search_path = '' as $$
+  select jsonb_build_object(
+    'day', private.shop_day(),
+    'ends_at', (private.shop_day() + 1)::timestamp at time zone 'utc',
+    'daily', (select coalesce(jsonb_agg(d), '[]'::jsonb) from private.daily_items(private.shop_day()) d),
+    'sets', (select coalesce(jsonb_agg(s), '[]'::jsonb) from private.sets_on_sale() s),
+    'season_ends_at', (select (private.current_season()).ends_at)
+  )
+$$;
+
+create or replace function private.returns_used(p_user uuid) returns integer
+language sql stable security definer set search_path = '' as $$
+  select count(*)::integer from public.purchases where user_id = p_user and returned_at is not null
+$$;
+
+-- Buy one item from today's daily section.
+create or replace function public.buy_item(p_item text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  me uuid := auth.uid();
+  it public.items;
+  bal integer;
+begin
+  if me is null or not exists (select 1 from public.profiles where id = me) then return jsonb_build_object('status', 'no_gamertag'); end if;
+  select * into it from public.items where id = p_item and source = 'shop';
+  if not found or not exists (select 1 from private.daily_items(private.shop_day()) d where d = p_item) then
+    return jsonb_build_object('status', 'not_in_shop');
+  end if;
+  if exists (select 1 from public.inventory where user_id = me and item_id = p_item) then return jsonb_build_object('status', 'owned'); end if;
+  begin
+    bal := private.add_frost(me, -it.price, 'shop', 'item:' || it.id);
+  exception when others then
+    if sqlerrm = 'not_enough_frost' then return jsonb_build_object('status', 'not_enough_frost'); end if;
+    raise;
+  end;
+  insert into public.inventory (user_id, item_id, source, price_paid) values (me, it.id, 'shop', it.price);
+  insert into public.purchases (user_id, kind, ref, price) values (me, 'item', it.id, it.price);
+  return jsonb_build_object('status', 'ok', 'balance', bal);
+end
+$$;
+
+-- Buy a whole themed set (only while it's on sale).
+create or replace function public.buy_set(p_set text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  me uuid := auth.uid();
+  s public.item_sets;
+  bal integer;
+begin
+  if me is null or not exists (select 1 from public.profiles where id = me) then return jsonb_build_object('status', 'no_gamertag'); end if;
+  select * into s from public.item_sets where id = p_set;
+  if not found or not exists (select 1 from private.sets_on_sale() x where x = p_set) then return jsonb_build_object('status', 'not_in_shop'); end if;
+  if not exists (select 1 from public.items i where i.set_id = p_set and not exists (select 1 from public.inventory v where v.user_id = me and v.item_id = i.id)) then
+    return jsonb_build_object('status', 'owned');
+  end if;
+  begin
+    bal := private.add_frost(me, -s.price, 'shop', 'set:' || s.id);
+  exception when others then
+    if sqlerrm = 'not_enough_frost' then return jsonb_build_object('status', 'not_enough_frost'); end if;
+    raise;
+  end;
+  insert into public.inventory (user_id, item_id, source, price_paid)
+  select me, i.id, 'set', 0 from public.items i where i.set_id = p_set
+  on conflict do nothing;
+  insert into public.purchases (user_id, kind, ref, price) values (me, 'set', s.id, s.price);
+  return jsonb_build_object('status', 'ok', 'balance', bal);
+end
+$$;
+
+-- Return something bought in the last 24 hours, for all its FROST back (3 returns per account).
+create or replace function public.return_purchase(p_purchase bigint) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  me uuid := auth.uid();
+  pu public.purchases;
+  rules jsonb := private.shop_rules();
+  bal integer;
+begin
+  select * into pu from public.purchases where id = p_purchase and user_id = me for update;
+  if not found then return jsonb_build_object('status', 'not_found'); end if;
+  if pu.returned_at is not null then return jsonb_build_object('status', 'already_returned'); end if;
+  if pu.bought_at < now() - make_interval(hours => (rules ->> 'return_hours')::integer) then return jsonb_build_object('status', 'too_late'); end if;
+  if private.returns_used(me) >= (rules ->> 'max_returns')::integer then return jsonb_build_object('status', 'no_returns_left'); end if;
+  -- Take back exactly what this purchase gave (a gift sent on to someone else can't be returned).
+  if pu.kind = 'item' then
+    if not exists (select 1 from public.inventory where user_id = me and item_id = pu.ref and source = 'shop') then
+      return jsonb_build_object('status', 'not_owned');
+    end if;
+    delete from public.inventory where user_id = me and item_id = pu.ref and source = 'shop';
+  else
+    delete from public.inventory v using public.items i where v.user_id = me and v.item_id = i.id and i.set_id = pu.ref and v.source = 'set';
+  end if;
+  update public.purchases set returned_at = now() where id = pu.id;
+  bal := private.add_frost(me, pu.price, 'return', pu.kind || ':' || pu.ref);
+  return jsonb_build_object('status', 'ok', 'balance', bal, 'returns_left', (rules ->> 'max_returns')::integer - private.returns_used(me));
+end
+$$;
+
+-- My recent purchases, with whether each can still be returned.
+create or replace function public.my_purchases() returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object(
+    'returns_left', greatest(0, (private.shop_rules() ->> 'max_returns')::integer - private.returns_used((select auth.uid()))),
+    'recent', coalesce((
+      select jsonb_agg(jsonb_build_object('id', p.id, 'kind', p.kind, 'ref', p.ref, 'price', p.price, 'bought_at', p.bought_at,
+        'returned_at', p.returned_at,
+        'returnable_until', case when p.returned_at is null then p.bought_at + interval '24 hours' end) order by p.bought_at desc)
+      from (select * from public.purchases where user_id = (select auth.uid()) and bought_at > now() - interval '7 days' order by bought_at desc limit 30) p
+    ), '[]'::jsonb)
+  )
+$$;
+
+revoke all on function private.daily_items(date) from public, anon, authenticated;
+revoke all on function private.sets_on_sale() from public, anon, authenticated;
+revoke all on function private.returns_used(uuid) from public, anon, authenticated;
+revoke all on function public.shop_today() from public;
+grant execute on function public.shop_today() to anon, authenticated;
+revoke all on function public.buy_item(text) from public, anon;
+grant execute on function public.buy_item(text) to authenticated;
+revoke all on function public.buy_set(text) from public, anon;
+grant execute on function public.buy_set(text) to authenticated;
+revoke all on function public.return_purchase(bigint) from public, anon;
+grant execute on function public.return_purchase(bigint) to authenticated;
+revoke all on function public.my_purchases() from public, anon;
+grant execute on function public.my_purchases() to authenticated;
+
+-- =================================================================== 20261118120000_gifts.sql
+
+-- CranSki · Phase 5 · Step 7: gifting to friends.
+--
+-- Buy one of today's Shop items for a friend, with your FROST. To keep it
+-- friendly and hard to abuse:
+--   - 5 gifts a day per sender (UTC);
+--   - only to friends you've had for 2+ days;
+--   - your account (from when you picked your gamertag) must be a week old,
+--     with 20 finished runs the server re-rode (counted from the FROST ledger);
+--   - anyone can turn gifts off in Settings, and nobody can send them one then;
+--   - they can't already own it, and gifts can't be returned.
+-- Everything is checked and done here; riders can't write these tables.
+
+create table if not exists public.gift_settings (
+  user_id uuid primary key references public.profiles (id) on delete cascade,
+  accept boolean not null default true,
+  updated_at timestamptz not null default now()
+);
+alter table public.gift_settings enable row level security;
+revoke all on public.gift_settings from public, anon, authenticated;
+grant select on public.gift_settings to authenticated;
+drop policy if exists "Riders see their own gift setting" on public.gift_settings;
+create policy "Riders see their own gift setting" on public.gift_settings
+  for select to authenticated using (user_id = (select auth.uid()));
+
+create table if not exists public.gifts (
+  id bigserial primary key,
+  sender uuid references public.profiles (id) on delete set null,
+  recipient uuid not null references public.profiles (id) on delete cascade,
+  item_id text not null references public.items (id),
+  price integer not null,
+  sent_at timestamptz not null default now(),
+  seen_at timestamptz
+);
+create index if not exists gifts_sender_day on public.gifts (sender, sent_at desc);
+create index if not exists gifts_recipient on public.gifts (recipient, sent_at desc);
+alter table public.gifts enable row level security;
+revoke all on public.gifts from public, anon, authenticated;
+grant select on public.gifts to authenticated;
+drop policy if exists "Riders see gifts they sent or got" on public.gifts;
+create policy "Riders see gifts they sent or got" on public.gifts
+  for select to authenticated using ((select auth.uid()) in (sender, recipient));
+
+create or replace function private.gift_rules() returns jsonb
+language sql immutable set search_path = '' as $$
+  select '{"per_day": 5, "friend_days": 2, "account_days": 7, "runs_needed": 20}'::jsonb
+$$;
+
+-- Finished runs the server re-rode for this rider (each one is in the FROST ledger once).
+create or replace function private.verified_runs(p_user uuid) returns integer
+language sql stable security definer set search_path = '' as $$
+  select count(*)::integer from private.frost_ledger where user_id = p_user and reason = 'run'
+$$;
+
+create or replace function private.accepts_gifts(p_user uuid) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select coalesce((select accept from public.gift_settings where user_id = p_user), true)
+$$;
+
+create or replace function private.gifts_today(p_user uuid) returns integer
+language sql stable security definer set search_path = '' as $$
+  select count(*)::integer from public.gifts
+  where sender = p_user and sent_at >= (private.shop_day())::timestamp at time zone 'utc'
+$$;
+
+-- When two riders became friends (null if they aren't).
+create or replace function private.friends_since(a uuid, b uuid) returns timestamptz
+language sql stable security definer set search_path = '' as $$
+  select coalesce(accepted_at, created_at) from public.friendships
+  where status = 'accepted' and ((requester = a and addressee = b) or (requester = b and addressee = a))
+  limit 1
+$$;
+
+-- Can I send gifts, and to which friends? (For the gift screen.)
+create or replace function public.gift_status() returns jsonb
+language plpgsql stable security definer set search_path = '' as $$
+declare
+  me uuid := auth.uid();
+  rules jsonb := private.gift_rules();
+  age_days integer;
+  runs integer;
+begin
+  if me is null or not exists (select 1 from public.profiles where id = me) then
+    return jsonb_build_object('status', 'no_gamertag');
+  end if;
+  select floor(extract(epoch from now() - created_at) / 86400)::integer into age_days from public.profiles where id = me;
+  runs := private.verified_runs(me);
+  return jsonb_build_object(
+    'status', 'ok',
+    'rules', rules,
+    'account_days', age_days,
+    'runs', runs,
+    'sent_today', private.gifts_today(me),
+    'gifts_left', greatest(0, (rules ->> 'per_day')::integer - private.gifts_today(me)),
+    'can_send', age_days >= (rules ->> 'account_days')::integer and runs >= (rules ->> 'runs_needed')::integer,
+    'friends', coalesce((
+      select jsonb_agg(jsonb_build_object(
+        'id', p.id, 'gamertag', p.gamertag,
+        'friends_days', floor(extract(epoch from now() - coalesce(f.accepted_at, f.created_at)) / 86400)::integer,
+        'accepts', private.accepts_gifts(p.id)) order by p.gamertag)
+      from public.friendships f
+      join public.profiles p on p.id = case when f.requester = me then f.addressee else f.requester end
+      where f.status = 'accepted' and me in (f.requester, f.addressee)
+    ), '[]'::jsonb)
+  );
+end
+$$;
+
+-- Send a friend one of today's daily Shop items.
+create or replace function public.send_gift(p_friend uuid, p_item text) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  me uuid := auth.uid();
+  rules jsonb := private.gift_rules();
+  it public.items;
+  since timestamptz;
+  bal integer;
+begin
+  if me is null or not exists (select 1 from public.profiles where id = me) then return jsonb_build_object('status', 'no_gamertag'); end if;
+  if p_friend = me then return jsonb_build_object('status', 'not_friends'); end if;
+  -- One gift at a time per sender, so the daily limit holds.
+  insert into public.wallets (user_id) values (me) on conflict (user_id) do nothing;
+  perform 1 from public.wallets where user_id = me for update;
+  if (select created_at from public.profiles where id = me) > now() - make_interval(days => (rules ->> 'account_days')::integer) then
+    return jsonb_build_object('status', 'account_too_new');
+  end if;
+  if private.verified_runs(me) < (rules ->> 'runs_needed')::integer then return jsonb_build_object('status', 'not_enough_runs'); end if;
+  since := private.friends_since(me, p_friend);
+  if since is null then return jsonb_build_object('status', 'not_friends'); end if;
+  if since > now() - make_interval(days => (rules ->> 'friend_days')::integer) then return jsonb_build_object('status', 'friends_too_new'); end if;
+  if not private.accepts_gifts(p_friend) then return jsonb_build_object('status', 'gifts_off'); end if;
+  if private.gifts_today(me) >= (rules ->> 'per_day')::integer then return jsonb_build_object('status', 'daily_limit'); end if;
+  select * into it from public.items where id = p_item and source = 'shop';
+  if not found or not exists (select 1 from private.daily_items(private.shop_day()) d where d = p_item) then
+    return jsonb_build_object('status', 'not_in_shop');
+  end if;
+  if exists (select 1 from public.inventory where user_id = p_friend and item_id = p_item) then return jsonb_build_object('status', 'already_owned'); end if;
+  begin
+    bal := private.add_frost(me, -it.price, 'gift_out', 'gift:' || it.id || ':' || p_friend);
+  exception when others then
+    if sqlerrm = 'not_enough_frost' then return jsonb_build_object('status', 'not_enough_frost'); end if;
+    raise;
+  end;
+  insert into public.inventory (user_id, item_id, source, price_paid) values (p_friend, it.id, 'gift', 0);
+  insert into public.gifts (sender, recipient, item_id, price) values (me, p_friend, it.id, it.price);
+  return jsonb_build_object('status', 'ok', 'balance', bal, 'gifts_left', greatest(0, (rules ->> 'per_day')::integer - private.gifts_today(me)));
+end
+$$;
+
+-- Gifts I've received (newest first), and how many I haven't seen yet.
+create or replace function public.my_gifts() returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select jsonb_build_object(
+    'unseen', (select count(*) from public.gifts where recipient = (select auth.uid()) and seen_at is null),
+    'recent', coalesce((
+      select jsonb_agg(jsonb_build_object('id', g.id, 'item', g.item_id, 'from', coalesce(p.gamertag, 'A former rider'),
+        'sent_at', g.sent_at, 'seen', g.seen_at is not null) order by g.sent_at desc)
+      from (select * from public.gifts where recipient = (select auth.uid()) order by sent_at desc limit 30) g
+      left join public.profiles p on p.id = g.sender
+    ), '[]'::jsonb))
+$$;
+
+create or replace function public.mark_gifts_seen() returns void
+language sql security definer set search_path = '' as $$
+  update public.gifts set seen_at = now() where recipient = (select auth.uid()) and seen_at is null
+$$;
+
+-- The opt-out (Settings): turn gifts from friends on or off.
+create or replace function public.set_accept_gifts(p_accept boolean) returns boolean
+language plpgsql security definer set search_path = '' as $$
+declare
+  me uuid := auth.uid();
+begin
+  if me is null or not exists (select 1 from public.profiles where id = me) then return null; end if;
+  insert into public.gift_settings (user_id, accept, updated_at) values (me, coalesce(p_accept, true), now())
+  on conflict (user_id) do update set accept = excluded.accept, updated_at = now();
+  return coalesce(p_accept, true);
+end
+$$;
+
+create or replace function public.my_gift_setting() returns boolean
+language sql stable security definer set search_path = '' as $$
+  select private.accepts_gifts((select auth.uid()))
+$$;
+
+revoke all on function private.verified_runs(uuid) from public, anon, authenticated;
+revoke all on function private.accepts_gifts(uuid) from public, anon, authenticated;
+revoke all on function private.gifts_today(uuid) from public, anon, authenticated;
+revoke all on function private.friends_since(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.gift_status() from public, anon;
+grant execute on function public.gift_status() to authenticated;
+revoke all on function public.send_gift(uuid, text) from public, anon;
+grant execute on function public.send_gift(uuid, text) to authenticated;
+revoke all on function public.my_gifts() from public, anon;
+grant execute on function public.my_gifts() to authenticated;
+revoke all on function public.mark_gifts_seen() from public, anon;
+grant execute on function public.mark_gifts_seen() to authenticated;
+revoke all on function public.set_accept_gifts(boolean) from public, anon;
+grant execute on function public.set_accept_gifts(boolean) to authenticated;
+revoke all on function public.my_gift_setting() from public, anon;
+grant execute on function public.my_gift_setting() to authenticated;
+
+-- =================================================================== 20261119120000_seasons.sql
+
+-- CranSki · Phase 5 · Step 8: seasons.
+--
+-- A season lasts about a month (30 days). The per-park leaderboards are the
+-- season's boards; THE YARD, APEX and BIG AIR are the prize boards. When a
+-- season ends, a scheduled job (pg_cron, see SUPABASE_SETUP.md):
+--   - keeps each board's top 10 in season_podiums (the hall of fame);
+--   - pays the prize boards' top 10: 2,500 / 1,500 / 750 FROST, then 250 for
+--     4th-10th. Only accounts 7+ days old with 20+ finished runs can win;
+--     places are counted among those riders;
+--   - clears every board (and the runs behind them) and starts the next season.
+-- Items, FROST and ratings stay. Each season has its own Season Pass, and the
+-- game drops ghosts from earlier seasons.
+--
+-- When someone beats a board's season best, it's logged in season_records and
+-- broadcast on the 'records' channel so everyone online sees RECORD. Each
+-- board's leader wears a crown in the game.
+
+create table if not exists public.season_podiums (
+  season_id integer not null references public.seasons (id),
+  park text not null,
+  rank integer not null,
+  user_id uuid references public.profiles (id) on delete cascade,
+  gamertag text not null,
+  total integer not null,
+  best_trick text,
+  prize integer not null default 0,
+  primary key (season_id, park, rank)
+);
+create table if not exists public.season_records (
+  id bigserial primary key,
+  season_id integer not null references public.seasons (id),
+  park text not null,
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  total integer not null,
+  previous integer not null,
+  at timestamptz not null default now()
+);
+create index if not exists season_records_at on public.season_records (at desc);
+alter table public.season_podiums enable row level security;
+alter table public.season_records enable row level security;
+revoke all on public.season_podiums, public.season_records from public, anon, authenticated;
+grant select on public.season_podiums, public.season_records to anon, authenticated;
+drop policy if exists "Season results are public" on public.season_podiums;
+create policy "Season results are public" on public.season_podiums for select using (true);
+drop policy if exists "Season records are public" on public.season_records;
+create policy "Season records are public" on public.season_records for select using (true);
+
+-- A prize is paid once.
+create unique index if not exists frost_ledger_prize_once on private.frost_ledger (user_id, ref) where reason = 'prize';
+
+create or replace function private.season_rules() returns jsonb
+language sql immutable set search_path = '' as $$
+  select '{"days": 30, "prize_parks": ["yard", "apex", "bigair"], "prizes": [2500, 1500, 750, 250, 250, 250, 250, 250, 250, 250],
+           "account_days": 7, "runs_needed": 20}'::jsonb
+$$;
+
+-- Saving a verified score (as in Phase 3), and now: a new season best on a
+-- board is a RECORD. (Same signature, so submit-run doesn't change.)
+create or replace function public.record_score(
+  p_user uuid,
+  p_park text,
+  p_total integer,
+  p_time real,
+  p_best_trick text,
+  p_top_speed integer,
+  p_airtime real,
+  p_sim_version integer,
+  p_steps integer,
+  p_inputs text,
+  p_marks jsonb,
+  p_grab_slots jsonb,
+  p_board boolean
+) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  old_total integer;
+  prior_best integer;
+  mine public.leaderboard;
+  improved boolean;
+  is_record boolean := false;
+  place bigint;
+  season public.seasons;
+begin
+  -- One score at a time per board, so two riders can't both take the record.
+  perform pg_advisory_xact_lock(hashtext('cranski-board:' || p_park));
+  select max(total) into prior_best from public.leaderboard where park = p_park;
+  select total into old_total from public.leaderboard where park = p_park and user_id = p_user for update;
+  improved := old_total is null or p_total > old_total;
+  if improved then
+    insert into public.leaderboard (park, user_id, total, run_time, best_trick, top_speed, airtime, sim_version, achieved_at)
+    values (p_park, p_user, p_total, p_time, left(p_best_trick, 80), p_top_speed, p_airtime, p_sim_version, now())
+    on conflict (park, user_id) do update set
+      total = excluded.total, run_time = excluded.run_time, best_trick = excluded.best_trick,
+      top_speed = excluded.top_speed, airtime = excluded.airtime, sim_version = excluded.sim_version,
+      achieved_at = excluded.achieved_at;
+    insert into public.leaderboard_runs (park, user_id, steps, inputs, marks, grab_slots, board, sim_version)
+    values (p_park, p_user, p_steps, p_inputs, coalesce(p_marks, '[]'::jsonb), p_grab_slots, p_board, p_sim_version)
+    on conflict (park, user_id) do update set
+      steps = excluded.steps, inputs = excluded.inputs, marks = excluded.marks,
+      grab_slots = excluded.grab_slots, board = excluded.board, sim_version = excluded.sim_version;
+    -- The season best fell (the first score of a season sets it; it isn't a record).
+    if prior_best is not null and p_total > prior_best then
+      is_record := true;
+      season := private.current_season();
+      insert into public.season_records (season_id, park, user_id, total, previous) values (season.id, p_park, p_user, p_total, prior_best);
+      begin
+        perform realtime.send(
+          jsonb_build_object('park', p_park, 'user_id', p_user, 'total', p_total, 'previous', prior_best,
+            'gamertag', (select gamertag from public.profiles where id = p_user), 'season', season.id),
+          'record', 'records', true);
+      exception when others then
+        null; -- Realtime from the database isn't available: the game also checks every minute
+      end;
+    end if;
+  end if;
+  select * into mine from public.leaderboard where park = p_park and user_id = p_user;
+  select 1 + count(*) into place from public.leaderboard l
+  where l.park = p_park and (l.total > mine.total or (l.total = mine.total and l.achieved_at < mine.achieved_at));
+  return jsonb_build_object('best', mine.total, 'improved', improved, 'rank', place, 'record', is_record);
+end
+$$;
+revoke all on function public.record_score(uuid, text, integer, real, text, integer, real, integer, integer, text, jsonb, jsonb, boolean) from public, anon, authenticated;
+grant execute on function public.record_score(uuid, text, integer, real, text, integer, real, integer, integer, text, jsonb, jsonb, boolean) to service_role;
+
+-- End the season if it's due (or now, with p_force): archive, pay prizes, reset boards, start the next.
+create or replace function private.end_season(p_force boolean default false) returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  rules jsonb := private.season_rules();
+  s public.seasons;
+  pk text;
+  r record;
+  i integer;
+  amount integer;
+  paid jsonb := '[]'::jsonb;
+begin
+  perform pg_advisory_xact_lock(hashtext('cranski-season-end'));
+  select * into s from public.seasons where ended_at is null order by id desc limit 1 for update;
+  if not found then
+    s := private.current_season();
+    return jsonb_build_object('status', 'started', 'season', s.id);
+  end if;
+  if s.ends_at > now() and not p_force then
+    return jsonb_build_object('status', 'not_yet', 'season', s.id, 'ends_at', s.ends_at);
+  end if;
+  -- Boards are locked while they're archived and cleared.
+  perform pg_advisory_xact_lock(hashtext('cranski-board:' || x)) from unnest(array['bigair', 'yard', 'apex', 'forest', 'pipe', 'bellevue']) x;
+
+  -- 1. Hall of fame: each board's top 10.
+  insert into public.season_podiums (season_id, park, rank, user_id, gamertag, total, best_trick)
+  select s.id, ranked.park, ranked.place, ranked.user_id, ranked.gamertag, ranked.total, ranked.best_trick
+  from (
+    select l.park, l.user_id, p.gamertag, l.total, l.best_trick,
+      row_number() over (partition by l.park order by l.total desc, l.achieved_at) as place
+    from public.leaderboard l join public.profiles p on p.id = l.user_id
+  ) ranked
+  where ranked.place <= 10
+  on conflict do nothing;
+
+  -- 2. Prizes on the prize boards, by place among riders who can win.
+  for pk in select jsonb_array_elements_text(rules -> 'prize_parks') loop
+    i := 0;
+    for r in
+      select l.user_id, l.total from public.leaderboard l join public.profiles p on p.id = l.user_id
+      where l.park = pk
+        and p.created_at <= now() - make_interval(days => (rules ->> 'account_days')::integer)
+        and private.verified_runs(l.user_id) >= (rules ->> 'runs_needed')::integer
+      order by l.total desc, l.achieved_at
+      limit 10
+    loop
+      i := i + 1;
+      amount := (rules -> 'prizes' ->> (i - 1))::integer;
+      perform private.add_frost(r.user_id, amount, 'prize', format('season:%s:%s:%s', s.id, pk, i));
+      update public.season_podiums set prize = amount where season_id = s.id and park = pk and user_id = r.user_id;
+      paid := paid || jsonb_build_object('park', pk, 'place', i, 'user_id', r.user_id, 'frost', amount);
+    end loop;
+  end loop;
+
+  -- 3. Fresh boards (the runs behind them go too), and the next season.
+  delete from public.leaderboard;
+  update public.seasons set ended_at = now() where id = s.id;
+  insert into public.seasons (id, name, starts_at, ends_at)
+  values (s.id + 1, 'Season ' || (s.id + 1), date_trunc('day', now()), date_trunc('day', now()) + make_interval(days => (rules ->> 'days')::integer));
+  return jsonb_build_object('status', 'ended', 'season', s.id, 'next', s.id + 1, 'prizes', paid);
+end
+$$;
+
+-- What the scheduled job runs (hourly): ends the season once it's due.
+create or replace function public.season_tick() returns jsonb
+language sql security definer set search_path = '' as $$
+  select private.end_season(false)
+$$;
+
+-- This season, its prize rules, the last season's winners and (signed in) what I won.
+create or replace function public.season_info() returns jsonb
+language plpgsql security definer set search_path = '' as $$
+declare
+  s public.seasons := private.current_season();
+  last public.seasons;
+  me uuid := auth.uid();
+begin
+  select * into last from public.seasons where ended_at is not null order by id desc limit 1;
+  return jsonb_build_object(
+    'season', jsonb_build_object('id', s.id, 'name', s.name, 'starts_at', s.starts_at, 'ends_at', s.ends_at),
+    'rules', private.season_rules(),
+    'last', case when last.id is null then null else jsonb_build_object(
+      'id', last.id, 'name', last.name,
+      'podiums', (select coalesce(jsonb_agg(jsonb_build_object('park', park, 'rank', rank, 'gamertag', gamertag, 'total', total, 'prize', prize) order by park, rank), '[]'::jsonb)
+                  from public.season_podiums where season_id = last.id and rank <= 3),
+      'mine', case when me is null then null else (
+        select coalesce(jsonb_agg(jsonb_build_object('park', split_part(ref, ':', 3), 'place', split_part(ref, ':', 4)::integer, 'frost', delta)), '[]'::jsonb)
+        from private.frost_ledger where user_id = me and reason = 'prize' and ref like 'season:' || last.id || ':%') end
+    ) end);
+end
+$$;
+
+-- Each board's season leader (they wear the crown).
+create or replace function public.season_leaders() returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select coalesce(jsonb_object_agg(t.park, jsonb_build_object('user_id', t.user_id, 'gamertag', t.gamertag, 'total', t.total)), '{}'::jsonb)
+  from (
+    select distinct on (l.park) l.park, l.user_id, p.gamertag, l.total
+    from public.leaderboard l join public.profiles p on p.id = l.user_id
+    order by l.park, l.total desc, l.achieved_at
+  ) t
+$$;
+
+-- Records set since a moment (the game checks every minute, in case it missed a broadcast).
+create or replace function public.recent_records(p_since timestamptz) returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'park', r.park, 'user_id', r.user_id, 'gamertag', p.gamertag,
+    'total', r.total, 'previous', r.previous, 'at', r.at, 'season', r.season_id) order by r.at), '[]'::jsonb)
+  from (select * from public.season_records where at > greatest(p_since, now() - interval '1 hour') order by at desc limit 20) r
+  join public.profiles p on p.id = r.user_id
+$$;
+
+-- The 'records' channel: anyone can listen; only the database broadcasts on it.
+drop policy if exists "cranski: everyone hears records" on realtime.messages;
+create policy "cranski: everyone hears records" on realtime.messages
+  for select to anon, authenticated
+  using (realtime.messages.extension = 'broadcast' and (select realtime.topic()) = 'records');
+
+revoke all on function private.end_season(boolean) from public, anon, authenticated;
+revoke all on function public.season_tick() from public, anon, authenticated;
+revoke all on function public.season_info() from public;
+grant execute on function public.season_info() to anon, authenticated;
+revoke all on function public.season_leaders() from public;
+grant execute on function public.season_leaders() to anon, authenticated;
+revoke all on function public.recent_records(timestamptz) from public;
+grant execute on function public.recent_records(timestamptz) to anon, authenticated;
+
+-- The scheduled job (once pg_cron is turned on: see SUPABASE_SETUP.md, then run this file again).
+do $$
+begin
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    perform cron.schedule('cranski-season-end', '7 * * * *', 'select public.season_tick()');
+  end if;
+end
+$$;
