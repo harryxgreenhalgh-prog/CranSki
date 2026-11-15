@@ -12,6 +12,7 @@ export const UPDATES = [
     items: [
       'A new rider: one smooth low-poly body on a skeleton, so knees, elbows and shoulders bend naturally. Your back rounds in a tuck, you cheer at the finish, wave and fix your goggles in Basecamp, and flail when you crash.',
       'Parks dressed for launch: chalets in BELLEVUE, floodlight masts, rail legs with base plates and pads, branded boxes, and a snow groomer, ski rack, snowman, event tent, speakers, flags and safety fencing at the start and finish.',
+      'Ready for launch: every screen and button checked on laptops, phones and tablets (and fixed where it was cut off or hard to reach), and the About, Privacy and Credits pages brought up to date.',
       'A first-time tutorial on BIG AIR: pop, spin, grab and land clean, one prompt at a time with the right buttons for your keyboard, controller or touch screen. New riders are offered it in Basecamp, and anyone can start it from How to play.',
       'Faster on school laptops: Performance mode draws far less (BELLEVUE went from over 900 draw calls to under 200), uses a lighter mountain skyline and simpler distant trees, and scales the resolution in a few steady steps to hold 30 fps. Full rooms are smoother too, and Basecamp opens after a much smaller download, with each park\'s scenery fetched only when you ride it.',
     ],
@@ -77,8 +78,10 @@ export const PAGES = {
   about: {
     title: 'About CranSki',
     html: `
-      <p>CranSki is a free park-skiing trick game that runs in your browser. Ride one of seven terrain parks, pop off kickers and rails, and land spins, corks, flips and grabs that the game names and scores from what you actually did.</p>
-      <p>Everything here (code, shapes, sounds and music) was made for CranSki.</p>
+      <p>CranSki is a free park-skiing trick game that runs in your browser. Ride one of seven terrain parks, pop off kickers and rails, and land spins, corks, flips, grabs and butters that the game names and scores from what you actually did. There's no button per trick.</p>
+      <p>New to it? Start the BIG AIR tutorial from <b>How to play</b>: it teaches popping, spinning, grabbing and landing clean in about two minutes, with prompts for your keyboard, controller or touch screen.</p>
+      <p>Playing solo needs no account. Signing in (with an email link, never a password) adds cloud saves, friends, leaderboards, live rooms, duels, parties, ranked matches, FROST and the Season Pass. FROST is earned only by riding: nothing in CranSki costs real money.</p>
+      <p>The code, the rider, the park props, the trees, the lifts, the sounds and the music were all made for CranSki. Three scenery models (the start hut, the finish gantry and the mountains) are other people's work used under Creative Commons Attribution: see <b>Credits</b>.</p>
       <h3>DISCLAIMER</h3>
       <p>${DISCLAIMER}</p>`,
   },
@@ -86,12 +89,13 @@ export const PAGES = {
   privacy: {
     title: 'Privacy',
     html: `
-      <p>Playing solo needs no account and sends nothing to any server. The game is static files on GitHub Pages, and your progress stays in this browser. Signing in is optional; you only need it for cloud saves, friends, leaderboards, multiplayer and FROST.</p>
+      <p>Playing solo needs no account, and your progress stays in this browser. Signing in is optional; you only need it for cloud saves, friends, leaderboards, multiplayer and FROST.</p>
+      <p>Even signed out, the game does make a few requests: it downloads its files from GitHub Pages (GitHub keeps ordinary web server logs, see <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener">GitHub's privacy statement</a>), and it asks CranSki's server for public season information (the current season and who leads each park, for the crowns and RECORD alerts). Those requests carry nothing about you beyond what any web page request does.</p>
 
       <h3>ON THIS DEVICE</h3>
       <p>Kept in this browser (local storage and IndexedDB):</p>
       <ul>
-        <li>Your rider name, settings, Locker choices, personal bests and recent run summaries.</li>
+        <li>Your rider name, settings, Locker choices, personal bests, recent run summaries, and whether you've done or skipped the tutorial.</li>
         <li>Replays and best-run ghosts. They stay here. When you're signed in, each run you finish is also sent to the server (its inputs only) so it can check the score for the leaderboard and for FROST (see below).</li>
         <li>If you sign in: your sign-in session (so you stay signed in), when your cloud save last synced, and your <b>Appear offline</b> choice.</li>
       </ul>
@@ -147,7 +151,10 @@ export const PAGES = {
       <h3>LIBRARIES</h3>
       <p><a href="https://threejs.org" target="_blank" rel="noopener">Three.js</a>, MIT licence, for 3D rendering.<br>
       <a href="https://vite.dev" target="_blank" rel="noopener">Vite</a>, MIT licence, for building the site.<br>
-      <a href="https://github.com/supabase/supabase-js" target="_blank" rel="noopener">supabase-js</a>, MIT licence, for sign-in, cloud saves, friends and leaderboards (loaded only when you use them).</p>
+      <a href="https://github.com/supabase/supabase-js" target="_blank" rel="noopener">supabase-js</a>, MIT licence, for sign-in, cloud saves, friends, leaderboards, seasons and multiplayer (downloaded after the game starts, separately from it).<br>
+      <a href="https://github.com/zeux/meshoptimizer" target="_blank" rel="noopener">meshoptimizer</a>'s decoder, MIT licence, bundled with Three.js, for unpacking the compressed 3D models.</p>
+      <h3>TOOLS</h3>
+      <p><a href="https://www.blender.org" target="_blank" rel="noopener">Blender</a> (GPL; the models it makes are CranSki's own) runs the scripts that build the rider and park models, and <a href="https://gltf-transform.dev" target="_blank" rel="noopener">glTF Transform</a> (MIT) compresses them for the web.</p>
       <h3>MUSIC</h3>
       <p>Original soundtrack composed for CranSki and played live by an in-browser synthesiser (no recordings, no samples). Artist: CranSki.</p>
       <ol>${TRACKS.map((t) => `<li>${t.name}</li>`).join('')}</ol>
