@@ -61,7 +61,8 @@ const PAD_SVG = `
 </svg>`;
 
 export class SettingsUI {
-  constructor({ onClose, onTouchEditor }) {
+  constructor({ onClose, onTouchEditor, onAccountTab }) {
+    this.onAccountTab = onAccountTab;
     account.onChange(() => {
       this.giftAccept = undefined; // a different rider: ask the server again
       this.giftMsg = '';
@@ -129,8 +130,11 @@ export class SettingsUI {
     else if (t === 'chat') {
       if (account.ready && this.giftAccept === undefined) this._loadGiftSetting();
       body.innerHTML = this._chat();
-    }
-    else body.innerHTML = this._stats();
+    } else if (t === 'account') {
+      // The account panel (gamertag, sign in and out, delete account), and where the gift opt-out is.
+      body.innerHTML = '<div class="acct" id="settings-acct"></div><p class="muted small">Whether friends can send you gifts: <button class="btn sm" data-goto="chat">Chat &amp; gifts</button></p>';
+      this.onAccountTab?.(body.querySelector('#settings-acct'));
+    } else body.innerHTML = this._stats();
     this._wire(body);
   }
 
@@ -242,6 +246,7 @@ export class SettingsUI {
   }
 
   _wire(body) {
+    body.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => this.show(b.dataset.goto)));
     body.querySelectorAll('[data-rebind-key]').forEach((b) =>
       b.addEventListener('click', () => {
         const a = b.dataset.rebindKey;

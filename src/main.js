@@ -3,7 +3,8 @@ import { DT } from './sim/constants.js';
 import { Terrain } from './sim/terrain.js';
 import { Run } from './sim/run.js';
 import { EMPTY_INPUT } from './sim/rider.js';
-import { Input } from './input.js';
+import { Input, BINDINGS } from './input.js';
+import { keyName } from './ui/keynames.js';
 import { buildWorld } from './render/world.js';
 import { buildBasecamp } from './render/basecampScene.js';
 import { RiderModel, COM_HEIGHT } from './render/riderModel.js';
@@ -79,6 +80,10 @@ function hasWebGL2() {
 
 function boot() {
   $('pause-help').innerHTML = TUTORIAL_BTN + CONTROLS_HTML;
+  // Screens sit above the disclaimer footer, which wraps to more lines on narrow screens.
+  const footerHeight = () => document.documentElement.style.setProperty('--footer-h', `${$('footer').offsetHeight}px`);
+  footerHeight();
+  if (window.ResizeObserver) new ResizeObserver(footerHeight).observe($('footer'));
   if (!hasWebGL2()) {
     $('nogl').classList.remove('hidden');
     $('loading').classList.add('hidden');
@@ -2002,6 +2007,7 @@ function boot() {
       $('settings').classList.add('hidden');
       touchEditor.open();
     },
+    onAccountTab: (el) => mountAccount(el, { onPrivacy: () => openPage('privacy') }),
   });
   const touch = new TouchControls({ onPause: () => back() });
   const touchEditor = new TouchEditor({
@@ -2170,7 +2176,7 @@ function boot() {
       return;
     }
     state = 'replay';
-    if (thenClip) replayView.openClip();
+    if (thenClip) replayView.openClip(true);
   }
 
   async function openReplays() {
@@ -2329,6 +2335,15 @@ function boot() {
     state = 'lift';
     const names = { gondola: 'GONDOLA', ropeway: 'ROPEWAY', tbar: 'T-BAR' };
     $('lift-name').textContent = names[ride.type];
+    // How to skip, for what you're using (Enter and controller A skip too).
+    const dev = input.lastDevice;
+    const f = BINDINGS.keyboard.skipLift?.[0];
+    $('lift-hint').innerHTML =
+      dev === 'touch'
+        ? 'Tap here to skip · drag to look around'
+        : dev === 'pad'
+          ? '<kbd>A</kbd> skip'
+          : `<kbd>${f ? keyName(f) : 'Enter'}</kbd> skip · drag to look around`;
     $('liftbar').classList.remove('hidden');
   }
 
@@ -2587,7 +2602,7 @@ function boot() {
   function dynamicResolution(now) {
     const dt = (now - dyn.prev) / 1000; // the real gap (the game's own dt is clamped)
     dyn.prev = now;
-    if (settings.graphics !== 'performance' || (state !== 'riding' && state !== 'lift' && state !== 'finish')) {
+    if (settings.graphics !== 'performance' || perf.lockRes || (state !== 'riding' && state !== 'lift' && state !== 'finish')) {
       dyn.sum = dyn.n = 0;
       dyn.start = now;
       return;
@@ -2656,6 +2671,8 @@ function boot() {
       );
     }
     tutorial.show(state === 'riding');
+    // The first-visit offer belongs to Basecamp: gone once you head off without answering.
+    if (cards.tutorial && state !== 'basecamp') setCard('tutorial', null);
     const wantTouch = state === 'riding' && isTouchDevice() && !touchEditor.isOpen;
     if (wantTouch !== touch.enabled) {
       touch.show(wantTouch);
@@ -3016,8 +3033,9 @@ function boot() {
     get world() {
       return loaded?.world;
     },
-    // Benchmarks: fill the current park with n riders streaming poses like a full live room.
-    benchRoom(n) {
+    // Benchmarks: fill the current park with n riders streaming poses like a full
+    // live room, gap metres apart down the run.
+    benchRoom(n, gap = 37) {
       const L = loaded;
       if (!L) return;
       const T = L.terrain;
@@ -3028,7 +3046,7 @@ function boot() {
         const uid = `bench-${i}`;
         const look = { ...DEFAULT_LOOK, topColor: colors[i % colors.length], ride: i % 4 === 3 ? 'board' : 'skis' };
         remotesMap.set(uid, { uid, tag: `Rider ${i + 1}`, look, board: look.ride === 'board', status: 'riding', snaps: new Snapshots(), heard: performance.now(), trick: null, interval: 66 });
-        bots.push({ uid, s: T.park.startS + 10 + (i * 37) % Math.max(60, T.park.finishS - T.park.startS - 40), u: ((i * 7) % 11) - 5, v: 9 + (i % 5) });
+        bots.push({ uid, s: T.park.startS + 10 + (i * gap) % Math.max(60, T.park.finishS - T.park.startS - 40), u: ((i * 7) % 11) - 5, v: 9 + (i % 5) });
       }
       const fake = {
         room: { bench: true },

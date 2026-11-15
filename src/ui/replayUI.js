@@ -28,7 +28,7 @@ export class ReplayView {
     $('rp-cam').addEventListener('click', () => this.nextCam());
     $('rp-freeze').addEventListener('click', () => this.freeze());
     $('rp-save').addEventListener('click', () => this.save());
-    $('rp-clip').addEventListener('click', () => this.openClip());
+    $('rp-clip').addEventListener('click', () => this.openClip(false));
     $('rp-exit').addEventListener('click', () => this.close());
     $('rp-time').addEventListener('input', (e) => {
       this.t = (Number(e.target.value) / 1000) * this.data.duration;
@@ -205,12 +205,20 @@ export class ReplayView {
   }
 
   // ---------------------------------------------------------------- clips
+  // Closing the clip editor goes back to where it was opened from: the replay
+  // viewer, or (opened straight from results or the Replays list) out of the replay.
   closeClip() {
     $('clip').classList.add('hidden');
+    if (this.clipDirect) {
+      this.clipDirect = false;
+      this.close();
+      return;
+    }
     $('replaybar').classList.remove('hidden');
   }
 
-  openClip() {
+  openClip(direct = false) {
+    this.clipDirect = direct;
     this.playing = false;
     $('replaybar').classList.add('hidden');
     this.segments = autoEdit(this.data);

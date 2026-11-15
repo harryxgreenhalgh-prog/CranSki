@@ -82,7 +82,7 @@ h2,
 #minimap {
   position: absolute;
   left: 16px;
-  bottom: 40px;
+  bottom: calc(var(--footer-h, 30px) + 10px);
   width: 240px;
   height: 96px;
   background: rgba(9, 22, 44, 0.45);
@@ -92,7 +92,7 @@ h2,
 #speedbox {
   position: absolute;
   right: 18px;
-  bottom: 40px;
+  bottom: calc(var(--footer-h, 30px) + 10px);
   text-align: right;
   text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
 }
@@ -248,7 +248,7 @@ h2,
 #hint {
   position: absolute;
   left: 50%;
-  bottom: 44px;
+  bottom: calc(var(--footer-h, 30px) + 14px);
   transform: translateX(-50%);
   font-weight: 700;
   font-size: 14px;
@@ -267,7 +267,7 @@ h2,
 /* ---------------------------------------------------------------- overlays */
 .overlay {
   position: absolute;
-  inset: 0 0 30px 0;
+  inset: 0 0 var(--footer-h, 30px) 0;
   display: grid;
   place-items: center;
   padding: 16px;
@@ -604,7 +604,7 @@ h2 {
 /* ---------------------------------------------------------------- Basecamp */
 .layer {
   position: absolute;
-  inset: 0 0 30px 0;
+  inset: 0 0 var(--footer-h, 30px) 0;
   pointer-events: none;
 }
 
@@ -1042,10 +1042,6 @@ h2 {
   .ride-big {
     font-size: 30px !important;
   }
-  .brand,
-  #friends-btn {
-    display: none;
-  }
   .footlinks {
     font-size: 11px;
   }
@@ -1475,7 +1471,7 @@ body.touching #footer .credits {
 #replaybar {
   position: absolute;
   left: 50%;
-  bottom: 40px;
+  bottom: calc(var(--footer-h, 30px) + 10px);
   transform: translateX(-50%);
   width: min(760px, 96vw);
   background: var(--panel);
@@ -1586,7 +1582,7 @@ body.touching #footer .credits {
 /* ---------------------------------------------------------------- locker */
 #locker {
   position: absolute;
-  inset: 0 0 30px 0;
+  inset: 0 0 var(--footer-h, 30px) 0;
   pointer-events: none;
 }
 
@@ -1926,11 +1922,6 @@ body.touching #footer .credits {
   white-space: nowrap;
 }
 
-@media (max-width: 1400px) {
-  .topright .brand {
-    display: none;
-  }
-}
 
 /* ---------------------------------------------------------------- friends */
 .flist {
@@ -2722,7 +2713,7 @@ body.touching #roombadge {
 /* Item Shop (Phase 5) */
 #shop {
   position: absolute;
-  inset: 0 0 30px 0;
+  inset: 0 0 var(--footer-h, 30px) 0;
   pointer-events: none;
 }
 #shop > * {
@@ -2914,7 +2905,7 @@ body.touching #roombadge {
 /* ---------------------------------------------------------------- tutorial (src/ui/tutorial.js) */
 #tutorial {
   position: absolute;
-  inset: 0 0 30px 0;
+  inset: 0 0 var(--footer-h, 30px) 0;
   pointer-events: none;
   z-index: 3;
 }
@@ -3159,5 +3150,150 @@ body.touching #roombadge {
   }
   .tut-steps {
     margin: 6px 0 7px;
+  }
+}
+
+/* ---------------------------------------------------------------- Basecamp on smaller screens */
+/* The tabs shrink in steps; when they still don't fit they scroll sideways
+   (wheel or swipe), with a fade on the side that has more. */
+.tabs.more-right {
+  -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent);
+  mask-image: linear-gradient(90deg, #000 85%, transparent);
+}
+.tabs.more-left {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 15%);
+  mask-image: linear-gradient(90deg, transparent, #000 15%);
+}
+.tabs.more-left.more-right {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+}
+@media (max-width: 1240px) {
+  .tabs button {
+    font-size: 17px;
+    padding: 6px 8px;
+  }
+  .topright .brand {
+    display: none;
+  }
+}
+@media (max-width: 1060px) {
+  .tabs button {
+    font-size: 15px;
+    padding: 5px 7px;
+  }
+  .frost small {
+    display: none;
+  }
+}
+/* Narrow screens: the buttons on one row, the tabs on their own row below. */
+@media (max-width: 860px) and (min-height: 421px) {
+  .topbar {
+    flex-wrap: wrap;
+    row-gap: 4px;
+    padding: 8px 12px 6px;
+  }
+  .topright {
+    order: 1;
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .topright .brand {
+    display: block;
+    margin-right: auto;
+    font-size: 20px;
+  }
+  .tabs {
+    order: 2;
+    width: 100%;
+  }
+  .passcard {
+    top: 108px;
+  }
+}
+/* Short screens (laptops at 540-620 px tall, phones on their side): the modes
+   go two by two so they stay clear of the lift pass. */
+@media (max-height: 620px) {
+  .modes {
+    grid-template-columns: 1fr 1fr;
+    width: min(340px, 46vw);
+  }
+  .mode {
+    padding: 7px 9px;
+    font-size: 13px;
+  }
+  .modes .party {
+    grid-column: 1 / -1;
+  }
+  .passcard {
+    top: 64px;
+  }
+}
+@media (max-height: 420px) {
+  .topbar {
+    padding: 6px 10px;
+  }
+  .tabs button {
+    font-size: 14px;
+    padding: 4px 6px;
+  }
+  .pill {
+    padding: 4px 9px;
+    font-size: 13px;
+  }
+  .icon {
+    width: 30px;
+    height: 30px;
+  }
+  .frost {
+    padding: 4px 9px;
+  }
+  .passcard {
+    top: 50px;
+    width: 170px;
+    padding: 8px 10px;
+  }
+  #rider-name {
+    font-size: 20px;
+    margin: 4px 0;
+  }
+  .pc-code {
+    height: 14px;
+  }
+  .modes {
+    bottom: 34px;
+  }
+  .modes .party {
+    display: none;
+  }
+  .ride-big {
+    bottom: 40px;
+    font-size: 26px !important;
+    padding: 8px 22px !important;
+  }
+}
+@media (max-width: 860px) and (min-height: 421px) {
+  .passcard {
+    top: 118px;
+  }
+}
+/* Phones held upright: no room for the logo, and smaller buttons. */
+@media (max-width: 480px) {
+  .topright {
+    gap: 5px;
+  }
+  .topright .brand {
+    display: none;
+  }
+  .pill {
+    padding: 4px 9px;
+    font-size: 13px;
+  }
+  .icon {
+    width: 32px;
+    height: 32px;
+  }
+  .frost {
+    padding: 4px 8px;
   }
 }

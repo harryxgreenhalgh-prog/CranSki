@@ -10,8 +10,9 @@ import { STRIDE, frameRider, placeRider, poseFor } from './pose.js';
 import { textTexture } from './textTexture.js';
 import { makeCrown } from './crown.js';
 
-// Full models at once, and how near they must be (fewer in Performance mode).
-const FULL = { performance: { max: 3, dist: 45 }, default: { max: 6, dist: 70 } };
+// Full models at once, and how near they must be, per graphics level
+// (DESIGN.md: 20 on Ultra, 12 on High, 8 on Performance; the rest get stand-ins).
+const FULL = { ultra: { max: 20, dist: 110 }, high: { max: 12, dist: 70 }, performance: { max: 8, dist: 40 }, default: { max: 12, dist: 70 } };
 const TAG_DIST = 180;
 
 // Stand-in geometry, one per jacket/pants/ride combination (kept: they're tiny).
