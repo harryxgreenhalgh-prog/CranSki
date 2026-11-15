@@ -1440,9 +1440,14 @@ body.touching #minimap {
 }
 
 body.touching #speedbox {
-  top: 64px;
+  top: 8px;
   bottom: auto;
-  right: 12px;
+  right: 64px; /* beside the pause button, above the right-thumb buttons */
+}
+
+/* The tutorial card takes the top-left corner on touch screens. */
+body.touching.tut-on #minimap {
+  display: none;
 }
 
 body.touching #speed {
@@ -3295,5 +3300,117 @@ body.touching #roombadge {
   }
   .frost {
     padding: 4px 8px;
+  }
+}
+
+/* Short screens (phones on their side): the pause menu in two columns and the
+   park map beside its info panel, so nothing needs scrolling. */
+@media (max-height: 500px) and (min-width: 560px) {
+  #pause .panel.narrow {
+    width: min(620px, 100%);
+    grid-template-columns: 1fr 1fr;
+    padding: 12px 14px;
+    gap: 6px;
+  }
+  #pause .panel.narrow > h2,
+  #pause .panel.narrow > [data-act='resume'],
+  #pause .pause-music,
+  #pause #pause-help,
+  #pause .panel.narrow > p {
+    grid-column: 1 / -1;
+  }
+  #pause .panel.narrow > h2 {
+    margin: 0;
+    font-size: 24px;
+  }
+  #pause .panel.narrow > .btn {
+    padding: 6px 10px;
+    font-size: 14px;
+  }
+  #pause .panel.narrow > p {
+    margin: 0;
+  }
+  .overlay {
+    padding: 8px;
+  }
+  .mapwrap {
+    grid-template-columns: 1fr 230px;
+    gap: 8px;
+  }
+  #map-svg {
+    max-height: calc(100vh - var(--footer-h, 30px) - 20px);
+  }
+  .mapside.panel {
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+  .mapside h2 {
+    font-size: 20px;
+    margin: 0 0 2px;
+  }
+  .mapside .breakdown td {
+    padding: 1px 4px;
+    line-height: 1.25;
+  }
+  #map-purpose {
+    display: none;
+  }
+  .mapwrap {
+    align-items: start;
+  }
+}
+
+/* The Locker's Save and Back stay in reach while the choices scroll. */
+.lk-right .buttons {
+  position: sticky;
+  bottom: -24px;
+  margin: 10px -24px -24px;
+  padding: 10px 24px 14px;
+  background: linear-gradient(180deg, rgba(9, 22, 44, 0), var(--panel) 30%);
+}
+@media (max-height: 500px) and (min-width: 560px) {
+  .lk-left {
+    left: 8px;
+    right: auto;
+    top: 8px;
+    bottom: 8px;
+    width: 190px;
+    overflow-y: auto;
+  }
+  .lk-left h2 {
+    margin: 0 0 4px;
+    font-size: 22px;
+  }
+  #locker-slots {
+    grid-auto-flow: row;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    overflow: visible;
+  }
+  #locker-slots button {
+    padding: 5px 6px;
+    font-size: 12px;
+  }
+  .lk-right {
+    top: 8px;
+    bottom: 8px;
+    left: auto;
+    right: 8px;
+    width: min(340px, 48vw);
+    height: auto;
+    padding: 12px;
+  }
+  .lk-right .buttons {
+    bottom: -12px;
+    margin: 8px -12px -12px;
+    padding: 8px 12px 10px;
+  }
+}
+/* Touch-first devices (phones, tablets) have no keyboard: hide the key hints on buttons. */
+@media (pointer: coarse) {
+  .btn kbd,
+  .ride-big kbd,
+  .keyhint {
+    display: none;
   }
 }

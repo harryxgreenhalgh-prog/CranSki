@@ -1,5 +1,4 @@
-// Text pages shown in the modal: About, How to play, Privacy, Credits, Updates,
-// and the tabs that need online play.
+// Text pages shown in the modal: About, How to play, Privacy, Credits, Updates.
 import { CONTROLS_HTML, TUTORIAL_BTN } from './hud.js';
 import { TRACKS } from '../audio/music.js';
 import { SCENES } from './loading.js';
@@ -183,12 +182,6 @@ export const PAGES = {
     title: 'Updates',
     html: () =>
       UPDATES.map((u) => `<h3>${u.title.toUpperCase()}</h3><ul>${u.items.map((i) => `<li>${i}</li>`).join('')}</ul>`).join(''),
-  },
-  online: {
-    title: 'Coming later',
-    html: `
-      <p>The Item Shop, the Season Pass and multiplayer (live rooms, duels and parties) arrive in later phases.</p>
-      <p>Available now: sign in with an email link for cloud saves, friends, FROST and leaderboards where the server re-rides each run to check the score. Solo riding still works without an account.</p>`,
   },
 };
 

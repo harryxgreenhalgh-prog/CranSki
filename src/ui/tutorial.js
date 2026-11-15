@@ -141,11 +141,14 @@ export class Tutorial {
     this.active = false;
     this.touchIds = [];
     this.root.classList.add('hidden');
+    globalThis.document?.body.classList.remove('tut-on');
   }
 
   // Show or hide with the riding view (hidden while paused or in menus).
   show(on) {
-    this.root.classList.toggle('hidden', !on || !this.active);
+    const visible = on && this.active;
+    this.root.classList.toggle('hidden', !visible);
+    globalThis.document?.body.classList.toggle('tut-on', visible);
   }
 
   // A fresh run from the top.

@@ -51,7 +51,7 @@ export class Basecamp {
     this._edges = edges;
     $('gear-btn').addEventListener('click', onGear);
     $('music-btn').addEventListener('click', onMusic);
-    $('friends-btn').addEventListener('click', () => (onFriends ? onFriends() : onPage('online')));
+    $('friends-btn').addEventListener('click', () => onFriends());
     $('account-btn').addEventListener('click', onAccount);
     $('season-card').addEventListener('click', () => onTab('pass'));
     $('season-card').addEventListener('keydown', (e) => (e.key === 'Enter' || e.key === ' ') && onTab('pass'));

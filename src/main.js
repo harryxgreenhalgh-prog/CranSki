@@ -258,7 +258,6 @@ function boot() {
       else if (tab === 'leaderboard') openBoard();
       else if (tab === 'pass') openPass();
       else if (tab === 'shop') openShop();
-      else openPage('online');
     },
     onPage: (p) => openPage(p),
     onAccount: () => openAccount(),
@@ -2375,7 +2374,12 @@ function boot() {
     restartHold = 0;
     finish = null;
     if (tutorial.active) tutorial.newRun();
-    else L.hud.hint(`${L.meta.name} · W tuck · Space pop`, 3);
+    else {
+      const dev = input.lastDevice;
+      const k = (a) => keyName(BINDINGS.keyboard[a]?.[0]);
+      const how = dev === 'touch' ? 'stick up to tuck · POP to jump' : dev === 'pad' ? 'RT tuck · A pop' : `${k('tuck')} tuck · ${k('pop')} pop`;
+      L.hud.hint(`${L.meta.name} · ${how}`, 3);
+    }
     recorder.reset();
     ghost = null;
     $('ghosttag').classList.add('hidden');
