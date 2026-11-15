@@ -17,6 +17,9 @@ export class ReplayView {
     this.model = model;
     this.onExit = onExit;
     this.open_ = false;
+    // The control bar fades while a replay plays untouched; any input brings it back.
+    this.lastInput = 0;
+    for (const ev of ['pointermove', 'pointerdown', 'keydown', 'wheel']) window.addEventListener(ev, () => (this.lastInput = performance.now()), { passive: true });
     this.v = {};
     this.pivot = new THREE.Vector3();
     this.quat = new THREE.Quaternion();
@@ -198,6 +201,7 @@ export class ReplayView {
       this.lastEventT = this.t;
     }
     this.L.hud.update({ rider: { speed: this.v.speed || 0, pos: this.pos, mode: this.v.mode }, score: { total: 0 }, line: { empty: true } }, dt, true);
+    $('replaybar').classList.toggle('idle', this.playing && performance.now() - this.lastInput > 3000);
     this.drawAt(this.t, dt, time);
     $('rp-play').textContent = this.playing ? '❚❚' : '▶';
     $('rp-time').value = String(Math.round((this.t / Math.max(0.01, this.data.duration)) * 1000));

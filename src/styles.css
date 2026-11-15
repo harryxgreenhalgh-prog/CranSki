@@ -1488,6 +1488,14 @@ body.touching #footer .credits {
   z-index: 3;
 }
 
+#replaybar {
+  transition: opacity 0.4s;
+}
+/* Playing and untouched for 3 s: out of the picture until the mouse moves or a key is pressed. */
+#replaybar.idle:not(:hover):not(:focus-within) {
+  opacity: 0;
+}
+
 #rp-title {
   font-family: var(--brush);
   font-style: italic;

@@ -27,6 +27,7 @@ Supabase and the in-browser `?localnet` room server, so nothing touched the real
 | Tutorial offer | Stayed on screen during a run if a new player ignored it | Cleared when you leave Basecamp |
 | Live rooms | Every graphics level showed 6 full-detail riders (DESIGN.md: 20 Ultra, 12 High, 8 Performance) | Per-level counts as designed |
 | Pages | An old "Coming later" page still said the Shop, Pass and multiplayer were coming | Removed (nothing linked to it any more) |
+| Replays | On smaller screens the control bar covered about a third of the picture, hiding the rider in some cameras | The bar fades out while a replay plays untouched and comes back on any mouse, key or touch |
 
 ## Checked, desktop (1280×720, keyboard and mouse)
 
@@ -82,7 +83,7 @@ Supabase and the in-browser `?localnet` room server, so nothing touched the real
 - ✓ Riding to the finish: the rider turns to the cameras beside the run summary
 - ✓ Results: total, breakdown, top speed, airtime, best trick
 - ✓ Save replay
-- ✓ Watch replay: play and pause, seek, all 7 cameras (Broadcast, Cinematic, Follow, Action cam, Helmet, Drone, Free), freeze, exit
+- ✓ Watch replay: play and pause, seek, all 7 cameras (Broadcast, Cinematic, Follow, Action cam, Helmet, Drone, Free), freeze, exit; the bar fades while playing untouched
 - ✓ Clip: sections, format, camera, trick text; close returns to results
 - ✓ Ride again goes back to the lift
 - ✓ Replays tab lists the run
@@ -110,7 +111,34 @@ every tab and button reachable, nothing overlapping.
 
 ## Online and multiplayer (re-run of the earlier end-to-end tests)
 
-(Re-running now: results to follow in the next commit.)
+Each earlier end-to-end test was run again against this build: two to four riders in tabs of one
+browser, signed in through a mocked Supabase, with the `?localnet` room server.
+
+| Test | What it covers | Result |
+| --- | --- | --- |
+| Account | Email-link sign-in (no password), gamertag rules and availability, signing out | ✓ |
+| Cloud saves | Settings, bests and Locker merge between devices; a change syncs | ✓ |
+| Sign-in code | The one-time code as well as the link | ✓ |
+| Friends | Search, request, accept, online status and where they are | ✓ |
+| Privacy | The Privacy page; deleting your account (type DELETE to confirm) | ✓ |
+| Idle rules | 1 min paused, 2 min with no input, then back to Basecamp after a countdown | ✓ |
+| Live rooms | Two riders see each other, roster, room counts | ✓ |
+| Chat | Filtering (crude words starred, hate words blocked), quick phrases, mute and report from the roster | ✓ (the test needed updating: it pressed Esc on the lift, which rightly takes you back to Basecamp) |
+| Friendly 1v1 duel | Challenge, 3-2-1, alternate drops, live spectating, result, leaving mid-duel | ✓ |
+| Party match | Private free-for-all on APEX for a party of 3 | ✓ |
+| CRANSKI CUP | Free-for-all over APEX, THE YARD and BIG AIR, total score | ✓ |
+| Gifting | Send a gift to a friend; turning gifts off stops them | ✓ |
+| Item Shop | Daily items, buy an item and a set, wear it, return within 24 h | ✓ |
+| Season Pass | Level and XP, buying premium with FROST, wearing a reward | ✓ |
+| Seasons | A season change, prizes, last season's hall of fame, the RECORD alert | ✓ |
+| Ranked 1v1 | Queue, match found, four alternate runs, result | ✓ |
+| Ranked 2v2 | Two pairs, team scores while watching, four runs | ✓ |
+| Leaderboard check | A run ridden in the browser, re-ridden by the real `submit-run` handler: identical score | ✓ |
+| FROST | Reward for a finished run, paid once, checked by the server | ✓ |
+
+**Replay cameras** (BIG AIR with a 360, paused at the best air): Broadcast, Cinematic, Follow,
+Action cam, Drone and Free all have the rider in frame; Helmet is first person, so the rider's
+own body is hidden, as it should be.
 
 ## Not checkable here
 
