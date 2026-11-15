@@ -1,6 +1,7 @@
 // Settings panel: Controls (rebinding), Graphics, Camera, Sound, Stats.
 import { settings, saveSettings, resetSection } from '../settings.js';
 import { BINDINGS } from '../input.js';
+import { PAD_NAMES, keyName } from './keynames.js';
 import { touchSettings } from './touch.js';
 import { account } from '../online/account.js';
 import { gifts } from '../online/gifts.js';
@@ -41,14 +42,7 @@ const PAD_LABELS = {
   pause: 'Pause',
 };
 
-// Standard Gamepad button names (Xbox labels).
-export const PAD_NAMES = ['A', 'B', 'X', 'Y', 'LB', 'RB', 'LT', 'RT', 'View', 'Menu', 'L-stick', 'R-stick', 'D-up', 'D-down', 'D-left', 'D-right', 'Home'];
-
-const NICE = { ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', ShiftLeft: 'Shift', ShiftRight: 'R Shift', ControlLeft: 'Ctrl', ControlRight: 'R Ctrl', AltLeft: 'Alt', AltRight: 'R Alt', Escape: 'Esc', Space: 'Space', Enter: 'Enter' };
-function keyName(code) {
-  if (!code) return '—';
-  return NICE[code] || code.replace(/^Key/, '').replace(/^Digit/, '').replace(/^Numpad/, 'Num ');
-}
+export { PAD_NAMES, keyName };
 
 // A controller drawn in SVG; buttons light up as you press them.
 const PAD_SVG = `
@@ -67,7 +61,8 @@ const PAD_SVG = `
 </svg>`;
 
 export class SettingsUI {
-  constructor({ onClose, onTouchEditor }) {
+  constructor({ onClose, onTouchEditor, onAccountTab }) {
+    this.onAccountTab = onAccountTab;
     account.onChange(() => {
       this.giftAccept = undefined; // a different rider: ask the server again
       this.giftMsg = '';
@@ -135,8 +130,11 @@ export class SettingsUI {
     else if (t === 'chat') {
       if (account.ready && this.giftAccept === undefined) this._loadGiftSetting();
       body.innerHTML = this._chat();
-    }
-    else body.innerHTML = this._stats();
+    } else if (t === 'account') {
+      // The account panel (gamertag, sign in and out, delete account), and where the gift opt-out is.
+      body.innerHTML = '<div class="acct" id="settings-acct"></div><p class="muted small">Whether friends can send you gifts: <button class="btn sm" data-goto="chat">Chat &amp; gifts</button></p>';
+      this.onAccountTab?.(body.querySelector('#settings-acct'));
+    } else body.innerHTML = this._stats();
     this._wire(body);
   }
 
@@ -248,6 +246,7 @@ export class SettingsUI {
   }
 
   _wire(body) {
+    body.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => this.show(b.dataset.goto)));
     body.querySelectorAll('[data-rebind-key]').forEach((b) =>
       b.addEventListener('click', () => {
         const a = b.dataset.rebindKey;

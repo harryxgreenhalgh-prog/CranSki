@@ -230,6 +230,14 @@ export class TouchControls {
     return inp;
   }
 
+  // Make the controls a prompt is talking about pulse (ids from BUTTONS, or
+  // 'stick'); none to clear.
+  highlight(ids = []) {
+    const want = new Set(ids);
+    for (const [id, b] of Object.entries(this.els || {})) b.el.classList.toggle('tut', want.has(id));
+    $('stick-base')?.classList.toggle('tut', want.has('stick'));
+  }
+
   // Haptic tick on every pop and landing.
   haptic(ms = 12) {
     if (this.enabled && navigator.vibrate) navigator.vibrate(ms);

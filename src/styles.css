@@ -82,7 +82,7 @@ h2,
 #minimap {
   position: absolute;
   left: 16px;
-  bottom: 40px;
+  bottom: calc(var(--footer-h, 30px) + 10px);
   width: 240px;
   height: 96px;
   background: rgba(9, 22, 44, 0.45);
@@ -92,7 +92,7 @@ h2,
 #speedbox {
   position: absolute;
   right: 18px;
-  bottom: 40px;
+  bottom: calc(var(--footer-h, 30px) + 10px);
   text-align: right;
   text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
 }
@@ -248,7 +248,7 @@ h2,
 #hint {
   position: absolute;
   left: 50%;
-  bottom: 44px;
+  bottom: calc(var(--footer-h, 30px) + 14px);
   transform: translateX(-50%);
   font-weight: 700;
   font-size: 14px;
@@ -267,7 +267,7 @@ h2,
 /* ---------------------------------------------------------------- overlays */
 .overlay {
   position: absolute;
-  inset: 0 0 30px 0;
+  inset: 0 0 var(--footer-h, 30px) 0;
   display: grid;
   place-items: center;
   padding: 16px;
@@ -604,7 +604,7 @@ h2 {
 /* ---------------------------------------------------------------- Basecamp */
 .layer {
   position: absolute;
-  inset: 0 0 30px 0;
+  inset: 0 0 var(--footer-h, 30px) 0;
   pointer-events: none;
 }
 
@@ -1042,10 +1042,6 @@ h2 {
   .ride-big {
     font-size: 30px !important;
   }
-  .brand,
-  #friends-btn {
-    display: none;
-  }
   .footlinks {
     font-size: 11px;
   }
@@ -1444,9 +1440,14 @@ body.touching #minimap {
 }
 
 body.touching #speedbox {
-  top: 64px;
+  top: 8px;
   bottom: auto;
-  right: 12px;
+  right: 64px; /* beside the pause button, above the right-thumb buttons */
+}
+
+/* The tutorial card takes the top-left corner on touch screens. */
+body.touching.tut-on #minimap {
+  display: none;
 }
 
 body.touching #speed {
@@ -1475,7 +1476,7 @@ body.touching #footer .credits {
 #replaybar {
   position: absolute;
   left: 50%;
-  bottom: 40px;
+  bottom: calc(var(--footer-h, 30px) + 10px);
   transform: translateX(-50%);
   width: min(760px, 96vw);
   background: var(--panel);
@@ -1485,6 +1486,14 @@ body.touching #footer .credits {
   display: grid;
   gap: 6px;
   z-index: 3;
+}
+
+#replaybar {
+  transition: opacity 0.4s;
+}
+/* Playing and untouched for 3 s: out of the picture until the mouse moves or a key is pressed. */
+#replaybar.idle:not(:hover):not(:focus-within) {
+  opacity: 0;
 }
 
 #rp-title {
@@ -1586,7 +1595,7 @@ body.touching #footer .credits {
 /* ---------------------------------------------------------------- locker */
 #locker {
   position: absolute;
-  inset: 0 0 30px 0;
+  inset: 0 0 var(--footer-h, 30px) 0;
   pointer-events: none;
 }
 
@@ -1926,11 +1935,6 @@ body.touching #footer .credits {
   white-space: nowrap;
 }
 
-@media (max-width: 1400px) {
-  .topright .brand {
-    display: none;
-  }
-}
 
 /* ---------------------------------------------------------------- friends */
 .flist {
@@ -2722,7 +2726,7 @@ body.touching #roombadge {
 /* Item Shop (Phase 5) */
 #shop {
   position: absolute;
-  inset: 0 0 30px 0;
+  inset: 0 0 var(--footer-h, 30px) 0;
   pointer-events: none;
 }
 #shop > * {
@@ -2909,4 +2913,512 @@ body.touching #roombadge {
 }
 .hall td:first-child {
   white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- tutorial (src/ui/tutorial.js) */
+#tutorial {
+  position: absolute;
+  inset: 0 0 var(--footer-h, 30px) 0;
+  pointer-events: none;
+  z-index: 3;
+}
+#tutorial.hidden,
+#tutorial .hidden {
+  display: none;
+}
+.tut-card {
+  position: absolute;
+  left: 16px;
+  top: 16px;
+  width: min(340px, calc(100vw - 32px));
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
+  border-left: 4px solid var(--blue);
+  border-radius: 12px;
+  padding: 10px 12px 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+.tut-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.tut-skip {
+  pointer-events: auto;
+  background: none;
+  border: 1px solid var(--panel-line);
+  border-radius: 999px;
+  color: var(--muted);
+  font: inherit;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.tut-skip:hover,
+.tut-skip:focus-visible {
+  color: var(--paper);
+  border-color: var(--muted);
+}
+.tut-steps {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 10px;
+  padding: 0;
+}
+.tut-steps li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  padding: 3px 9px 3px 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+.tut-steps li i {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+}
+.tut-steps li.ok {
+  background: rgba(56, 224, 140, 0.18);
+  color: var(--paper);
+}
+.tut-steps li.ok i {
+  border-color: var(--green);
+  background: var(--green) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='%230d1b2a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px no-repeat;
+}
+.tut-steps li.flash {
+  animation: tut-pop 0.9s ease-out;
+}
+@keyframes tut-pop {
+  0% {
+    transform: scale(1.35);
+    box-shadow: 0 0 0 0 rgba(56, 224, 140, 0.7);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 14px rgba(56, 224, 140, 0);
+  }
+}
+.tut-prompt {
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+.tut-prompt.urgent {
+  color: #ffd23f;
+  font-family: var(--brush);
+  font-style: italic;
+  font-size: 24px;
+  animation: tut-blink 0.5s ease-in-out infinite alternate;
+}
+.tut-prompt.good {
+  color: var(--green);
+}
+.tut-prompt.bad {
+  color: #ffb4a0;
+}
+@keyframes tut-blink {
+  to {
+    opacity: 0.6;
+  }
+}
+.tut-note {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.tut-note:empty {
+  display: none;
+}
+/* Button pictures: keys, controller buttons (Xbox colours) and touch buttons. */
+.tut-prompt kbd.tk {
+  margin: 0 2px;
+  font-size: 0.85em;
+  padding: 2px 8px;
+  border-bottom-width: 3px;
+}
+.pb {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.6em;
+  height: 1.6em;
+  padding: 0 0.4em;
+  border-radius: 999px;
+  background: #2b3647;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  font-size: 0.8em;
+  font-weight: 900;
+  vertical-align: middle;
+  margin: 0 2px;
+}
+.pb-A {
+  background: #2f9e44;
+}
+.pb-B {
+  background: #d9363e;
+}
+.pb-X {
+  background: #1c6fd9;
+}
+.pb-Y {
+  background: #d6a800;
+  color: var(--ink);
+}
+.pb-LB,
+.pb-RB,
+.pb-LT,
+.pb-RT {
+  border-radius: 6px;
+}
+.pb-stick {
+  font-weight: 700;
+}
+.tb {
+  display: inline-grid;
+  place-items: center;
+  padding: 0 0.6em;
+  height: 1.7em;
+  border-radius: 999px;
+  background: rgba(255, 122, 47, 0.8);
+  border: 2px solid #fff;
+  font-size: 0.78em;
+  font-weight: 900;
+  vertical-align: middle;
+  margin: 0 2px;
+}
+/* The touch control a prompt mentions pulses. */
+.tbtn.tut,
+#stick-base.tut {
+  animation: tut-ring 1s ease-out infinite;
+  border-color: #ffd23f;
+}
+@keyframes tut-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 210, 63, 0.8);
+  }
+  100% {
+    box-shadow: 0 0 0 18px rgba(255, 210, 63, 0);
+  }
+}
+.tut-done {
+  position: absolute;
+  left: 50%;
+  top: 52px;
+  transform: translateX(-50%);
+  width: min(420px, calc(100vw - 32px));
+  text-align: center;
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
+  border-top: 4px solid var(--green);
+  border-radius: 14px;
+  padding: 16px 18px;
+  pointer-events: auto;
+}
+.tut-done b {
+  font-family: var(--brush);
+  font-style: italic;
+  font-size: 30px;
+  color: var(--green);
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.35);
+}
+.tut-done p {
+  margin: 8px 0 12px;
+  color: var(--muted);
+}
+.tut-done div {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+.tut-start {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+@media (max-width: 640px), (max-height: 420px) {
+  .tut-card {
+    left: 8px;
+    top: 8px;
+    width: min(270px, calc(100vw - 16px));
+    padding: 7px 9px 9px;
+  }
+  .tut-prompt {
+    font-size: 14px;
+  }
+  .tut-prompt.urgent {
+    font-size: 18px;
+  }
+  .tut-steps {
+    margin: 6px 0 7px;
+  }
+}
+
+/* ---------------------------------------------------------------- Basecamp on smaller screens */
+/* The tabs shrink in steps; when they still don't fit they scroll sideways
+   (wheel or swipe), with a fade on the side that has more. */
+.tabs.more-right {
+  -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent);
+  mask-image: linear-gradient(90deg, #000 85%, transparent);
+}
+.tabs.more-left {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 15%);
+  mask-image: linear-gradient(90deg, transparent, #000 15%);
+}
+.tabs.more-left.more-right {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+}
+@media (max-width: 1240px) {
+  .tabs button {
+    font-size: 17px;
+    padding: 6px 8px;
+  }
+  .topright .brand {
+    display: none;
+  }
+}
+@media (max-width: 1060px) {
+  .tabs button {
+    font-size: 15px;
+    padding: 5px 7px;
+  }
+  .frost small {
+    display: none;
+  }
+}
+/* Narrow screens: the buttons on one row, the tabs on their own row below. */
+@media (max-width: 860px) and (min-height: 421px) {
+  .topbar {
+    flex-wrap: wrap;
+    row-gap: 4px;
+    padding: 8px 12px 6px;
+  }
+  .topright {
+    order: 1;
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .topright .brand {
+    display: block;
+    margin-right: auto;
+    font-size: 20px;
+  }
+  .tabs {
+    order: 2;
+    width: 100%;
+  }
+  .passcard {
+    top: 108px;
+  }
+}
+/* Short screens (laptops at 540-620 px tall, phones on their side): the modes
+   go two by two so they stay clear of the lift pass. */
+@media (max-height: 620px) {
+  .modes {
+    grid-template-columns: 1fr 1fr;
+    width: min(340px, 46vw);
+  }
+  .mode {
+    padding: 7px 9px;
+    font-size: 13px;
+  }
+  .modes .party {
+    grid-column: 1 / -1;
+  }
+  .passcard {
+    top: 64px;
+  }
+}
+@media (max-height: 420px) {
+  .topbar {
+    padding: 6px 10px;
+  }
+  .tabs button {
+    font-size: 14px;
+    padding: 4px 6px;
+  }
+  .pill {
+    padding: 4px 9px;
+    font-size: 13px;
+  }
+  .icon {
+    width: 30px;
+    height: 30px;
+  }
+  .frost {
+    padding: 4px 9px;
+  }
+  .passcard {
+    top: 50px;
+    width: 170px;
+    padding: 8px 10px;
+  }
+  #rider-name {
+    font-size: 20px;
+    margin: 4px 0;
+  }
+  .pc-code {
+    height: 14px;
+  }
+  .modes {
+    bottom: 34px;
+  }
+  .modes .party {
+    display: none;
+  }
+  .ride-big {
+    bottom: 40px;
+    font-size: 26px !important;
+    padding: 8px 22px !important;
+  }
+}
+@media (max-width: 860px) and (min-height: 421px) {
+  .passcard {
+    top: 118px;
+  }
+}
+/* Phones held upright: no room for the logo, and smaller buttons. */
+@media (max-width: 480px) {
+  .topright {
+    gap: 5px;
+  }
+  .topright .brand {
+    display: none;
+  }
+  .pill {
+    padding: 4px 9px;
+    font-size: 13px;
+  }
+  .icon {
+    width: 32px;
+    height: 32px;
+  }
+  .frost {
+    padding: 4px 8px;
+  }
+}
+
+/* Short screens (phones on their side): the pause menu in two columns and the
+   park map beside its info panel, so nothing needs scrolling. */
+@media (max-height: 500px) and (min-width: 560px) {
+  #pause .panel.narrow {
+    width: min(620px, 100%);
+    grid-template-columns: 1fr 1fr;
+    padding: 12px 14px;
+    gap: 6px;
+  }
+  #pause .panel.narrow > h2,
+  #pause .panel.narrow > [data-act='resume'],
+  #pause .pause-music,
+  #pause #pause-help,
+  #pause .panel.narrow > p {
+    grid-column: 1 / -1;
+  }
+  #pause .panel.narrow > h2 {
+    margin: 0;
+    font-size: 24px;
+  }
+  #pause .panel.narrow > .btn {
+    padding: 6px 10px;
+    font-size: 14px;
+  }
+  #pause .panel.narrow > p {
+    margin: 0;
+  }
+  .overlay {
+    padding: 8px;
+  }
+  .mapwrap {
+    grid-template-columns: 1fr 230px;
+    gap: 8px;
+  }
+  #map-svg {
+    max-height: calc(100vh - var(--footer-h, 30px) - 20px);
+  }
+  .mapside.panel {
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+  .mapside h2 {
+    font-size: 20px;
+    margin: 0 0 2px;
+  }
+  .mapside .breakdown td {
+    padding: 1px 4px;
+    line-height: 1.25;
+  }
+  #map-purpose {
+    display: none;
+  }
+  .mapwrap {
+    align-items: start;
+  }
+}
+
+/* The Locker's Save and Back stay in reach while the choices scroll. */
+.lk-right .buttons {
+  position: sticky;
+  bottom: -24px;
+  margin: 10px -24px -24px;
+  padding: 10px 24px 14px;
+  background: linear-gradient(180deg, rgba(9, 22, 44, 0), var(--panel) 30%);
+}
+@media (max-height: 500px) and (min-width: 560px) {
+  .lk-left {
+    left: 8px;
+    right: auto;
+    top: 8px;
+    bottom: 8px;
+    width: 190px;
+    overflow-y: auto;
+  }
+  .lk-left h2 {
+    margin: 0 0 4px;
+    font-size: 22px;
+  }
+  #locker-slots {
+    grid-auto-flow: row;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    overflow: visible;
+  }
+  #locker-slots button {
+    padding: 5px 6px;
+    font-size: 12px;
+  }
+  .lk-right {
+    top: 8px;
+    bottom: 8px;
+    left: auto;
+    right: 8px;
+    width: min(340px, 48vw);
+    height: auto;
+    padding: 12px;
+  }
+  .lk-right .buttons {
+    bottom: -12px;
+    margin: 8px -12px -12px;
+    padding: 8px 12px 10px;
+  }
+}
+/* Touch-first devices (phones, tablets) have no keyboard: hide the key hints on buttons. */
+@media (pointer: coarse) {
+  .btn kbd,
+  .ride-big kbd,
+  .keyhint {
+    display: none;
+  }
 }

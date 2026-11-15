@@ -1,6 +1,5 @@
-// Text pages shown in the modal: About, How to play, Privacy, Credits, Updates,
-// and the tabs that need online play.
-import { CONTROLS_HTML } from './hud.js';
+// Text pages shown in the modal: About, How to play, Privacy, Credits, Updates.
+import { CONTROLS_HTML, TUTORIAL_BTN } from './hud.js';
 import { TRACKS } from '../audio/music.js';
 import { SCENES } from './loading.js';
 
@@ -8,6 +7,16 @@ export const DISCLAIMER =
   'CranSki is an independent fan-made game inspired by Cork7. It is not affiliated with, endorsed by, or connected to Cork7 or its developers. Not affiliated with SSX, EA, X Games or Red Bull.';
 
 export const UPDATES = [
+  {
+    title: 'Launch polish',
+    items: [
+      'A new rider: one smooth low-poly body on a skeleton, so knees, elbows and shoulders bend naturally. Your back rounds in a tuck, you cheer at the finish, wave and fix your goggles in Basecamp, and flail when you crash.',
+      'Parks dressed for launch: chalets in BELLEVUE, floodlight masts, rail legs with base plates and pads, branded boxes, and a snow groomer, ski rack, snowman, event tent, speakers, flags and safety fencing at the start and finish.',
+      'Ready for launch: every screen and button checked on laptops, phones and tablets (and fixed where it was cut off or hard to reach), and the About, Privacy and Credits pages brought up to date.',
+      'A first-time tutorial on BIG AIR: pop, spin, grab and land clean, one prompt at a time with the right buttons for your keyboard, controller or touch screen. New riders are offered it in Basecamp, and anyone can start it from How to play.',
+      'Faster on school laptops: Performance mode draws far less (BELLEVUE went from over 900 draw calls to under 200), uses a lighter mountain skyline and simpler distant trees, and scales the resolution in a few steady steps to hold 30 fps. Full rooms are smoother too, and Basecamp opens after a much smaller download, with each park\'s scenery fetched only when you ride it.',
+    ],
+  },
   {
     title: 'Phase 5 · Ranked and progression',
     items: [
@@ -69,21 +78,24 @@ export const PAGES = {
   about: {
     title: 'About CranSki',
     html: `
-      <p>CranSki is a free park-skiing trick game that runs in your browser. Ride one of seven terrain parks, pop off kickers and rails, and land spins, corks, flips and grabs that the game names and scores from what you actually did.</p>
-      <p>Everything here (code, shapes, sounds and music) was made for CranSki.</p>
+      <p>CranSki is a free park-skiing trick game that runs in your browser. Ride one of seven terrain parks, pop off kickers and rails, and land spins, corks, flips, grabs and butters that the game names and scores from what you actually did. There's no button per trick.</p>
+      <p>New to it? Start the BIG AIR tutorial from <b>How to play</b>: it teaches popping, spinning, grabbing and landing clean in about two minutes, with prompts for your keyboard, controller or touch screen.</p>
+      <p>Playing solo needs no account. Signing in (with an email link, never a password) adds cloud saves, friends, leaderboards, live rooms, duels, parties, ranked matches, FROST and the Season Pass. FROST is earned only by riding: nothing in CranSki costs real money.</p>
+      <p>The code, the rider, the park props, the trees, the lifts, the sounds and the music were all made for CranSki. Three scenery models (the start hut, the finish gantry and the mountains) are other people's work used under Creative Commons Attribution: see <b>Credits</b>.</p>
       <h3>DISCLAIMER</h3>
       <p>${DISCLAIMER}</p>`,
   },
-  howto: { title: 'How to play', html: `<div class="howto">${CONTROLS_HTML}</div>` },
+  howto: { title: 'How to play', html: `<div class="howto">${TUTORIAL_BTN}${CONTROLS_HTML}</div>` },
   privacy: {
     title: 'Privacy',
     html: `
-      <p>Playing solo needs no account and sends nothing to any server. The game is static files on GitHub Pages, and your progress stays in this browser. Signing in is optional; you only need it for cloud saves, friends, leaderboards, multiplayer and FROST.</p>
+      <p>Playing solo needs no account, and your progress stays in this browser. Signing in is optional; you only need it for cloud saves, friends, leaderboards, multiplayer and FROST.</p>
+      <p>Even signed out, the game does make a few requests: it downloads its files from GitHub Pages (GitHub keeps ordinary web server logs, see <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener">GitHub's privacy statement</a>), and it asks CranSki's server for public season information (the current season and who leads each park, for the crowns and RECORD alerts). Those requests carry nothing about you beyond what any web page request does.</p>
 
       <h3>ON THIS DEVICE</h3>
       <p>Kept in this browser (local storage and IndexedDB):</p>
       <ul>
-        <li>Your rider name, settings, Locker choices, personal bests and recent run summaries.</li>
+        <li>Your rider name, settings, Locker choices, personal bests, recent run summaries, and whether you've done or skipped the tutorial.</li>
         <li>Replays and best-run ghosts. They stay here. When you're signed in, each run you finish is also sent to the server (its inputs only) so it can check the score for the leaderboard and for FROST (see below).</li>
         <li>If you sign in: your sign-in session (so you stay signed in), when your cloud save last synced, and your <b>Appear offline</b> choice.</li>
       </ul>
@@ -139,21 +151,37 @@ export const PAGES = {
       <h3>LIBRARIES</h3>
       <p><a href="https://threejs.org" target="_blank" rel="noopener">Three.js</a>, MIT licence, for 3D rendering.<br>
       <a href="https://vite.dev" target="_blank" rel="noopener">Vite</a>, MIT licence, for building the site.<br>
-      <a href="https://github.com/supabase/supabase-js" target="_blank" rel="noopener">supabase-js</a>, MIT licence, for sign-in, cloud saves, friends and leaderboards (loaded only when you use them).</p>
+      <a href="https://github.com/supabase/supabase-js" target="_blank" rel="noopener">supabase-js</a>, MIT licence, for sign-in, cloud saves, friends, leaderboards, seasons and multiplayer (downloaded after the game starts, separately from it).<br>
+      <a href="https://github.com/zeux/meshoptimizer" target="_blank" rel="noopener">meshoptimizer</a>'s decoder, MIT licence, bundled with Three.js, for unpacking the compressed 3D models.</p>
+      <h3>TOOLS</h3>
+      <p><a href="https://www.blender.org" target="_blank" rel="noopener">Blender</a> (GPL; the models it makes are CranSki's own) runs the scripts that build the rider and park models, and <a href="https://gltf-transform.dev" target="_blank" rel="noopener">glTF Transform</a> (MIT) compresses them for the web.</p>
       <h3>MUSIC</h3>
       <p>Original soundtrack composed for CranSki and played live by an in-browser synthesiser (no recordings, no samples). Artist: CranSki.</p>
       <ol>${TRACKS.map((t) => `<li>${t.name}</li>`).join('')}</ol>
       <h3>SOUND EFFECTS</h3>
       <p>Snow, wind, rail grind, landings, the lift and the ringing ball are all synthesised in the browser for CranSki.</p>
+      <h3>3D MODELS MADE FOR CRANSKI</h3>
+      <p>Original work, built from code in Blender (the scripts are in <code>tools/blender/</code>) or in the game itself. No outside assets.</p>
+      <table class="ptable">
+        <thead><tr><th>Asset</th><th>What it is</th></tr></thead>
+        <tbody>
+          <tr><td><code>rider-body.glb</code></td><td>The rider's skinned body on one skeleton: jacket (two builds), sleeves, tee arms, hoods, pocket, baggy pants. Posed and animated live by the game (tucks, grabs, landings, cheering, waving, crashing).</td></tr>
+          <tr><td><code>rider.glb</code></td><td>Head, helmet, goggles, beanie, mittens, ski boots, twin-tip skis, poles, snowboard and board boots</td></tr>
+          <tr><td><code>props.glb</code></td><td>Chalets, floodlight masts, snow groomer, ski rack, speaker stack, event tent, feather flags, safety fence, rail legs and pads, snowman</td></tr>
+          <tr><td><code>trees.glb</code></td><td>Pine trees (snowy, dark and far)</td></tr>
+          <tr><td><code>lift.glb</code></td><td>Gondola cabin, lift tower and the inflatable arches</td></tr>
+          <tr><td>Built in the game's code</td><td>Every park's snow, kickers, pipes and paint; rails, boxes and stairs; signs and banners; the sky, clouds and stars; the crown; Basecamp</td></tr>
+        </tbody>
+      </table>
       <h3>3D MODELS (CC BY 4.0)</h3>
-      <p>Used under the <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">Creative Commons Attribution 4.0</a> licence, resized for the web:</p>
+      <p>Used under the <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">Creative Commons Attribution 4.0</a> licence. Changes: textures resized and meshes simplified for the web.</p>
       <ul>
-        <li><a href="https://sketchfab.com/3d-models/snowy-wooden-hut-857c02ab61834df8a8d125ccce6fec2a" target="_blank" rel="noopener">“Snowy Wooden Hut”</a> by <a href="https://sketchfab.com/gecko0307" target="_blank" rel="noopener">gecko0307</a>: the Basecamp lodge and start huts</li>
-        <li><a href="https://sketchfab.com/3d-models/finish-line-70aecb6bac234266bdebd22322396caa" target="_blank" rel="noopener">“Finish Line”</a> by <a href="https://sketchfab.com/kemalcolak" target="_blank" rel="noopener">Kemal Çolak</a>: the finish line</li>
-        <li><a href="https://sketchfab.com/3d-models/snowy-mountain-terrain-9fa3c56fd32746bcb0e06cd2c4229ca0" target="_blank" rel="noopener">“Snowy Mountain - Terrain”</a> by <a href="https://sketchfab.com/artfromheath" target="_blank" rel="noopener">artfromheath</a>: the mountains around every park</li>
+        <li><a href="https://sketchfab.com/3d-models/snowy-wooden-hut-857c02ab61834df8a8d125ccce6fec2a" target="_blank" rel="noopener">“Snowy Wooden Hut”</a> by <a href="https://sketchfab.com/gecko0307" target="_blank" rel="noopener">gecko0307</a> (<code>hut.glb</code>): the Basecamp lodge and start huts</li>
+        <li><a href="https://sketchfab.com/3d-models/finish-line-70aecb6bac234266bdebd22322396caa" target="_blank" rel="noopener">“Finish Line”</a> by <a href="https://sketchfab.com/kemalcolak" target="_blank" rel="noopener">Kemal Çolak</a> (<code>finish.glb</code>): the finish line</li>
+        <li><a href="https://sketchfab.com/3d-models/snowy-mountain-terrain-9fa3c56fd32746bcb0e06cd2c4229ca0" target="_blank" rel="noopener">“Snowy Mountain - Terrain”</a> by <a href="https://sketchfab.com/artfromheath" target="_blank" rel="noopener">artfromheath</a> (<code>mountain.glb</code>, and <code>mountain-lo.glb</code>, a simplified copy for Performance mode): the mountains around every park</li>
       </ul>
-      <h3>ART</h3>
-      <p>The rider, trees, lifts and other models are built in code and in Blender for CranSki. Loading scenes: ${SCENES.map((s) => s.name).join(', ')}.</p>
+      <h3>TEXTURES, IMAGES AND FONTS</h3>
+      <p>Snow, corduroy, ski top sheets, box panels, signs and the goggle strap are drawn in code. The loading scenes (${SCENES.map((s) => s.name).join(', ')}) are drawn for CranSki as SVG. Text uses your device's own fonts; no font files are downloaded.</p>
       <h3>DISCLAIMER</h3>
       <p>${DISCLAIMER}</p>`,
   },
@@ -161,12 +189,6 @@ export const PAGES = {
     title: 'Updates',
     html: () =>
       UPDATES.map((u) => `<h3>${u.title.toUpperCase()}</h3><ul>${u.items.map((i) => `<li>${i}</li>`).join('')}</ul>`).join(''),
-  },
-  online: {
-    title: 'Coming later',
-    html: `
-      <p>The Item Shop, the Season Pass and multiplayer (live rooms, duels and parties) arrive in later phases.</p>
-      <p>Available now: sign in with an email link for cloud saves, friends, FROST and leaderboards where the server re-rides each run to check the score. Solo riding still works without an account.</p>`,
   },
 };
 

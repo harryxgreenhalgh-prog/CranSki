@@ -46,6 +46,9 @@ export class Input {
     this.padIndex = null;
     this.prevPadButtons = [];
     this.padPressed = new Set();
+    // What the player last used, so prompts can show the right buttons:
+    // 'keyboard', 'pad' or 'touch'.
+    this.lastDevice = 'keyboard';
 
     target.addEventListener('keydown', (e) => {
       // Typing in a text box (the rider name) never drives the game.
@@ -54,11 +57,15 @@ export class Input {
       if (GAME_KEYS.has(e.code)) e.preventDefault();
       if (!e.repeat) this.pressed.add(e.code);
       this.down.add(e.code);
+      this.lastDevice = 'keyboard';
     });
     target.addEventListener('keyup', (e) => {
       this.down.delete(e.code);
     });
     window.addEventListener('blur', () => this.down.clear());
+    window.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch') this.lastDevice = 'touch';
+    });
     window.addEventListener('gamepadconnected', (e) => {
       // Browsers only expose a pad after its first button press.
       if (this.padIndex === null) this.padIndex = e.gamepad.index;
@@ -94,6 +101,7 @@ export class Input {
     const pad = this._pad();
     if (!pad) return;
     const b = pad.buttons.map((x) => x.pressed);
+    if (b.some(Boolean) || pad.axes.some((a) => Math.abs(a) > 0.5)) this.lastDevice = 'pad';
     for (const [action, idx] of Object.entries(BINDINGS.gamepad)) {
       if (b[idx] && !this.prevPadButtons[idx]) this.padPressed.add(action);
     }

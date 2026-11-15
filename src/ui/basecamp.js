@@ -29,9 +29,29 @@ export class Basecamp {
       })
     );
     document.querySelectorAll('#basecamp .footlinks button').forEach((b) => b.addEventListener('click', () => onPage(b.dataset.page)));
+    // Tabs that don't fit scroll sideways: the mouse wheel scrolls them too, and
+    // a fade shows which side has more.
+    const tabs = document.querySelector('#basecamp .tabs');
+    const edges = () => {
+      tabs.classList.toggle('more-left', tabs.scrollLeft > 2);
+      tabs.classList.toggle('more-right', tabs.scrollLeft + tabs.clientWidth < tabs.scrollWidth - 2);
+    };
+    tabs.addEventListener(
+      'wheel',
+      (e) => {
+        if (tabs.scrollWidth <= tabs.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+        tabs.scrollLeft += e.deltaY;
+        e.preventDefault();
+      },
+      { passive: false }
+    );
+    tabs.addEventListener('scroll', edges);
+    tabs.addEventListener('focusin', (e) => e.target.scrollIntoView?.({ inline: 'nearest', block: 'nearest' }));
+    window.addEventListener('resize', edges);
+    this._edges = edges;
     $('gear-btn').addEventListener('click', onGear);
     $('music-btn').addEventListener('click', onMusic);
-    $('friends-btn').addEventListener('click', () => (onFriends ? onFriends() : onPage('online')));
+    $('friends-btn').addEventListener('click', () => onFriends());
     $('account-btn').addEventListener('click', onAccount);
     $('season-card').addEventListener('click', () => onTab('pass'));
     $('season-card').addEventListener('keydown', (e) => (e.key === 'Enter' || e.key === ' ') && onTab('pass'));
@@ -60,6 +80,7 @@ export class Basecamp {
 
   show() {
     $('basecamp').classList.remove('hidden');
+    requestAnimationFrame(() => this._edges());
     document.querySelectorAll('#basecamp .tabs button').forEach((x) => x.classList.toggle('on', x.dataset.tab === 'ride'));
     this.refresh();
   }

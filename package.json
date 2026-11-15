@@ -2,7 +2,7 @@
   "name": "cranski",
   "version": "0.1.0",
   "private": true,
-  "description": "CranSki: a free browser freeski game. Phase 1: solo core on the BIG AIR park.",
+  "description": "CranSki: a free freeski trick game that runs in the browser.",
   "type": "module",
   "scripts": {
     "dev": "vite",

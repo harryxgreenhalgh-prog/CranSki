@@ -1,51 +1,61 @@
 // Other riders in a live room. The nearest few get the full rider model in
-// their own Locker look; everyone further away gets a cheap stand-in (a handful
-// of plain shapes in their jacket colour). Gamertags float above them, and the
+// their own Locker look; everyone further away gets a cheap stand-in (a few
+// plain shapes in their jacket colour, merged into one mesh: one draw call). Gamertags float above them, and the
 // name of a trick they just landed pops up for a moment.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RiderModel, DEFAULT_LOOK, COM_HEIGHT } from './riderModel.js';
 import { ASSETS } from './assets.js';
 import { STRIDE, frameRider, placeRider, poseFor } from './pose.js';
 import { textTexture } from './textTexture.js';
 import { makeCrown } from './crown.js';
 
-const FULL_MAX = 6; // full models at once
-const FULL_DIST = 70; // metres
+// Full models at once, and how near they must be, per graphics level
+// (DESIGN.md: 20 on Ultra, 12 on High, 8 on Performance; the rest get stand-ins).
+const FULL = { ultra: { max: 20, dist: 110 }, high: { max: 12, dist: 70 }, performance: { max: 8, dist: 40 }, default: { max: 12, dist: 70 } };
 const TAG_DIST = 180;
 
-const shared = {};
-function cheapGeometry() {
-  if (!shared.body) {
-    shared.body = new THREE.CapsuleGeometry(0.2, 0.55, 3, 8);
-    shared.head = new THREE.SphereGeometry(0.15, 10, 8);
-    shared.legs = new THREE.CapsuleGeometry(0.11, 0.5, 2, 6);
-    shared.ski = new THREE.BoxGeometry(0.1, 0.03, 1.7);
-    shared.dark = new THREE.MeshLambertMaterial({ color: 0x1d2633 });
+// Stand-in geometry, one per jacket/pants/ride combination (kept: they're tiny).
+const cheapCache = new Map();
+let cheapMat = null;
+function cheapGeometry(look) {
+  const top = look.topColor ?? DEFAULT_LOOK.topColor;
+  const pants = look.pants ?? DEFAULT_LOOK.pants;
+  const board = look.ride === 'board';
+  const key = `${top}:${pants}:${board}`;
+  if (cheapCache.has(key)) return cheapCache.get(key);
+  const dark = 0x1d2633;
+  const parts = [
+    [new THREE.CapsuleGeometry(0.2, 0.55, 3, 8).translate(0, 0.25, 0), top],
+    [new THREE.SphereGeometry(0.15, 10, 8).translate(0, 0.78, 0), dark],
+    [new THREE.CapsuleGeometry(0.11, 0.5, 2, 6).translate(0, -0.42, 0), pants],
+  ];
+  for (const x of board ? [0] : [-0.13, 0.13]) {
+    const ski = new THREE.BoxGeometry(0.1, 0.03, 1.7);
+    if (board) ski.scale(3, 1, 0.85);
+    parts.push([ski.translate(x, -COM_HEIGHT + 0.02, 0), dark]);
   }
-  return shared;
+  const c = new THREE.Color();
+  const geos = parts.map(([g0, hex]) => {
+    const g = g0.index ? g0.toNonIndexed() : g0;
+    if (g !== g0) g0.dispose();
+    g.deleteAttribute('uv');
+    c.setHex(hex);
+    const col = new Float32Array(g.attributes.position.count * 3);
+    for (let i = 0; i < col.length; i += 3) col.set([c.r, c.g, c.b], i);
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    return g;
+  });
+  const geo = mergeGeometries(geos);
+  for (const g of geos) g.dispose();
+  geo.computeBoundingSphere();
+  cheapCache.set(key, geo);
+  return geo;
 }
 
 function makeCheap(look) {
-  const g = cheapGeometry();
-  const root = new THREE.Group();
-  const jacket = new THREE.MeshLambertMaterial({ color: look.topColor ?? DEFAULT_LOOK.topColor });
-  const pants = new THREE.MeshLambertMaterial({ color: look.pants ?? DEFAULT_LOOK.pants });
-  const body = new THREE.Mesh(g.body, jacket);
-  body.position.y = 0.25;
-  const head = new THREE.Mesh(g.head, g.dark);
-  head.position.y = 0.78;
-  const legs = new THREE.Mesh(g.legs, pants);
-  legs.position.y = -0.42;
-  root.add(body, head, legs);
-  const board = look.ride === 'board';
-  for (const x of board ? [0] : [-0.13, 0.13]) {
-    const ski = new THREE.Mesh(g.ski, g.dark);
-    ski.position.set(x, -COM_HEIGHT + 0.02, 0);
-    if (board) ski.scale.set(3, 1, 0.85);
-    root.add(ski);
-  }
-  root.userData.mats = [jacket, pants];
-  return root;
+  cheapMat ||= new THREE.MeshLambertMaterial({ vertexColors: true });
+  return new THREE.Mesh(cheapGeometry(look), cheapMat);
 }
 
 function makeLabel(text, { bg = 'rgba(9,22,44,0.72)', fg = '#ffffff', w = 512, h = 96, size = 1.6 } = {}) {
@@ -64,6 +74,7 @@ export class RemoteRiders {
     this.frame = new Float32Array(STRIDE);
     this.view = {};
     this._cam = new THREE.Vector3();
+    this.quality = 'high'; // the graphics setting (fewer full models in performance)
   }
 
   attach(scene) {
@@ -89,7 +100,7 @@ export class RemoteRiders {
       e.trick.material.map.dispose();
       e.trick.material.dispose();
     }
-    for (const m of e.cheap.userData.mats) m.dispose();
+    e.full?.dispose();
     this.entries.delete(uid);
   }
 
@@ -147,8 +158,9 @@ export class RemoteRiders {
     }
     // Nearest few in full detail.
     shown.sort((a, b) => a.dist - b.dist);
+    const lim = FULL[this.quality] || FULL.default;
     shown.forEach((e, i) => {
-      const full = i < FULL_MAX && e.dist < FULL_DIST && ASSETS.ready;
+      const full = i < lim.max && e.dist < lim.dist && ASSETS.ready;
       if (full && !e.full) {
         e.full = new RiderModel(e.look);
         e.full.upgrade(ASSETS.parts);

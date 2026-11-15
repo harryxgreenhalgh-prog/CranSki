@@ -3,13 +3,14 @@ import { DT } from './sim/constants.js';
 import { Terrain } from './sim/terrain.js';
 import { Run } from './sim/run.js';
 import { EMPTY_INPUT } from './sim/rider.js';
-import { Input } from './input.js';
+import { Input, BINDINGS } from './input.js';
+import { keyName } from './ui/keynames.js';
 import { buildWorld } from './render/world.js';
 import { buildBasecamp } from './render/basecampScene.js';
 import { RiderModel, COM_HEIGHT } from './render/riderModel.js';
 import { ChaseCam } from './render/camera.js';
 import { Spray } from './render/spray.js';
-import { Hud, showResults, CONTROLS_HTML } from './ui/hud.js';
+import { Hud, showResults, CONTROLS_HTML, TUTORIAL_BTN } from './ui/hud.js';
 import { Basecamp } from './ui/basecamp.js';
 import { ParkMap } from './ui/map.js';
 import { PAGES, pageHtml } from './ui/pages.js';
@@ -63,7 +64,8 @@ import { DuelSession, DUEL_PARKS, CHALLENGE_TIMEOUT, validPose } from './online/
 import { Snapshots } from './online/rooms.js';
 import { Reel } from './render/reel.js';
 import { packRuns } from './replay/record.js';
-import { frameRider, STRIDE } from './render/pose.js';
+import { frameRider, STRIDE, writeFrame } from './render/pose.js';
+import { Tutorial } from './ui/tutorial.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -77,7 +79,11 @@ function hasWebGL2() {
 }
 
 function boot() {
-  $('pause-help').innerHTML = CONTROLS_HTML;
+  $('pause-help').innerHTML = TUTORIAL_BTN + CONTROLS_HTML;
+  // Screens sit above the disclaimer footer, which wraps to more lines on narrow screens.
+  const footerHeight = () => document.documentElement.style.setProperty('--footer-h', `${$('footer').offsetHeight}px`);
+  footerHeight();
+  if (window.ResizeObserver) new ResizeObserver(footerHeight).observe($('footer'));
   if (!hasWebGL2()) {
     $('nogl').classList.remove('hidden');
     $('loading').classList.add('hidden');
@@ -85,7 +91,9 @@ function boot() {
   }
 
   const canvas = $('game');
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+  // Antialiasing costs a lot of fill rate on school laptops: off in Performance (from the next load).
+  const firstLowEnd = load('settings', null) === null && looksLowEnd();
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: settings.graphics !== 'performance' && !firstLowEnd, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -95,7 +103,7 @@ function boot() {
   renderer.toneMappingExposure = 1.0;
 
   // First visit on a phone or weaker machine: start in Performance, with an Undo.
-  if (load('settings', null) === null && looksLowEnd()) {
+  if (firstLowEnd) {
     settings.graphics = 'performance';
     saveSettings();
     $('toast-text').textContent = 'Graphics set to Performance for this device.';
@@ -109,7 +117,11 @@ function boot() {
     setTimeout(() => $('toast').classList.add('hidden'), 9000);
   }
 
-  let dynRes = 1; // Performance mode scales the resolution to hold the frame rate
+  // Performance mode scales the resolution to hold the frame rate, in a few
+  // fixed steps (each change resizes the drawing buffer, so it's done rarely).
+  const DYN_STEPS = [1, 0.85, 0.7, 0.6];
+  let dynStep = 0;
+  let dynRes = 1;
   function applyQuality() {
     const q = settings.graphics;
     renderer.shadowMap.enabled = q !== 'performance';
@@ -128,6 +140,7 @@ function boot() {
   let ghost = null;
   let lastReplay = null;
   const input = new Input(window);
+  if (isTouchDevice()) input.lastDevice = 'touch';
   const music = new Music();
   const sfx = new Sfx();
   const loadingScreen = new LoadingScreen();
@@ -150,6 +163,18 @@ function boot() {
   let loaded = null; // { id, meta, terrain, run, world, chase, spray, hud, time }
   let loading = null;
 
+  // The skyline model for the graphics setting (Performance has a lighter one).
+  const mountainModel = () => (settings.graphics === 'performance' ? 'mountain-lo' : 'mountain');
+
+  // Download a park's code and scenery models without building it.
+  function prefetchPark(id) {
+    if (loaded && loaded.id === id) return;
+    parkMeta(id)
+      .load()
+      .then(() => preloadScenes([mountainModel(), 'finish']))
+      .catch(() => {});
+  }
+
   async function loadPark(id, progress = () => {}) {
     if (loaded && loaded.id === id) return loaded;
     if (loading && loading.id === id) return loading.promise;
@@ -157,7 +182,7 @@ function boot() {
     const promise = (async () => {
       const mod = await meta.load(); // each park is its own chunk, fetched when picked
       progress(0.35, 'Loading scenery…');
-      await preloadScenes(['mountain', 'finish', 'hut']).catch((e) => console.error('scenery models', e));
+      await preloadScenes([mountainModel(), 'finish', 'hut']).catch((e) => console.error('scenery models', e));
       progress(0.45, `Shaping ${meta.name}…`);
       await new Promise((r) => setTimeout(r, 0));
       const terrain = new Terrain(mod.park);
@@ -233,7 +258,6 @@ function boot() {
       else if (tab === 'leaderboard') openBoard();
       else if (tab === 'pass') openPass();
       else if (tab === 'shop') openShop();
-      else openPage('online');
     },
     onPage: (p) => openPage(p),
     onAccount: () => openAccount(),
@@ -259,6 +283,7 @@ function boot() {
   function toBasecamp() {
     blurMenus();
     endLift();
+    tutorial.stop();
     state = 'basecamp';
     showOverlay(null);
     $('finishcard').classList.add('hidden');
@@ -555,7 +580,7 @@ function boot() {
   const duelFrameBuf = new Float32Array(STRIDE);
   const duelView = {};
   const cards = {}; // kind -> { big, small, buttons, count }
-  const CARD_ORDER = ['conn', 'opp', 'challenge', 'partygo', 'rankask', 'pminv', 'leave', 'pmwait', 'cup', 'still', 'count'];
+  const CARD_ORDER = ['conn', 'opp', 'challenge', 'partygo', 'rankask', 'pminv', 'leave', 'pmwait', 'cup', 'still', 'count', 'tutorial'];
   function setCard(kind, card) {
     if (card) cards[kind] = card;
     else delete cards[kind];
@@ -1828,6 +1853,7 @@ function boot() {
     duelTick(L, dt);
     live.tick(L.run.rider, STATUS_OF[state] || 'lift');
     remotes.attach(L.world.scene);
+    remotes.quality = settings.graphics;
     remotes.update(live, dt, camera, L.terrain);
     if (duel) remotes.hideUid(duel.opp.uid);
     L.hud.others = remotes.dots();
@@ -1980,6 +2006,7 @@ function boot() {
       $('settings').classList.add('hidden');
       touchEditor.open();
     },
+    onAccountTab: (el) => mountAccount(el, { onPrivacy: () => openPage('privacy') }),
   });
   const touch = new TouchControls({ onPause: () => back() });
   const touchEditor = new TouchEditor({
@@ -2148,7 +2175,7 @@ function boot() {
       return;
     }
     state = 'replay';
-    if (thenClip) replayView.openClip();
+    if (thenClip) replayView.openClip(true);
   }
 
   async function openReplays() {
@@ -2208,9 +2235,11 @@ function boot() {
   }
   $('modal-close').addEventListener('click', closeModal);
 
-  // opts: { room, privateKey, announce, force } for parties.
+  // opts: { room, privateKey, announce, force } for parties; { tutorial } drops
+  // straight in at the gate (no lift, no live room).
   async function goRide(opts = {}) {
     blurMenus();
+    if (!opts.tutorial) tutorial.stop();
     $('musicpop').classList.add('hidden');
     $('music-btn').classList.remove('on');
     basecamp.hide();
@@ -2230,11 +2259,68 @@ function boot() {
       return;
     }
     loadingScreen.hide();
+    if (opts.tutorial) {
+      startRun();
+      return;
+    }
     if (live && (opts.force || live.park !== parkId || !live.room)) joinRoomFor(parkId, opts);
     startLift();
   }
 
+  // ------------------------------------------------------------ tutorial
+  const tutorial = new Tutorial($('tutorial'), {
+    onDone: () => {
+      profile.tutorial = 'done';
+      sfx.ring?.(20);
+    },
+    onSkip: () => {
+      if (profile.tutorial !== 'done') profile.tutorial = 'skipped';
+      tutorial.stop();
+      touch.highlight([]);
+      toast('Tutorial skipped. Start it again any time from How to play.');
+    },
+    onBasecamp: () => toBasecamp(),
+  });
+  let tutTouch = '';
+  $('modal').addEventListener('click', (e) => {
+    if (e.target.closest('[data-act="tutorial"]')) startTutorial();
+  });
+
+  function startTutorial() {
+    if (duel || cup) {
+      toast(cup ? 'Not during the Cup.' : 'Not during a match.');
+      return;
+    }
+    if (!$('modal').classList.contains('hidden')) closeModal();
+    setCard('tutorial', null);
+    parkId = 'bigair';
+    profile.park = 'bigair';
+    tutorial.start();
+    goRide({ tutorial: true });
+  }
+
+  // First visit: offer the tutorial in Basecamp (once).
+  function offerTutorial() {
+    if (profile.tutorial || profile.runs.length || state !== 'basecamp') return;
+    setCard('tutorial', {
+      big: 'New to CranSki?',
+      small: 'Learn the basics on BIG AIR in about two minutes: pop, spin, grab and land clean.',
+      buttons: [
+        { label: 'Start the tutorial', fn: () => startTutorial() },
+        {
+          label: 'Not now',
+          fn: () => {
+            setCard('tutorial', null);
+            profile.tutorial = 'skipped';
+            toast('You can start the tutorial any time from How to play.');
+          },
+        },
+      ],
+    });
+  }
+
   function startLift() {
+    tutorial.stop();
     const L = loaded;
     placeModel(L.world.scene);
     L.run.reset();
@@ -2248,6 +2334,15 @@ function boot() {
     state = 'lift';
     const names = { gondola: 'GONDOLA', ropeway: 'ROPEWAY', tbar: 'T-BAR' };
     $('lift-name').textContent = names[ride.type];
+    // How to skip, for what you're using (Enter and controller A skip too).
+    const dev = input.lastDevice;
+    const f = BINDINGS.keyboard.skipLift?.[0];
+    $('lift-hint').innerHTML =
+      dev === 'touch'
+        ? 'Tap here to skip · drag to look around'
+        : dev === 'pad'
+          ? '<kbd>A</kbd> skip'
+          : `<kbd>${f ? keyName(f) : 'Enter'}</kbd> skip · drag to look around`;
     $('liftbar').classList.remove('hidden');
   }
 
@@ -2278,7 +2373,13 @@ function boot() {
     acc = 0;
     restartHold = 0;
     finish = null;
-    L.hud.hint(`${L.meta.name} · W tuck · Space pop`, 3);
+    if (tutorial.active) tutorial.newRun();
+    else {
+      const dev = input.lastDevice;
+      const k = (a) => keyName(BINDINGS.keyboard[a]?.[0]);
+      const how = dev === 'touch' ? 'stick up to tuck · POP to jump' : dev === 'pad' ? 'RT tuck · A pop' : `${k('tuck')} tuck · ${k('pop')} pop`;
+      L.hud.hint(`${L.meta.name} · ${how}`, 3);
+    }
     recorder.reset();
     ghost = null;
     $('ghosttag').classList.add('hidden');
@@ -2286,7 +2387,7 @@ function boot() {
     if (ghostModel.root.parent !== L.world.scene) L.world.scene.add(ghostModel.root);
     ghostModel.root.visible = false;
     const runId = L.run;
-    if (playMode !== 'live') replayDB.ghost(L.id).then((g) => {
+    if (playMode !== 'live' && !tutorial.active) replayDB.ghost(L.id).then((g) => {
       if (!g || g.version !== SIM_VERSION || loaded !== L || L.run !== runId || state !== 'riding') return;
       if (seasons.id && g.season && g.season !== seasons.id) return; // last season's ghost
       // Catch the ghost up to where you are now, so it starts with you.
@@ -2300,6 +2401,7 @@ function boot() {
   function pause(on) {
     if (on && state === 'riding') {
       state = 'paused';
+      tutorial.show(false);
       $('pause-roster').classList.toggle('hidden', !(live && live.room));
       showOverlay('pause');
     } else if (!on && state === 'paused') {
@@ -2387,6 +2489,7 @@ function boot() {
     if (act === 'roster' && live && live.room) roster.show(live, true);
     if (act === 'settings') openSettings();
     if (act === 'help') $('pause-help').classList.toggle('hidden');
+    if (act === 'tutorial') startTutorial();
     if (act === 'basecamp') toBasecamp();
     if (act === 'mplay') music.toggle();
     if (act === 'mskip') music.skip();
@@ -2492,14 +2595,61 @@ function boot() {
   const IDLE = { crouch: 0.05, tuck: 0, legsUp: 0, lean: 0, look: 0, armsOut: 0, grab: null, grabSide: 1 };
 
   let lastDraw = 0;
+  let debugCam = null;
   let reportedState = null;
   let lastVy = 0;
-  let slowFrames = 0;
-  let fastFrames = 0;
+  // Dynamic resolution, aiming to hold 30 fps: frame times are averaged over
+  // 2-second windows. A window under ~27 fps steps the resolution down; three
+  // windows with room to spare step it back up (not within 30 s of having to
+  // step down); and nothing changes within 4 s of the last change.
+  const dyn = { sum: 0, n: 0, start: 0, fast: 0, lastChange: 0, blockUp: 0, prev: 0 };
+  function dynamicResolution(now) {
+    const dt = (now - dyn.prev) / 1000; // the real gap (the game's own dt is clamped)
+    dyn.prev = now;
+    if (settings.graphics !== 'performance' || perf.lockRes || (state !== 'riding' && state !== 'lift' && state !== 'finish')) {
+      dyn.sum = dyn.n = 0;
+      dyn.start = now;
+      return;
+    }
+    if (dt > 0.5) return; // a one-off hitch (loading, a tab switch) isn't the frame rate
+    dyn.sum += dt;
+    dyn.n++;
+    if (now - dyn.start < 2000) return;
+    const avg = dyn.sum / dyn.n;
+    dyn.sum = dyn.n = 0;
+    dyn.start = now;
+    const roomy = settings.frameCap === 30 ? 1 / 29 : 1 / 45; // capped frames can't run faster than 30
+    let next = dynStep;
+    if (avg > 1 / 27.5) {
+      dyn.fast = 0;
+      next = Math.min(DYN_STEPS.length - 1, dynStep + 1);
+    } else if (avg < roomy) {
+      if (++dyn.fast >= 3 && now > dyn.blockUp) next = Math.max(0, dynStep - 1);
+    } else dyn.fast = 0;
+    if (next !== dynStep && now - dyn.lastChange > 4000) {
+      if (next > dynStep) dyn.blockUp = now + 30000;
+      dynStep = next;
+      dynRes = perf.res = DYN_STEPS[dynStep];
+      dyn.fast = 0;
+      dyn.lastChange = now;
+      applyQuality();
+    }
+  }
+  // Main-thread time per drawn frame (for the stats overlay and benchmarks).
+  const perf = { frames: 0, js: 0, jsMax: 0, res: 1, slow: [], reset() { this.frames = this.js = this.jsMax = 0; this.slow = []; } };
   function frame(now) {
     requestAnimationFrame(frame);
     // 30 fps cap: skip this display frame if it's too soon.
     if (settings.frameCap === 30 && now - lastDraw < 1000 / 30 - 2) return;
+    const t0 = performance.now();
+    drawFrame(now);
+    const ms = performance.now() - t0;
+    perf.frames++;
+    perf.js += ms;
+    if (ms > perf.jsMax) perf.jsMax = ms;
+    if (ms > 250 && perf.slow.length < 20) perf.slow.push({ at: Math.round(now), ms: Math.round(ms), state, programs: renderer.info.programs?.length, calls: renderer.info.render.calls, s: loaded ? Math.round(-loaded.run.rider.pos.z) : null, geos: renderer.info.memory.geometries });
+  }
+  function drawFrame(now) {
     lastDraw = now;
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
@@ -2524,6 +2674,9 @@ function boot() {
         dt
       );
     }
+    tutorial.show(state === 'riding');
+    // The first-visit offer belongs to Basecamp: gone once you head off without answering.
+    if (cards.tutorial && state !== 'basecamp') setCard('tutorial', null);
     const wantTouch = state === 'riding' && isTouchDevice() && !touchEditor.isOpen;
     if (wantTouch !== touch.enabled) {
       touch.show(wantTouch);
@@ -2531,21 +2684,7 @@ function boot() {
     }
     if (settingsUI.isOpen) settingsUI.tick(input.pad());
 
-    // Performance mode: dynamic resolution to hold the frame rate.
-    if (settings.graphics === 'performance') {
-      const target = settings.frameCap === 30 ? 1 / 28 : 1 / 50;
-      if (dt > target * 1.15) slowFrames++;
-      else if (dt < target * 0.8) fastFrames++;
-      if (slowFrames > 20 && dynRes > 0.6) {
-        dynRes = Math.max(0.6, dynRes - 0.1);
-        applyQuality();
-        slowFrames = fastFrames = 0;
-      } else if (fastFrames > 120 && dynRes < 1) {
-        dynRes = Math.min(1, dynRes + 0.1);
-        applyQuality();
-        slowFrames = fastFrames = 0;
-      }
-    }
+    dynamicResolution(now);
 
     if (input.wasPressed('pause') && !settingsUI.capturing) back();
     else if (input.wasPressed('confirm') && $('modal').classList.contains('hidden') && !settingsUI.isOpen) {
@@ -2570,7 +2709,7 @@ function boot() {
       model.root.position.set(0, COM_HEIGHT, 0);
       const dressing = state === 'locker' || state === 'shop';
       model.root.quaternion.setFromAxisAngle(tmp.set(0, 1, 0), Math.PI - 0.35 + (dressing ? lockerYaw + 0.35 : 0));
-      model.update({ ...IDLE, crouch: 0.05 + 0.05 * Math.sin(time * 1.6) }, dt);
+      model.update({ ...IDLE, crouch: 0.05 + 0.05 * Math.sin(time * 1.6), gesture: state === 'basecamp' ? 'idle' : null }, dt);
       basecampScene.frameCamera(camera, camera.aspect, state === 'locker' ? (locker.focus === 'full' ? 'locker' : locker.focus) : state === 'shop' ? shop.focus : 'full', dt);
       basecampScene.update(time, camera);
       if (camera.fov !== 50) {
@@ -2716,6 +2855,21 @@ function boot() {
       }
       if (steps >= 12) acc = 0;
 
+      // The tutorial watches this frame's landings (and restarts instead of finishing).
+      let tutRestart = false;
+      if (tutorial.active && state === 'riding') {
+        const device = input.lastDevice;
+        tutRestart = tutorial.update(dt, run, inp, device, run.messages) === 'restart';
+        if (!tutorial.finished && run.messages.some((m) => m.type === 'finish')) {
+          tutRestart = true;
+          run.messages = run.messages.filter((m) => m.type !== 'finish');
+        }
+      }
+      const ids = tutorial.active && state === 'riding' && touch.enabled ? tutorial.touchIds.join() : '';
+      if (ids !== tutTouch) {
+        tutTouch = ids;
+        touch.highlight(ids ? ids.split(',') : []);
+      }
       for (const m of run.messages) {
         if (m.type === 'finish') startFinish();
         else if (m.type === 'ring') sfx.ring(m.speed);
@@ -2727,6 +2881,7 @@ function boot() {
         }
       }
       run.messages.length = 0;
+      if (tutRestart) startRun();
       if (state === 'riding') L.hud.update(run, dt);
       if (state === 'finish') {
         finish.t += dt;
@@ -2778,6 +2933,8 @@ function boot() {
     absorb = Math.max(0, absorb - dt);
     const pose = poseFor(r, { absorb, riding: state === 'riding' });
     if (state === 'finish') pose.look = 0;
+    // Stopped at the finish (or on the results screen): celebrate.
+    if ((state === 'finish' && r.speed < 1.5) || state === 'results' || state === 'cupwait') pose.gesture = 'cheer';
     model.update(pose, dt);
 
     // Ghost: your best run on this park.
@@ -2810,7 +2967,12 @@ function boot() {
     } else {
       L.chase.update(r, pivot, dt);
     }
-    L.world.update(L.time, pivot, camera, state === 'riding' ? r : null);
+    if (debugCam) {
+      // Tests and screenshots: a fixed camera.
+      camera.position.copy(debugCam.pos);
+      camera.lookAt(debugCam.look);
+    }
+    L.world.update(L.time, debugCam ? debugCam.look : pivot, camera, state === 'riding' ? r : null);
     liveFrame(L, dt);
     renderer.render(L.world.scene, camera);
     input.endFrame();
@@ -2835,15 +2997,14 @@ function boot() {
     await new Promise((r) => setTimeout(r, 0));
     placeModel(basecampScene.scene);
     renderer.compile(basecampScene.scene, camera);
-    try {
-      await loadPark(parkId, (p, s) => loadingScreen.set(0.3 + p * 0.65, s));
-    } catch (e) {
-      console.error(e); // the park loads again when picked
-    }
+    // Basecamp is ready: show it now. Your last park's code and scenery download
+    // in the background; it's built when you ride (behind the loading screen).
     loadingScreen.ready(() => {
       startAudio();
       music.play();
       toBasecamp();
+      setTimeout(() => prefetchPark(parkId), 1200);
+      setTimeout(offerTutorial, 900);
     });
   })();
   requestAnimationFrame((t) => {
@@ -2859,6 +3020,7 @@ function boot() {
     get terrain() {
       return loaded?.terrain;
     },
+    tutorial,
     camera,
     pivot,
     get state() {
@@ -2869,6 +3031,68 @@ function boot() {
     },
     party,
     seasons,
+    model,
+    renderer,
+    perf,
+    get world() {
+      return loaded?.world;
+    },
+    // Benchmarks: fill the current park with n riders streaming poses like a full
+    // live room, gap metres apart down the run.
+    benchRoom(n, gap = 37) {
+      const L = loaded;
+      if (!L) return;
+      const T = L.terrain;
+      const remotesMap = new Map();
+      const bots = [];
+      const colors = [0xff7a2f, 0x1e7bff, 0x22b07d, 0xffd23f, 0xe0406b, 0x8e5bff];
+      for (let i = 0; i < n; i++) {
+        const uid = `bench-${i}`;
+        const look = { ...DEFAULT_LOOK, topColor: colors[i % colors.length], ride: i % 4 === 3 ? 'board' : 'skis' };
+        remotesMap.set(uid, { uid, tag: `Rider ${i + 1}`, look, board: look.ride === 'board', status: 'riding', snaps: new Snapshots(), heard: performance.now(), trick: null, interval: 66 });
+        bots.push({ uid, s: T.park.startS + 10 + (i * gap) % Math.max(60, T.park.finishS - T.park.startS - 40), u: ((i * 7) % 11) - 5, v: 9 + (i % 5) });
+      }
+      const fake = {
+        room: { bench: true },
+        park: L.id,
+        remotes: remotesMap,
+        tick() {},
+        sendTrick() {},
+        leaveRoom: async () => {},
+        counts: () => ({}),
+      };
+      const q = new THREE.Quaternion();
+      const yAxis = new THREE.Vector3(0, 1, 0);
+      const rider = { pos: new THREE.Vector3(), q, mode: 'ground', load: 0.3, tucking: false, lean: 0, switchStance: false, activeGrab: null, air: null, omega: new THREE.Vector3(), rail: null, butter: null, sink: 0, speed: 10 };
+      let last = performance.now();
+      const step = () => {
+        if (live !== fake) return;
+        const t = performance.now();
+        const dt = Math.min(0.1, (t - last) / 1000);
+        last = t;
+        for (const b of bots) {
+          b.s += b.v * dt;
+          if (b.s > T.park.finishS) b.s = T.park.startS + 10;
+          const x = T.center(b.s) + b.u + Math.sin(t / 900 + b.v) * 3;
+          rider.pos.set(x, T.height(x, -b.s), -b.s);
+          q.setFromAxisAngle(yAxis, Math.cos(t / 900 + b.v) * 0.4);
+          rider.lean = Math.sin(t / 900 + b.v);
+          const f = new Array(STRIDE);
+          writeFrame(rider, f, 0);
+          const e = remotesMap.get(b.uid);
+          e.snaps.push(t, f, t);
+          e.heard = t;
+        }
+        setTimeout(step, 66);
+      };
+      live = fake;
+      step();
+      return n;
+    },
+    // Screenshots: hold the camera at pos looking at look ({x,y,z}), or null to release.
+    setDebugCam(pos, look) {
+      debugCam = pos ? { pos: new THREE.Vector3(pos.x, pos.y, pos.z), look: new THREE.Vector3(look.x, look.y, look.z) } : null;
+    },
     get lastReplay() {
       return lastReplay;
     },

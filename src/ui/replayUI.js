@@ -17,6 +17,9 @@ export class ReplayView {
     this.model = model;
     this.onExit = onExit;
     this.open_ = false;
+    // The control bar fades while a replay plays untouched; any input brings it back.
+    this.lastInput = 0;
+    for (const ev of ['pointermove', 'pointerdown', 'keydown', 'wheel']) window.addEventListener(ev, () => (this.lastInput = performance.now()), { passive: true });
     this.v = {};
     this.pivot = new THREE.Vector3();
     this.quat = new THREE.Quaternion();
@@ -28,7 +31,7 @@ export class ReplayView {
     $('rp-cam').addEventListener('click', () => this.nextCam());
     $('rp-freeze').addEventListener('click', () => this.freeze());
     $('rp-save').addEventListener('click', () => this.save());
-    $('rp-clip').addEventListener('click', () => this.openClip());
+    $('rp-clip').addEventListener('click', () => this.openClip(false));
     $('rp-exit').addEventListener('click', () => this.close());
     $('rp-time').addEventListener('input', (e) => {
       this.t = (Number(e.target.value) / 1000) * this.data.duration;
@@ -198,6 +201,7 @@ export class ReplayView {
       this.lastEventT = this.t;
     }
     this.L.hud.update({ rider: { speed: this.v.speed || 0, pos: this.pos, mode: this.v.mode }, score: { total: 0 }, line: { empty: true } }, dt, true);
+    $('replaybar').classList.toggle('idle', this.playing && performance.now() - this.lastInput > 3000);
     this.drawAt(this.t, dt, time);
     $('rp-play').textContent = this.playing ? '❚❚' : '▶';
     $('rp-time').value = String(Math.round((this.t / Math.max(0.01, this.data.duration)) * 1000));
@@ -205,12 +209,20 @@ export class ReplayView {
   }
 
   // ---------------------------------------------------------------- clips
+  // Closing the clip editor goes back to where it was opened from: the replay
+  // viewer, or (opened straight from results or the Replays list) out of the replay.
   closeClip() {
     $('clip').classList.add('hidden');
+    if (this.clipDirect) {
+      this.clipDirect = false;
+      this.close();
+      return;
+    }
     $('replaybar').classList.remove('hidden');
   }
 
-  openClip() {
+  openClip(direct = false) {
+    this.clipDirect = direct;
     this.playing = false;
     $('replaybar').classList.add('hidden');
     this.segments = autoEdit(this.data);

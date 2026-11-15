@@ -7,6 +7,25 @@ CranSki's online features (accounts, cloud saves, friends and leaderboards) use 
 
 Your game's address is `https://harryxgreenhalgh-prog.github.io/CranSki/`. If you use a custom domain, use that instead wherever it appears below.
 
+## Launch checklist (everything, in order, no terminal needed)
+
+The sections below explain each step in detail. For launch, this is the whole list:
+
+1. **SQL Editor → New query**: paste all of `supabase/setup.sql` and click **Run**. It contains every table, function and security rule, and it's safe to run again.
+2. **Integrations → Cron**: click **Enable pg_cron**, then run `setup.sql` once more. **Cron → Jobs** should now list **cranski-season-end** (section 18). Without it, seasons never end.
+3. **Authentication → Sign In / Providers → Email**: on, with **Confirm email** on. **Emails → Templates**: **Confirm signup** and **Magic Link** both contain `{{ .Token }}` (section 1).
+4. **Authentication → URL Configuration**: Site URL `https://harryxgreenhalgh-prog.github.io/CranSki/` and the Redirect URLs from section 1.
+5. **Authentication → Emails → SMTP Settings**: set up your own email sender before inviting players (Supabase's built-in one sends only a few emails an hour).
+6. **Realtime → Settings**: turn off **Allow public access** (section 6).
+7. **GitHub → Settings → Secrets and variables → Actions**: add `SUPABASE_ACCESS_TOKEN` (see *Deploying Edge Functions without a terminal* below).
+8. **GitHub → Settings → Pages**: Source **GitHub Actions**.
+9. Merge to `main`. GitHub Actions tests and publishes the game, and deploys the `submit-run`, `delete-account` and `chat` functions.
+10. Check it on the live site: sign in, finish a run on BIG AIR, and see it on the leaderboard with FROST added.
+
+Never needed, and never to be put in the game or this repository: the secret / `service_role` key.
+
+---
+
 Do the sections in order. Each one says which build step needs it.
 
 > **Shortcut for the database:** `supabase/setup.sql` contains all four SQL files below, joined together. Paste it once into **SQL Editor** → **New query** and click **Run**. It's safe to run on a project that already has some of it (for example only `profiles`), and safe to run again.

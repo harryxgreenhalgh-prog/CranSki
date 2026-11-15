@@ -4,6 +4,10 @@ import { describeTrick } from '../sim/tricks.js';
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.round(n).toLocaleString('en-US');
 
+// Starts the BIG AIR tutorial (How to play page and the pause menu's help).
+export const TUTORIAL_BTN =
+  '<p class="tut-start"><button class="btn primary" data-act="tutorial">Start the BIG AIR tutorial</button> <span class="muted">Pop, spin, grab and land clean, step by step.</span></p>';
+
 export const CONTROLS_HTML = `
   <div>
     <h3>ON SNOW</h3>

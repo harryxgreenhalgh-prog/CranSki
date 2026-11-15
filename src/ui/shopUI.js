@@ -69,7 +69,9 @@ export class Shop {
     try {
       this.stock = await economy.shopToday();
       this.purchases = account.ready ? await economy.myPurchases() : null;
-      this.err = null;
+      // Nothing came back (the server isn't set up for the Shop yet): say so
+      // rather than showing Loading… for ever.
+      this.err = this.stock ? null : "The Shop isn't open right now. Close it and try again in a little while.";
     } catch (e) {
       this.err = e.message;
     }
